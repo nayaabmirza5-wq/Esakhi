@@ -42,7 +42,7 @@ const statusHistorySchema = new Schema(
   {
     status: {
       type: String,
-      enum: ['placed', 'accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery', 'delivered', 'completed', 'cancelled'],
+      enum: ['placed', 'accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery', 'delivered', 'completed', 'cancelled', 'delivery_failed'],
       required: true,
     },
     changedAt: { type: Date, required: true, default: Date.now },
@@ -55,6 +55,7 @@ const statusHistorySchema = new Schema(
 
 const deliveryPartnerSchema = new Schema(
   {
+    userId: { type: Schema.Types.ObjectId, ref: 'User' },
     name: { type: String, trim: true, required: true, maxlength: 120 },
     phoneE164: { type: String, required: true, match: /^\+91[6-9]\d{9}$/ },
     internalNotes: { type: String, trim: true, maxlength: 500 },
@@ -90,7 +91,7 @@ const orderSchema = new Schema(
     paymentEvents: { type: [paymentEventSchema], default: [] },
     fulfilmentStatus: {
       type: String,
-      enum: ['placed', 'accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery', 'delivered', 'completed', 'cancelled'],
+      enum: ['placed', 'accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery', 'delivered', 'completed', 'cancelled', 'delivery_failed'],
       default: 'placed',
       required: true,
     },

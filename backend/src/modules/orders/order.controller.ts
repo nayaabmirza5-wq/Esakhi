@@ -1,9 +1,11 @@
 import type { RequestHandler } from 'express';
 import mongoose from 'mongoose';
+import { z } from 'zod';
 import { AppError } from '../../utils/AppError.js';
 import { authenticatedUserId } from '../../utils/authenticatedUser.js';
 import { sendData, sendPage } from '../../utils/apiResponse.js';
 import { AuditLog } from '../audit/auditLog.model.js';
+import { User } from '../auth/user.model.js';
 import { InventoryAdjustment } from '../inventory/inventoryAdjustment.model.js';
 import { Product } from '../catalog/product.model.js';
 import { Settings } from '../settings/settings.model.js';
@@ -194,6 +196,11 @@ export const assignDeliveryPartner: RequestHandler = async (req, res) => {
   const order = await Order.findOne({ _id: id, fulfilmentMethod: 'delivery', fulfilmentStatus: { $in: ['preparing', 'out_for_delivery'] } });
   if (!order) throw new AppError(409, 'DELIVERY_PARTNER_NOT_ALLOWED', 'A delivery partner can only be assigned to a delivery order being prepared or delivered.');
 
+  const partnerUser = input.partnerId ? await User.findOne({ _id: input.partnerId, role: 'delivery_partner', status: 'active' }).select('_id name phoneE164').lean() : null;
+  if (input.partnerId && !partnerUser) {
+    throw new AppError(404, 'DELIVERY_PARTNER_NOT_FOUND', 'The selected partner is not an active delivery partner.');
+  }
+
   const session = await mongoose.startSession();
   let updated;
   try {
@@ -203,8 +210,9 @@ export const assignDeliveryPartner: RequestHandler = async (req, res) => {
         {
           $set: {
             deliveryPartner: {
-              name: input.name,
-              phoneE164: input.phone.startsWith('+91') ? input.phone : `+91${input.phone}`,
+              userId: partnerUser?._id ?? order.deliveryPartner?.userId,
+              name: partnerUser?.name ?? input.name,
+              phoneE164: partnerUser?.phoneE164 ? `+91${String(partnerUser.phoneE164).replace(/^\+91/, '')}` : (input.phone.startsWith('+91') ? input.phone : `+91${input.phone}`),
               ...(input.internalNotes ? { internalNotes: input.internalNotes } : {}),
               assignedAt: new Date(),
               assignedBy: actorId,
@@ -227,6 +235,41 @@ export const assignDeliveryPartner: RequestHandler = async (req, res) => {
     await session.endSession();
   }
   if (!updated) throw new AppError(500, 'INTERNAL_ERROR', 'The delivery partner could not be assigned.');
+  sendData(res, updated);
+};
+
+export const listAssignedPartnerOrders: RequestHandler = async (req, res) => {
+  const partnerId = authenticatedUserId(req);
+  const orders = await Order.find({ 'deliveryPartner.userId': partnerId }).sort({ createdAt: -1 }).lean();
+  sendData(res, orders);
+};
+
+export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
+  const { id } = orderIdParamsSchema.parse(req.params);
+  const { status, note } = z.object({
+    status: z.enum(['out_for_delivery', 'delivered', 'delivery_failed']),
+    note: z.string().trim().max(500).optional(),
+  }).strict().parse(req.body);
+  const partnerId = authenticatedUserId(req);
+  const order = await Order.findOne({ _id: id, 'deliveryPartner.userId': partnerId }).lean();
+  if (!order) throw new AppError(404, 'NOT_FOUND', 'Order not found for this delivery partner.');
+
+  const allowedTransition = status === 'out_for_delivery' ? order.fulfilmentStatus === 'preparing' || order.fulfilmentStatus === 'ready_for_pickup' :
+    status === 'delivered' ? order.fulfilmentStatus === 'out_for_delivery' :
+      status === 'delivery_failed' ? order.fulfilmentStatus === 'out_for_delivery' : false;
+  if (!allowedTransition) {
+    throw new AppError(409, 'INVALID_STATUS_TRANSITION', 'That delivery status transition is not allowed.');
+  }
+
+  const updated = await Order.findOneAndUpdate(
+    { _id: id, 'deliveryPartner.userId': partnerId },
+    {
+      $set: { fulfilmentStatus: status },
+      $push: { statusHistory: { status, changedAt: new Date(), actorType: 'user', actorId: partnerId, ...(note ? { note } : {}) } },
+    },
+    { new: true },
+  );
+  if (!updated) throw new AppError(500, 'INTERNAL_ERROR', 'The delivery status could not be updated.');
   sendData(res, updated);
 };
 

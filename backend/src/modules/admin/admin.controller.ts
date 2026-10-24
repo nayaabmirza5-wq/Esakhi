@@ -123,3 +123,47 @@ export const updateCustomerStatus: RequestHandler = async (req, res) => {
   if (!user) throw new AppError(500, 'INTERNAL_ERROR', 'The user status could not be updated.');
   sendData(res, user);
 };
+
+export const listDeliveryPartners: RequestHandler = async (req, res) => {
+  const { page, limit } = pageSchema.parse(req.query);
+  const [partners, total] = await Promise.all([
+    User.find({ role: 'delivery_partner' }).select('phoneE164 name role status createdAt').sort({ createdAt: -1 })
+      .skip((page - 1) * limit).limit(limit).lean(),
+    User.countDocuments({ role: 'delivery_partner' }),
+  ]);
+  const workload = await Promise.all(partners.map(async (partner) => {
+    const assignedCount = await Order.countDocuments({ 'deliveryPartner.userId': partner._id });
+    const inProgressCount = await Order.countDocuments({ 'deliveryPartner.userId': partner._id, fulfilmentStatus: { $in: ['preparing', 'out_for_delivery'] } });
+    return { ...partner, assignedCount, inProgressCount };
+  }));
+  sendPage(res, workload, page, limit, total);
+};
+
+export const updateDeliveryPartnerStatus: RequestHandler = async (req, res) => {
+  const { userId } = z.object({ userId: z.string().regex(/^[a-f\d]{24}$/i) }).parse(req.params);
+  const { status } = z.object({ status: z.enum(['active', 'disabled']) }).strict().parse(req.body);
+  const actorId = authenticatedUserId(req);
+  const session = await mongoose.startSession();
+  let partner;
+  try {
+    partner = await session.withTransaction(async () => {
+      const updated = await User.findOneAndUpdate(
+        { _id: userId, role: 'delivery_partner' },
+        { $set: { status } },
+        { new: true, session },
+      ).select('phoneE164 name role status');
+      if (!updated) throw new AppError(404, 'NOT_FOUND', 'Delivery partner not found.');
+      await AuditLog.create([{
+        actorId,
+        action: 'delivery_partner.status_updated',
+        resourceType: 'user',
+        resourceId: updated.id,
+        metadata: { status },
+      }], { session });
+      return updated;
+    });
+  } finally {
+    await session.endSession();
+  }
+  sendData(res, partner);
+};

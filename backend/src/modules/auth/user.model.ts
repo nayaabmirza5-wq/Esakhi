@@ -19,7 +19,7 @@ const userSchema = new Schema(
   {
     phoneE164: { type: String, required: true, unique: true },
     name: { type: String, trim: true, maxlength: 120 },
-    role: { type: String, enum: ['customer', 'staff', 'admin'], default: 'customer', required: true },
+    role: { type: String, enum: ['customer', 'staff', 'admin', 'delivery_partner'], default: 'customer', required: true },
     status: { type: String, enum: ['active', 'disabled'], default: 'active', required: true },
     refreshTokenHash: { type: String, select: false },
     savedAddresses: { type: [savedAddressSchema], default: [] },
