@@ -2,7 +2,7 @@ import type { RequestHandler } from 'express';
 import { AppError } from '../utils/AppError.js';
 import { Settings } from '../modules/settings/settings.model.js';
 
-export function requireRole(...roles: Array<'customer' | 'staff' | 'admin'>): RequestHandler {
+export function requireRole(...roles: Array<'customer' | 'staff' | 'admin' | 'delivery_partner'>): RequestHandler {
   return async (req, _res, next) => {
     if (!req.user || !roles.some((role) => role === req.user?.role)) {
       next(new AppError(403, 'FORBIDDEN', 'You do not have permission to perform this action.'));

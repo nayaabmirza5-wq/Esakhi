@@ -6,7 +6,8 @@ export type FulfilmentStatus =
   | 'out_for_delivery'
   | 'delivered'
   | 'completed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'delivery_failed';
 
 export type FulfilmentMethod = 'delivery' | 'pickup';
 
@@ -20,6 +21,7 @@ export function nextFulfilmentStatus(
     preparing: method === 'pickup' ? 'ready_for_pickup' : 'out_for_delivery',
     ready_for_pickup: 'completed',
     out_for_delivery: 'delivered',
+    delivery_failed: 'delivered',
   };
   return transitions[current] ?? null;
 }

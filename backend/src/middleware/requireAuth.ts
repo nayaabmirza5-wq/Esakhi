@@ -6,7 +6,7 @@ import { User } from '../modules/auth/user.model.js';
 
 export interface AuthUser {
   id: string;
-  role: 'customer' | 'staff' | 'admin';
+  role: 'customer' | 'staff' | 'admin' | 'delivery_partner';
   status: 'active' | 'disabled';
 }
 

@@ -47,10 +47,11 @@ export const paymentReviewSchema = z.object({
   note: z.string().trim().min(1).max(1000),
 }).strict();
 export const fulfilmentUpdateSchema = z.object({
-  status: z.enum(['accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery', 'delivered', 'completed']),
+  status: z.enum(['accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery', 'delivered', 'completed', 'delivery_failed']),
   note: z.string().trim().max(500).optional(),
 }).strict();
 export const deliveryPartnerSchema = z.object({
+  partnerId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
   name: z.string().trim().min(1).max(120),
   phone: z.string().trim().regex(/^(\+91)?[6-9]\d{9}$/),
   internalNotes: z.string().trim().max(500).optional(),
@@ -65,7 +66,7 @@ export const orderPaginationQuerySchema = z.object({
 export const orderListQuerySchema = orderPaginationQuerySchema.extend({
   q: z.string().trim().max(100).optional(),
   paymentStatus: z.enum(['pending_verification', 'confirmed', 'rejected']).optional(),
-  fulfilmentStatus: z.enum(['placed', 'accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery', 'delivered', 'completed', 'cancelled']).optional(),
+  fulfilmentStatus: z.enum(['placed', 'accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery', 'delivered', 'completed', 'cancelled', 'delivery_failed']).optional(),
   cancellationRequest: z.enum(['pending', 'reviewed']).optional(),
   from: z.iso.datetime({ offset: true }).optional(),
   to: z.iso.datetime({ offset: true }).optional(),

@@ -8,7 +8,7 @@ import { env } from './config/env.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { productRoutes, adminProductRoutes } from './modules/catalog/product.routes.js';
-import { customerOrderRoutes, adminOrderRoutes } from './modules/orders/order.routes.js';
+import { customerOrderRoutes, adminOrderRoutes, deliveryPartnerRoutes } from './modules/orders/order.routes.js';
 import { settingsRoutes, adminSettingsRoutes } from './modules/settings/settings.routes.js';
 import { inventoryRoutes } from './modules/inventory/inventory.routes.js';
 import { adminRoutes } from './modules/admin/admin.routes.js';
@@ -112,6 +112,7 @@ api.use('/categories', (_req, res) => {
 });
 api.use('/service-area', settingsRoutes);
 api.use('/orders', customerOrderRoutes);
+api.use('/delivery-partners', deliveryPartnerRoutes);
 api.use('/admin/products', adminProductRoutes);
 api.use('/admin/orders', adminOrderRoutes);
 api.use('/admin/notifications', adminNotificationRoutes);
