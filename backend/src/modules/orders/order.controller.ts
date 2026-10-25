@@ -13,6 +13,7 @@ import { Order } from './order.model.js';
 import {
   cancellationRequestSchema,
   cancellationReviewSchema,
+  bulkDeliveryPartnerSchema,
   createOrderSchema,
   fulfilmentUpdateSchema,
   internalNoteSchema,
@@ -24,7 +25,7 @@ import {
 import { createOrder } from './order.service.js';
 import { deliveryPartnerSchema } from './order.schemas.js';
 import { enqueueOrderStatusNotification } from '../notifications/orderNotification.service.js';
-import { nextFulfilmentStatus } from './order.transitions.js';
+import { canAssignDeliveryPartner, nextFulfilmentStatus, statusAfterDeliveryPartnerAssignment } from './order.transitions.js';
 
 export const createOrderController: RequestHandler = async (req, res) => {
   const input = createOrderSchema.parse(req.body);
@@ -41,7 +42,7 @@ export const listMyOrders: RequestHandler = async (req, res) => {
   const query = orderPaginationQuerySchema.parse(req.query);
   const customerId = authenticatedUserId(req);
   const [orders, total] = await Promise.all([
-    Order.find({ customerId }).select('-internalNotes -paymentEvents -idempotencyKey -cancellationRequest.reviewedBy -cancellationRequest.adminNote').sort({ createdAt: -1 })
+    Order.find({ customerId }).select('-internalNotes -paymentEvents -idempotencyKey -deliveryPartner.userId -deliveryPartnerHistory -cancellationRequest.reviewedBy -cancellationRequest.adminNote').sort({ createdAt: -1 })
       .skip((query.page - 1) * query.limit).limit(query.limit).lean(),
     Order.countDocuments({ customerId }),
   ]);
@@ -193,38 +194,77 @@ export const assignDeliveryPartner: RequestHandler = async (req, res) => {
   const { id } = orderIdParamsSchema.parse(req.params);
   const input = deliveryPartnerSchema.parse(req.body);
   const actorId = authenticatedUserId(req);
-  const order = await Order.findOne({ _id: id, fulfilmentMethod: 'delivery', fulfilmentStatus: { $in: ['preparing', 'out_for_delivery'] } });
-  if (!order) throw new AppError(409, 'DELIVERY_PARTNER_NOT_ALLOWED', 'A delivery partner can only be assigned to a delivery order being prepared or delivered.');
-
-  const partnerUser = input.partnerId ? await User.findOne({ _id: input.partnerId, role: 'delivery_partner', status: 'active' }).select('_id name phoneE164').lean() : null;
-  if (input.partnerId && !partnerUser) {
-    throw new AppError(404, 'DELIVERY_PARTNER_NOT_FOUND', 'The selected partner is not an active delivery partner.');
+  const order = await Order.findOne({ _id: id, fulfilmentMethod: 'delivery', fulfilmentStatus: { $in: ['preparing', 'out_for_delivery', 'delivery_failed'] } });
+  if (!order || !canAssignDeliveryPartner(order.fulfilmentStatus, Boolean(order.deliveryPartner))) {
+    throw new AppError(409, 'DELIVERY_PARTNER_NOT_ALLOWED', 'A delivery partner can only be assigned to an unassigned delivery order being prepared or delivered, or reassigned after a failed delivery attempt.');
   }
+
+  if (!input.partnerId && (!input.name || !input.phone)) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'A delivery partner name and phone number are required.');
+  }
+  const priorAssignment = order.deliveryPartner && (order.fulfilmentStatus === 'delivery_failed' || !input.partnerId || order.deliveryPartner.userId?.toString() !== input.partnerId) ? {
+    ...(order.deliveryPartner.userId ? { userId: order.deliveryPartner.userId } : {}),
+    name: order.deliveryPartner.name,
+    phoneE164: order.deliveryPartner.phoneE164,
+    assignedAt: order.deliveryPartner.assignedAt,
+    assignedBy: order.deliveryPartner.assignedBy,
+    unassignedAt: new Date(),
+    unassignedBy: new mongoose.Types.ObjectId(actorId),
+  } : undefined;
 
   const session = await mongoose.startSession();
   let updated;
   try {
     updated = await session.withTransaction(async () => {
+      const partnerUser = input.partnerId
+        ? await User.findOne({ _id: input.partnerId, role: 'delivery_partner', status: 'active' })
+          .select('_id name phoneE164').session(session).lean()
+        : undefined;
+      if (input.partnerId && !partnerUser) {
+        throw new AppError(404, 'DELIVERY_PARTNER_NOT_FOUND', 'The selected partner is not an active delivery partner.');
+      }
       const assigned = await Order.findOneAndUpdate(
-        { _id: id, fulfilmentMethod: 'delivery', fulfilmentStatus: { $in: ['preparing', 'out_for_delivery'] } },
+        {
+          _id: id,
+          fulfilmentMethod: 'delivery',
+          fulfilmentStatus: { $in: ['preparing', 'out_for_delivery', 'delivery_failed'] },
+          $or: [{ deliveryPartner: { $exists: false } }, { fulfilmentStatus: 'delivery_failed' }],
+        },
         {
           $set: {
+            ...(order.fulfilmentStatus === 'delivery_failed'
+              ? { fulfilmentStatus: statusAfterDeliveryPartnerAssignment(order.fulfilmentStatus) }
+              : {}),
             deliveryPartner: {
-              userId: partnerUser?._id ?? order.deliveryPartner?.userId,
-              name: partnerUser?.name ?? input.name,
-              phoneE164: partnerUser?.phoneE164 ? `+91${String(partnerUser.phoneE164).replace(/^\+91/, '')}` : (input.phone.startsWith('+91') ? input.phone : `+91${input.phone}`),
+              ...(partnerUser ? { userId: partnerUser._id } : {}),
+              name: partnerUser?.name ?? input.name ?? '',
+              phoneE164: partnerUser?.phoneE164 ?? (input.phone?.startsWith('+91') ? input.phone : `+91${input.phone}`),
               ...(input.internalNotes ? { internalNotes: input.internalNotes } : {}),
               assignedAt: new Date(),
               assignedBy: actorId,
             },
           },
+          ...((priorAssignment || order.fulfilmentStatus === 'delivery_failed') ? {
+            $push: {
+              ...(priorAssignment ? { deliveryPartnerHistory: priorAssignment } : {}),
+              ...(order.fulfilmentStatus === 'delivery_failed' ? {
+                statusHistory: {
+                  status: statusAfterDeliveryPartnerAssignment(order.fulfilmentStatus),
+                  changedAt: new Date(),
+                  actorType: 'user',
+                  actorId,
+                  note: 'Delivery partner reassigned after a failed delivery attempt.',
+                },
+              } : {}),
+            },
+          } : {}),
         },
         { new: true, runValidators: true, session },
       );
       if (!assigned) throw new AppError(409, 'DELIVERY_PARTNER_NOT_ALLOWED', 'The order changed and the delivery partner was not assigned.');
       await AuditLog.create([{
         actorId,
-        action: order.deliveryPartner ? 'order.delivery_partner_reassigned' : 'order.delivery_partner_assigned',
+        action: priorAssignment ? 'order.delivery_partner_reassigned' : 'order.delivery_partner_assigned',
         resourceType: 'order',
         resourceId: assigned.id,
         metadata: { orderReference: assigned.orderReference },
@@ -238,9 +278,85 @@ export const assignDeliveryPartner: RequestHandler = async (req, res) => {
   sendData(res, updated);
 };
 
+export const bulkAssignDeliveryPartner: RequestHandler = async (req, res) => {
+  const input = bulkDeliveryPartnerSchema.parse(req.body);
+  const actorId = authenticatedUserId(req);
+  const session = await mongoose.startSession();
+  let assignedOrders: Awaited<ReturnType<typeof Order.find>>;
+  try {
+    const result = await session.withTransaction(async () => {
+      const partner = await User.findOne({ _id: input.partnerId, role: 'delivery_partner', status: 'active' })
+        .select('_id name phoneE164').session(session).lean();
+      if (!partner) throw new AppError(404, 'DELIVERY_PARTNER_NOT_FOUND', 'The selected partner is not an active delivery partner.');
+      const orders = await Order.find({
+        _id: { $in: input.orderIds },
+        fulfilmentMethod: 'delivery',
+        fulfilmentStatus: { $in: ['preparing', 'out_for_delivery', 'delivery_failed'] },
+      }).session(session);
+      if (orders.length !== input.orderIds.length || orders.some((order) => !canAssignDeliveryPartner(order.fulfilmentStatus, Boolean(order.deliveryPartner)))) {
+        throw new AppError(409, 'DELIVERY_PARTNER_NOT_ALLOWED', 'One or more selected orders are ineligible: assigned orders can only be reassigned after a failed delivery attempt.');
+      }
+
+      const assigned = [];
+      for (const order of orders) {
+        const wasAssigned = Boolean(order.deliveryPartner);
+        if (order.deliveryPartner) {
+          order.deliveryPartnerHistory.push({
+            ...(order.deliveryPartner.userId ? { userId: order.deliveryPartner.userId } : {}),
+            name: order.deliveryPartner.name,
+            phoneE164: order.deliveryPartner.phoneE164,
+            assignedAt: order.deliveryPartner.assignedAt,
+            assignedBy: order.deliveryPartner.assignedBy,
+            unassignedAt: new Date(),
+            unassignedBy: new mongoose.Types.ObjectId(actorId),
+          });
+        }
+        order.deliveryPartner = {
+          userId: partner._id,
+          name: partner.name ?? 'Delivery Partner',
+          phoneE164: partner.phoneE164,
+          ...(input.internalNotes ? { internalNotes: input.internalNotes } : {}),
+          assignedAt: new Date(),
+          assignedBy: new mongoose.Types.ObjectId(actorId),
+        };
+        if (order.fulfilmentStatus === 'delivery_failed') {
+          order.fulfilmentStatus = statusAfterDeliveryPartnerAssignment(order.fulfilmentStatus);
+          order.statusHistory.push({
+            status: order.fulfilmentStatus,
+            changedAt: new Date(),
+            actorType: 'user',
+            actorId: new mongoose.Types.ObjectId(actorId),
+            note: 'Delivery partner reassigned after a failed delivery attempt.',
+          });
+        }
+        await order.save({ session });
+        assigned.push({ order, wasAssigned });
+      }
+
+      await AuditLog.create(assigned.map(({ order, wasAssigned }) => ({
+        actorId,
+        action: wasAssigned ? 'order.delivery_partner_reassigned' : 'order.delivery_partner_assigned',
+        resourceType: 'order',
+        resourceId: order.id,
+        metadata: { orderReference: order.orderReference, partnerId: partner._id.toString() },
+      })), { session });
+      return assigned.map(({ order }) => order);
+    });
+    assignedOrders = result ?? [];
+  } finally {
+    await session.endSession();
+  }
+  sendData(res, assignedOrders);
+};
+
 export const listAssignedPartnerOrders: RequestHandler = async (req, res) => {
   const partnerId = authenticatedUserId(req);
-  const orders = await Order.find({ 'deliveryPartner.userId': partnerId }).sort({ createdAt: -1 }).lean();
+  const orders = await Order.find({
+    'deliveryPartner.userId': partnerId,
+    fulfilmentStatus: { $nin: ['delivered', 'completed', 'cancelled', 'delivery_failed'] },
+  })
+    .select('-internalNotes -paymentEvents -idempotencyKey -deliveryPartnerHistory -deliveryPartner.internalNotes -deliveryPartner.assignedBy -deliveryPartner.userId -cancellationRequest.reviewedBy -cancellationRequest.adminNote')
+    .sort({ createdAt: -1 }).lean();
   sendData(res, orders);
 };
 
@@ -251,24 +367,43 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
     note: z.string().trim().max(500).optional(),
   }).strict().parse(req.body);
   const partnerId = authenticatedUserId(req);
-  const order = await Order.findOne({ _id: id, 'deliveryPartner.userId': partnerId }).lean();
+  const order = await Order.findOne({ _id: id, 'deliveryPartner.userId': partnerId });
   if (!order) throw new AppError(404, 'NOT_FOUND', 'Order not found for this delivery partner.');
 
-  const allowedTransition = status === 'out_for_delivery' ? order.fulfilmentStatus === 'preparing' || order.fulfilmentStatus === 'ready_for_pickup' :
-    status === 'delivered' ? order.fulfilmentStatus === 'out_for_delivery' :
-      status === 'delivery_failed' ? order.fulfilmentStatus === 'out_for_delivery' : false;
+  const priorStatus = order.fulfilmentStatus;
+  const allowedTransition = status === 'out_for_delivery' ? priorStatus === 'preparing' || priorStatus === 'ready_for_pickup' :
+    status === 'delivered' ? priorStatus === 'out_for_delivery' :
+      status === 'delivery_failed' ? priorStatus === 'out_for_delivery' : false;
   if (!allowedTransition) {
     throw new AppError(409, 'INVALID_STATUS_TRANSITION', 'That delivery status transition is not allowed.');
   }
 
-  const updated = await Order.findOneAndUpdate(
-    { _id: id, 'deliveryPartner.userId': partnerId },
-    {
-      $set: { fulfilmentStatus: status },
-      $push: { statusHistory: { status, changedAt: new Date(), actorType: 'user', actorId: partnerId, ...(note ? { note } : {}) } },
-    },
-    { new: true },
-  );
+  const session = await mongoose.startSession();
+  let updated;
+  try {
+    updated = await session.withTransaction(async () => {
+      const changed = await Order.findOneAndUpdate(
+        { _id: id, 'deliveryPartner.userId': partnerId, fulfilmentStatus: priorStatus },
+        {
+          $set: { fulfilmentStatus: status },
+          $push: { statusHistory: { status, changedAt: new Date(), actorType: 'user', actorId: partnerId, ...(note ? { note } : {}) } },
+        },
+        { new: true, session },
+      ).select('-internalNotes -paymentEvents -idempotencyKey -deliveryPartnerHistory -deliveryPartner.internalNotes -deliveryPartner.assignedBy -deliveryPartner.userId -cancellationRequest.reviewedBy -cancellationRequest.adminNote -statusHistory.actorId -statusHistory.actorType');
+      if (!changed) throw new AppError(409, 'INVALID_STATUS_TRANSITION', 'The order status changed; reload and try again.');
+      await enqueueOrderStatusNotification(changed, status, session);
+      await AuditLog.create([{
+        actorId: partnerId,
+        action: 'order.fulfilment_updated',
+        resourceType: 'order',
+        resourceId: changed.id,
+        metadata: { status },
+      }], { session });
+      return changed;
+    });
+  } finally {
+    await session.endSession();
+  }
   if (!updated) throw new AppError(500, 'INTERNAL_ERROR', 'The delivery status could not be updated.');
   sendData(res, updated);
 };
@@ -425,7 +560,9 @@ function toCustomerOrder(order: object): Record<string, unknown> {
     const partner = { ...customerOrder.deliveryPartner } as Record<string, unknown>;
     delete partner.internalNotes;
     delete partner.assignedBy;
+    delete partner.userId;
     customerOrder.deliveryPartner = partner;
   }
+  delete customerOrder.deliveryPartnerHistory;
   return customerOrder;
 }

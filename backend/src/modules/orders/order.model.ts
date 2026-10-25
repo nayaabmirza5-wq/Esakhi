@@ -65,6 +65,19 @@ const deliveryPartnerSchema = new Schema(
   { _id: false },
 );
 
+const deliveryPartnerAssignmentSchema = new Schema(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: 'User' },
+    name: { type: String, trim: true, required: true, maxlength: 120 },
+    phoneE164: { type: String, required: true, match: /^\+91[6-9]\d{9}$/ },
+    assignedAt: { type: Date, required: true },
+    assignedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    unassignedAt: { type: Date, required: true },
+    unassignedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  },
+  { _id: false },
+);
+
 const orderSchema = new Schema(
   {
     orderReference: { type: String, required: true, unique: true },
@@ -73,6 +86,7 @@ const orderSchema = new Schema(
     customerName: { type: String, required: true, trim: true, maxlength: 120 },
     customerPhoneE164: { type: String, required: true },
     address: { type: addressSchema },
+    deliveryInstructions: { type: String, trim: true, maxlength: 500 },
     fulfilmentMethod: { type: String, enum: ['delivery', 'pickup'], required: true },
     items: { type: [orderItemSchema], required: true },
     subtotalPaise: { type: Number, required: true, min: 0 },
@@ -97,6 +111,7 @@ const orderSchema = new Schema(
     },
     statusHistory: { type: [statusHistorySchema], default: [] },
     deliveryPartner: { type: deliveryPartnerSchema },
+    deliveryPartnerHistory: { type: [deliveryPartnerAssignmentSchema], default: [] },
     cancellationRequest: {
       requestedAt: Date,
       customerNote: { type: String, trim: true, maxlength: 500 },
@@ -113,6 +128,7 @@ const orderSchema = new Schema(
 orderSchema.index({ customerId: 1, createdAt: -1 });
 orderSchema.index({ idempotencyKey: 1, customerId: 1 }, { unique: true });
 orderSchema.index({ fulfilmentStatus: 1, paymentStatus: 1, createdAt: -1 });
+orderSchema.index({ 'deliveryPartner.userId': 1, createdAt: -1 });
 
 export const Order = model('Order', orderSchema);
 export type OrderRecord = InferSchemaType<typeof orderSchema>;

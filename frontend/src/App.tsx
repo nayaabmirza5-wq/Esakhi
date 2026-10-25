@@ -114,6 +114,18 @@ function useLoad<T>(load: () => Promise<T>, dependencies: unknown[] = EMPTY_DEPE
   return { data, error, loading, reload, setData };
 }
 
+function useRefreshOnFocus(reload: (showLoading?: boolean) => Promise<void>): void {
+  useEffect(() => {
+    const refresh = () => { void reload(false); };
+    const timer = window.setInterval(refresh, 30_000);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [reload]);
+}
+
 function App(): ReactNode {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
@@ -259,11 +271,14 @@ function App(): ReactNode {
               <Route path="/account" element={<AccountPage />} />
               <Route path="/orders" element={<OrdersPage />} />
               <Route path="/orders/:id" element={<CustomerOrderPage />} />
+              <Route path="/delivery-partner" element={<DeliveryPartnerGate><DeliveryPartnerPage /></DeliveryPartnerGate>} />
               <Route path="/admin" element={<AdminGate><AdminDashboardPage /></AdminGate>} />
               <Route path="/admin/products" element={<AdminGate><AdminProductsPage /></AdminGate>} />
               <Route path="/admin/inventory" element={<AdminGate adminOnly><AdminInventoryPage /></AdminGate>} />
               <Route path="/admin/orders" element={<AdminGate><AdminOrdersPage /></AdminGate>} />
               <Route path="/admin/orders/:id" element={<AdminGate><AdminOrderPage /></AdminGate>} />
+              <Route path="/admin/delivery-partners" element={<AdminGate adminOnly><AdminDeliveryPartnersPage /></AdminGate>} />
+              <Route path="/admin/delivery-partners/:id" element={<AdminGate adminOnly><AdminDeliveryPartnerPage /></AdminGate>} />
               <Route path="/admin/customers" element={<AdminGate adminOnly><AdminCustomersPage /></AdminGate>} />
               <Route path="/admin/customers/:id" element={<AdminGate adminOnly><AdminCustomerPage /></AdminGate>} />
               <Route path="/admin/settings" element={<AdminGate adminOnly><AdminSettingsPage /></AdminGate>} />
@@ -295,6 +310,7 @@ function Header({ theme, setTheme }: { theme: string; setTheme: (value: string) 
           <NavLink to="/our-story">Our story</NavLink>
           {user && <NavLink to="/orders">My orders</NavLink>}
           {user && (user.role === 'admin' || user.role === 'staff') && <NavLink to="/admin">Workspace</NavLink>}
+          {user?.role === 'delivery_partner' && <NavLink to="/delivery-partner">Delivery portal</NavLink>}
         </nav>
         <div className="header-actions">
           <label className="theme-select">
@@ -458,7 +474,7 @@ function ShopPage(): ReactNode {
 }
 
 function Pagination({ page, pages, onChange }: { page: number; pages: number; onChange: (page: number) => void }): ReactNode {
-  return <div className="pagination"><button className="button button-outline" disabled={page <= 1} onClick={() => onChange(page - 1)}>Previous</button><span>Page {page} of {pages}</span><button className="button button-outline" disabled={page >= pages} onClick={() => onChange(page + 1)}>Next</button></div>;
+  return <div className="pagination"><button type="button" className="button button-outline" disabled={page <= 1} onClick={() => onChange(page - 1)}>Previous</button><span>Page {page} of {pages}</span><button type="button" className="button button-outline" disabled={page >= pages} onClick={() => onChange(page + 1)}>Next</button></div>;
 }
 
 function ProductPage(): ReactNode {
@@ -525,7 +541,7 @@ function SignInPage(): ReactNode {
       const session = await api.verifyOtp(phone, code);
       setSession(session.user, session.accessToken);
       await reloadUser();
-      navigate(signInState?.from || (session.user.role === 'admin' || session.user.role === 'staff' ? '/admin' : '/account'), { replace: true, state: signInState?.checkoutState });
+      navigate(signInState?.from || (session.user.role === 'admin' || session.user.role === 'staff' ? '/admin' : session.user.role === 'delivery_partner' ? '/delivery-partner' : '/account'), { replace: true, state: signInState?.checkoutState });
     } catch (cause) { setError(displayError(cause)); }
     finally { setLoading(false); }
   };
@@ -631,7 +647,7 @@ function AccountPage(): ReactNode {
       setError(displayError(cause));
     }
   };
-  return <div className="page-container narrow"><PageIntro eyebrow="Your account" title={`Hello${user.name ? `, ${user.name}` : ''}`} description="Manage your profile and find your past orders." /><div className="account-role"><span className="status-dot" /> Signed in as {user.role}</div>{error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}<form className="stack-form panel" onSubmit={(event) => void submit(event)}><label className="field"><span>Your name</span><input maxLength={120} value={name} onChange={(event) => setName(event.target.value)} /></label><label className="field"><span>Verified phone</span><input value={user.phone ?? ''} disabled /></label><button className="button">Save profile</button></form>{user.role === 'customer' && <section className="panel push-notification-settings"><h2>Order notifications</h2><p>Get a browser notification when your order status changes. Notifications are optional and require browser permission.</p>{pushNotificationsConfigured ? <button className="button button-outline" onClick={() => void togglePush()}>{pushEnabled ? 'Disable on this device' : 'Enable order notifications'}</button> : <Notice>Push notifications are not configured for this app yet.</Notice>}</section>}<div className="account-links"><Link to="/orders" className="button button-outline">View order history</Link>{(user.role === 'admin' || user.role === 'staff') && <Link to="/admin" className="button button-outline">Open workspace</Link>}</div><AddressEditor onSaved={reloadUser} /></div>;
+  return <div className="page-container narrow"><PageIntro eyebrow="Your account" title={`Hello${user.name ? `, ${user.name}` : ''}`} description="Manage your profile and find your past orders." /><div className="account-role"><span className="status-dot" /> Signed in as {user.role}</div>{error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}<form className="stack-form panel" onSubmit={(event) => void submit(event)}><label className="field"><span>Your name</span><input maxLength={120} value={name} onChange={(event) => setName(event.target.value)} /></label><label className="field"><span>Verified phone</span><input value={user.phone ?? ''} disabled /></label><button className="button">Save profile</button></form>{user.role === 'customer' && <section className="panel push-notification-settings"><h2>Order notifications</h2><p>Get a browser notification when your order status changes. Notifications are optional and require browser permission.</p>{pushNotificationsConfigured ? <button className="button button-outline" onClick={() => void togglePush()}>{pushEnabled ? 'Disable on this device' : 'Enable order notifications'}</button> : <Notice>Push notifications are not configured for this app yet.</Notice>}</section>}<div className="account-links"><Link to="/orders" className="button button-outline">View order history</Link>{user.role === 'delivery_partner' && <Link to="/delivery-partner" className="button button-outline">Open delivery portal</Link>}{(user.role === 'admin' || user.role === 'staff') && <Link to="/admin" className="button button-outline">Open workspace</Link>}</div><AddressEditor onSaved={reloadUser} /></div>;
 }
 
 function AddressEditor({ onSaved }: { onSaved: () => Promise<void> }): ReactNode {
@@ -723,7 +739,7 @@ function OrdersPage(): ReactNode {
 }
 
 function OrderCard({ order, to }: { order: Order; to: string }): ReactNode {
-  return <Link className="order-card" to={to}><div><span className="eyebrow">{order.orderReference}</span><strong>{order.items.map((item) => item.productName).join(', ')}</strong><small>{order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-IN') : ''}</small></div><div className="order-card-meta"><StatusBadge value={order.fulfilmentStatus} fulfilmentMethod={order.fulfilmentMethod} /><strong>{formatMoney(order.totalPaise)}</strong><span>View order →</span></div></Link>;
+  return <Link className="order-card" to={to}><div><span className="eyebrow">{order.orderReference}</span><strong>{order.items.map((item) => item.productName).join(', ')}</strong>{order.deliveryPartner && <small>Delivery partner: {order.deliveryPartner.name}</small>}<small>{order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-IN') : ''}</small></div><div className="order-card-meta"><StatusBadge value={order.fulfilmentStatus} fulfilmentMethod={order.fulfilmentMethod} /><strong>{formatMoney(order.totalPaise)}</strong><span>View order →</span></div></Link>;
 }
 
 function orderStatusLabel(value: string, fulfilmentMethod?: Order['fulfilmentMethod']): string {
@@ -819,7 +835,7 @@ function AdminGate({ children, adminOnly = false }: { children: ReactNode; admin
 function AdminLayout({ children }: { children: ReactNode }): ReactNode {
   const { user } = useAuth();
   const admin = user?.role === 'admin';
-  return <div className="admin-shell"><aside className="admin-sidebar"><Link to="/admin" className="admin-brand"><img src="/images/esakhi-emblem.png" alt="" /><span>eSakhi<br /><small>Maker workspace</small></span></Link><span className="sidebar-label">WORKSPACE</span><nav className="admin-nav"><NavLink to="/admin" end>Overview</NavLink><NavLink to="/admin/products">Products</NavLink>{admin && <NavLink to="/admin/inventory">Inventory</NavLink>}<NavLink to="/admin/orders">Orders</NavLink>{admin && <NavLink to="/admin/customers">Customers</NavLink>}{admin && <NavLink to="/admin/settings">Store settings</NavLink>}<NavLink to="/admin/system">API status</NavLink></nav><div className="sidebar-user"><span className="avatar">{(user?.name || 'E').slice(0, 1).toUpperCase()}</span><span><strong>{user?.name || user?.phone}</strong><small>{user?.role}</small></span></div></aside><section className="admin-content">{children}</section></div>;
+  return <div className="admin-shell"><aside className="admin-sidebar"><Link to="/admin" className="admin-brand"><img src="/images/esakhi-emblem.png" alt="" /><span>eSakhi<br /><small>Maker workspace</small></span></Link><span className="sidebar-label">WORKSPACE</span><nav className="admin-nav"><NavLink to="/admin" end>Overview</NavLink><NavLink to="/admin/products">Products</NavLink>{admin && <NavLink to="/admin/inventory">Inventory</NavLink>}<NavLink to="/admin/orders">Orders</NavLink>{admin && <NavLink to="/admin/delivery-partners">Delivery Partners</NavLink>}{admin && <NavLink to="/admin/customers">Customers</NavLink>}{admin && <NavLink to="/admin/settings">Store settings</NavLink>}<NavLink to="/admin/system">API status</NavLink></nav><div className="sidebar-user"><span className="avatar">{(user?.name || 'E').slice(0, 1).toUpperCase()}</span><span><strong>{user?.name || user?.phone}</strong><small>{user?.role}</small></span></div></aside><section className="admin-content">{children}</section></div>;
 }
 
 function AdminDashboardPage(): ReactNode {
@@ -949,6 +965,7 @@ function AdminOrdersPage(): ReactNode {
   if (from) query.set('from', new Date(from).toISOString());
   if (to) query.set('to', new Date(to).toISOString());
   const result = useLoad(() => api.adminOrders(query), [page, queryText, payment, fulfilment, cancellationRequest, from, to]);
+  useRefreshOnFocus(result.reload);
   const notificationFailures = useLoad(
     () => user?.role === 'admin'
       ? api.failedNotifications()
@@ -983,7 +1000,7 @@ function AdminOrdersPage(): ReactNode {
         <label className="date-filter"><span>From</span><input type="datetime-local" value={from} onChange={(event) => { setPage(1); setFrom(event.target.value); }} /></label>
         <label className="date-filter"><span>To</span><input type="datetime-local" value={to} onChange={(event) => { setPage(1); setTo(event.target.value); }} /></label>
       </div>
-      {result.loading ? <Loading /> : result.data?.data.length ? <><div className="admin-table-wrap"><table><thead><tr><th>Order</th><th>Customer</th><th>Delivery location</th><th>Placed</th><th>Total</th><th>Payment</th><th>Fulfilment</th><th>Cancellation</th></tr></thead><tbody>{result.data.data.map((order) => <tr key={order._id}><td><Link to={`/admin/orders/${order._id}`}>{order.orderReference}</Link></td><td>{order.customerName}<small>{order.customerPhoneE164}</small></td><td>{order.fulfilmentMethod === 'pickup' ? 'Pickup' : order.address ? <>{order.address.locality}, {order.address.city}<small>{order.address.state} {order.address.postalCode}</small></> : 'Address unavailable'}</td><td>{order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-IN') : '—'}</td><td>{formatMoney(order.totalPaise)}</td><td><StatusBadge value={order.paymentStatus} /></td><td><StatusBadge value={order.fulfilmentStatus} fulfilmentMethod={order.fulfilmentMethod} /></td><td>{order.cancellationRequest?.requestedAt ? <Link to={`/admin/orders/${order._id}`}>{order.cancellationRequest.decision ? `Reviewed: ${order.cancellationRequest.decision}` : 'Pending review'}</Link> : '—'}</td></tr>)}</tbody></table></div>{result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}</> : !result.error && <EmptyState title="No orders match these filters" />}
+      {result.loading ? <Loading /> : result.data?.data.length ? <><div className="admin-table-wrap"><table><thead><tr><th>Order</th><th>Customer</th><th>Delivery location</th><th>Placed</th><th>Total</th><th>Payment</th><th>Fulfilment</th><th>Delivery partner</th><th>Cancellation</th></tr></thead><tbody>{result.data.data.map((order) => <tr key={order._id}><td><Link to={`/admin/orders/${order._id}`}>{order.orderReference}</Link></td><td>{order.customerName}<small>{order.customerPhoneE164}</small></td><td>{order.fulfilmentMethod === 'pickup' ? 'Pickup' : order.address ? <>{order.address.locality}, {order.address.city}<small>{order.address.state} {order.address.postalCode}</small></> : 'Address unavailable'}</td><td>{order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-IN') : '—'}</td><td>{formatMoney(order.totalPaise)}</td><td><StatusBadge value={order.paymentStatus} /></td><td><StatusBadge value={order.fulfilmentStatus} fulfilmentMethod={order.fulfilmentMethod} /></td><td>{order.deliveryPartner?.name ?? (order.fulfilmentMethod === 'delivery' ? 'Not assigned' : '—')}</td><td>{order.cancellationRequest?.requestedAt ? <Link to={`/admin/orders/${order._id}`}>{order.cancellationRequest.decision ? `Reviewed: ${order.cancellationRequest.decision}` : 'Pending review'}</Link> : '—'}</td></tr>)}</tbody></table></div>{result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}</> : !result.error && <EmptyState title="No orders match these filters" />}
     </div>
   );
 }
@@ -995,6 +1012,8 @@ function AdminOrderPage(): ReactNode {
   const [note, setNote] = useState('');
   const [reviewNote, setReviewNote] = useState('');
   const [statusNote, setStatusNote] = useState('');
+  const [partnerId, setPartnerId] = useState('');
+  const [partnerPage, setPartnerPage] = useState(1);
   const [partnerName, setPartnerName] = useState('');
   const [partnerPhone, setPartnerPhone] = useState('');
   const [partnerNotes, setPartnerNotes] = useState('');
@@ -1002,9 +1021,13 @@ function AdminOrderPage(): ReactNode {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const admin = user?.role === 'admin';
+  const partners = useLoad(() => admin
+    ? api.deliveryPartners(partnerPage, 100)
+    : Promise.resolve({ data: [], pagination: { page: 1, limit: 100, total: 0, totalPages: 0 } }), [admin, partnerPage]);
   const reload = async () => { await order.reload(); };
   useEffect(() => {
     if (!order.data?.deliveryPartner) return;
+    setPartnerId(order.data.deliveryPartner.userId ?? '');
     setPartnerName(order.data.deliveryPartner.name);
     setPartnerPhone(order.data.deliveryPartner.phoneE164);
     setPartnerNotes(order.data.deliveryPartner.internalNotes ?? '');
@@ -1027,7 +1050,9 @@ function AdminOrderPage(): ReactNode {
     completed: 'Confirm pickup completed',
   };
   const canAssignPartner = item.fulfilmentMethod === 'delivery'
-    && ['preparing', 'out_for_delivery'].includes(item.fulfilmentStatus);
+    && ['preparing', 'out_for_delivery', 'delivery_failed'].includes(item.fulfilmentStatus)
+    && (!item.deliveryPartner || item.fulfilmentStatus === 'delivery_failed');
+  const selectedPartner = partners.data?.data.find((partner) => getId(partner) === partnerId);
   const act = async (operation: () => Promise<unknown>, success: string) => {
     setError(''); setMessage('');
     try { await operation(); setMessage(success); await reload(); }
@@ -1036,11 +1061,14 @@ function AdminOrderPage(): ReactNode {
   const assignPartner = (event: FormEvent) => {
     event.preventDefault();
     void act(
-      () => api.assignDeliveryPartner(id, {
-        name: partnerName,
-        phone: partnerPhone,
-        ...(partnerNotes.trim() ? { internalNotes: partnerNotes.trim() } : {}),
-      }),
+      async () => {
+        const assigned = await api.assignDeliveryPartner(id, {
+          ...(partnerId ? { partnerId } : { name: partnerName, phone: partnerPhone }),
+          ...(partnerNotes.trim() ? { internalNotes: partnerNotes.trim() } : {}),
+        });
+        await partners.reload(false);
+        return assigned;
+      },
       item.deliveryPartner ? 'Delivery partner updated.' : 'Delivery partner assigned.',
     );
   };
@@ -1069,16 +1097,29 @@ function AdminOrderPage(): ReactNode {
           <h2>Actions</h2>
           <p>Fulfilment: <StatusBadge value={item.fulfilmentStatus} fulfilmentMethod={item.fulfilmentMethod} /></p>
           {canAssignPartner && <form className="stack-form delivery-partner-form" onSubmit={assignPartner}>
-            <h3>{item.deliveryPartner ? 'Delivery partner' : 'Assign delivery partner'}</h3>
-            <label className="field"><span>Partner name</span><input required maxLength={120} value={partnerName} onChange={(event) => setPartnerName(event.target.value)} /></label>
-            <label className="field"><span>Indian mobile number</span><input required inputMode="tel" pattern="(\\+91)?[6-9][0-9]{9}" value={partnerPhone} onChange={(event) => setPartnerPhone(event.target.value)} /></label>
+            <h3>Delivery Assignment</h3>
+            {admin && <label className="field"><span>Select an existing delivery partner</span><select value={partnerId} onChange={(event) => {
+              const selectedId = event.target.value;
+              const selected = partners.data?.data.find((partner) => getId(partner) === selectedId);
+              setPartnerId(selectedId);
+              if (selected) {
+                setPartnerName(selected.name ?? '');
+                setPartnerPhone(selected.phoneE164 ?? selected.phone ?? '');
+              }
+            }}><option value="">Manual assignment (legacy)</option>{item.deliveryPartner?.userId && !partners.data?.data.some((partner) => getId(partner) === item.deliveryPartner?.userId) && <option value={item.deliveryPartner.userId}>{item.deliveryPartner.name} · {item.deliveryPartner.phoneE164} · currently assigned</option>}{partners.data?.data.map((partner) => <option key={getId(partner)} value={getId(partner)} disabled={partner.status === 'disabled' && getId(partner) !== item.deliveryPartner?.userId}>{partner.name || 'Delivery Partner'} · {partner.phoneE164 ?? partner.phone} · {partner.status}</option>)}</select></label>}
+            {partners.error && admin && <Notice tone="error">{partners.error}</Notice>}
+            {selectedPartner && <div className="delivery-partner-card"><strong>Selected partner details</strong><span>{selectedPartner.name || 'Delivery Partner'}</span><a href={`tel:${selectedPartner.phoneE164 ?? selectedPartner.phone}`}>{selectedPartner.phoneE164 ?? selectedPartner.phone}</a>{selectedPartner.email && <span>{selectedPartner.email}</span>}<small>Account {getId(selectedPartner)} · {selectedPartner.status} · {selectedPartner.assignedCount} active orders</small></div>}
+            {admin && partners.data && partners.data.pagination.totalPages > 1 && <Pagination page={partnerPage} pages={partners.data.pagination.totalPages} onChange={setPartnerPage} />}
+            {!partnerId && <><label className="field"><span>Partner name</span><input required maxLength={120} value={partnerName} onChange={(event) => setPartnerName(event.target.value)} /></label>
+            <label className="field"><span>Indian mobile number</span><input required inputMode="tel" pattern="(\\+91)?[6-9][0-9]{9}" value={partnerPhone} onChange={(event) => setPartnerPhone(event.target.value)} /></label></>}
             <label className="field"><span>Internal delivery notes (optional)</span><textarea maxLength={500} rows={2} value={partnerNotes} onChange={(event) => setPartnerNotes(event.target.value)} /></label>
             <button className="button button-outline button-full">{item.deliveryPartner ? 'Save reassignment' : 'Assign partner'}</button>
           </form>}
           {nextStatus && <><label className="field"><span>Customer-visible status note (optional)</span><textarea maxLength={500} rows={2} value={statusNote} onChange={(event) => setStatusNote(event.target.value)} /></label>
             <button className="button button-full" disabled={nextStatus === 'out_for_delivery' && item.fulfilmentMethod === 'delivery' && !item.deliveryPartner} onClick={() => void act(() => api.fulfilOrder(id, nextStatus, statusNote), `${orderStatusLabel(nextStatus, item.fulfilmentMethod)} status recorded.`)}>{statusActionLabel[nextStatus]}</button>
           </>}
-          {item.deliveryPartner && <div className="delivery-partner-card"><strong>Assigned delivery partner</strong><span>{item.deliveryPartner.name}</span><a href={`tel:${item.deliveryPartner.phoneE164}`}>{item.deliveryPartner.phoneE164}</a><small>Assigned {new Date(item.deliveryPartner.assignedAt).toLocaleString('en-IN')}</small></div>}
+          <section className="delivery-partner-card"><strong>Delivery Assignment</strong>{item.deliveryPartner ? <><span>Assignment status: Assigned</span><span>{item.deliveryPartner.name}</span><a href={`tel:${item.deliveryPartner.phoneE164}`}>{item.deliveryPartner.phoneE164}</a><small>Assigned {new Date(item.deliveryPartner.assignedAt).toLocaleString('en-IN')}</small>{item.deliveryPartner.userId && <Link to={`/admin/delivery-partners/${item.deliveryPartner.userId}`}>View partner profile and other orders</Link>}</> : <><span>Not assigned</span>{canAssignPartner && <span>Assign an existing partner above to enable delivery progress.</span>}</>}</section>
+          {item.deliveryPartnerHistory?.length ? <div className="delivery-partner-card"><strong>Previous assignments</strong>{item.deliveryPartnerHistory.map((assignment, index) => <span key={`${assignment.userId ?? assignment.name}-${index}`}>{assignment.name} · {assignment.phoneE164} · {new Date(assignment.assignedAt).toLocaleString('en-IN')} to {new Date(assignment.unassignedAt).toLocaleString('en-IN')}</span>)}</div> : null}
           <label className="field"><span>Internal note</span><textarea rows={3} value={note} onChange={(event) => setNote(event.target.value)} placeholder="Only staff and admins can see this" /></label>
           <button className="button button-outline button-full" disabled={!note.trim()} onClick={() => void act(() => api.addOrderNote(id, note), 'Internal note added.')}>Add note</button>
           {item.internalNotes?.map((entry, index) => <p className="internal-note" key={`${index}-${entry}`}>{entry}</p>)}
@@ -1090,6 +1131,159 @@ function AdminOrderPage(): ReactNode {
   );
 }
 
+function AdminDeliveryPartnersPage(): ReactNode {
+  const [partnerPage, setPartnerPage] = useState(1);
+  const [orderPage, setOrderPage] = useState(1);
+  const partners = useLoad(() => api.deliveryPartners(partnerPage, 100), [partnerPage]);
+  const orders = useLoad(() => api.adminOrders(new URLSearchParams({ page: String(orderPage), limit: '100' })), [orderPage]);
+  useRefreshOnFocus(partners.reload);
+  useRefreshOnFocus(orders.reload);
+  const [selectedPartnerId, setSelectedPartnerId] = useState('');
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [internalNotes, setInternalNotes] = useState('');
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const eligibleOrders = orders.data?.data.filter((order) =>
+    order.fulfilmentMethod === 'delivery'
+      && ['preparing', 'out_for_delivery', 'delivery_failed'].includes(order.fulfilmentStatus)
+      && (!order.deliveryPartner || order.fulfilmentStatus === 'delivery_failed'),
+  ) ?? [];
+  const selectedPartner = partners.data?.data.find((partner) => getId(partner) === selectedPartnerId);
+
+  const toggleOrder = (orderId: string) => {
+    if (!selectedOrderIds.includes(orderId) && selectedOrderIds.length >= 100) {
+      setError('Bulk assignment is limited to 100 orders per request.');
+      return;
+    }
+    setError('');
+    setSelectedOrderIds((current) => current.includes(orderId)
+      ? current.filter((id) => id !== orderId)
+      : [...current, orderId]);
+  };
+  const assignSelectedOrders = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedPartnerId || !selectedOrderIds.length) return;
+    if (!window.confirm(`Assign ${selectedOrderIds.length} order(s) to ${selectedPartner?.name || 'this delivery partner'}?`)) return;
+    setError('');
+    setMessage('');
+    try {
+      await api.bulkAssignDeliveryPartner({
+        partnerId: selectedPartnerId,
+        orderIds: selectedOrderIds,
+        ...(internalNotes.trim() ? { internalNotes: internalNotes.trim() } : {}),
+      });
+      setSelectedOrderIds([]);
+      setInternalNotes('');
+      setMessage('Selected orders were assigned.');
+      await Promise.all([partners.reload(false), orders.reload(false)]);
+    } catch (cause) {
+      setError(displayError(cause));
+    }
+  };
+
+  return <div className="admin-page">
+    <PageIntro eyebrow="Fulfilment" title="Delivery Partners" description="Review partner accounts and workload, assign multiple eligible orders, and open individual order assignments." />
+    {(partners.error || orders.error || error) && <Notice tone="error">{error || partners.error || orders.error}</Notice>}
+    {message && <Notice tone="success">{message}</Notice>}
+    <section className="admin-panel">
+      <div className="panel-heading"><div><span className="eyebrow">Partner accounts</span><h2>Delivery partner directory</h2></div></div>
+      {partners.loading ? <Loading /> : partners.data?.data.length ? <div className="admin-table-wrap"><table><thead><tr><th>Partner</th><th>Mobile</th><th>Email</th><th>Account ID</th><th>Status</th><th>Active orders</th><th>Details</th></tr></thead><tbody>{partners.data.data.map((partner) => <tr key={getId(partner)}><td>{partner.name || 'Delivery Partner'}</td><td><a href={`tel:${partner.phoneE164 ?? partner.phone}`}>{partner.phoneE164 ?? partner.phone}</a></td><td>{partner.email || '—'}</td><td><code>{getId(partner)}</code></td><td><StatusBadge value={partner.status ?? 'active'} /></td><td>{partner.assignedCount}</td><td><Link to={`/admin/delivery-partners/${getId(partner)}`}>View details and orders</Link></td></tr>)}</tbody></table></div> : !partners.error && <EmptyState title="No delivery partner accounts found">Create or promote an account through the existing account workflow; orders do not create partner accounts.</EmptyState>}
+      {partners.data && partners.data.pagination.totalPages > 1 && <Pagination page={partnerPage} pages={partners.data.pagination.totalPages} onChange={(page) => { setSelectedPartnerId(''); setPartnerPage(page); }} />}
+    </section>
+    <section className="admin-panel">
+      <div className="panel-heading"><div><span className="eyebrow">Order assignment</span><h2>Assign eligible orders</h2></div></div>
+      <form className="stack-form" onSubmit={(event) => void assignSelectedOrders(event)}>
+        <label className="field"><span>Delivery partner</span><select required value={selectedPartnerId} onChange={(event) => setSelectedPartnerId(event.target.value)}><option value="">Select an active partner</option>{partners.data?.data.filter((partner) => partner.status === 'active').map((partner) => <option key={getId(partner)} value={getId(partner)}>{partner.name || 'Delivery Partner'} · {partner.phoneE164 ?? partner.phone}</option>)}</select></label>
+        {selectedPartner && <div className="delivery-partner-card"><strong>Selected partner</strong><span>{selectedPartner.name || 'Delivery Partner'}</span><a href={`tel:${selectedPartner.phoneE164 ?? selectedPartner.phone}`}>{selectedPartner.phoneE164 ?? selectedPartner.phone}</a>{selectedPartner.email && <span>{selectedPartner.email}</span>}<small>{selectedPartner.assignedCount} active assigned order(s)</small></div>}
+        <label className="field"><span>Internal assignment note (optional)</span><textarea maxLength={500} rows={2} value={internalNotes} onChange={(event) => setInternalNotes(event.target.value)} /></label>
+        {orders.loading ? <Loading /> : eligibleOrders.length ? <div className="admin-table-wrap"><table><thead><tr><th>Select</th><th>Order</th><th>Customer</th><th>Delivery status</th><th>Assigned partner</th></tr></thead><tbody>{eligibleOrders.map((order) => <tr key={order._id}><td><input type="checkbox" aria-label={`Select order ${order.orderReference}`} checked={selectedOrderIds.includes(order._id)} disabled={!selectedOrderIds.includes(order._id) && selectedOrderIds.length >= 100} onChange={() => toggleOrder(order._id)} /></td><td><Link to={`/admin/orders/${order._id}`}>{order.orderReference}</Link></td><td>{order.customerName}<small>{order.customerPhoneE164}</small></td><td><StatusBadge value={order.fulfilmentStatus} fulfilmentMethod={order.fulfilmentMethod} /></td><td>{order.deliveryPartner?.name || 'Not assigned'}</td></tr>)}</tbody></table></div> : !orders.error && <EmptyState title="No eligible delivery orders on this page" />}
+        {orders.data && orders.data.pagination.totalPages > 1 && <Pagination page={orderPage} pages={orders.data.pagination.totalPages} onChange={setOrderPage} />}
+        <button className="button" disabled={!selectedPartnerId || !selectedOrderIds.length}>{`Assign ${selectedOrderIds.length || ''} selected order${selectedOrderIds.length === 1 ? '' : 's'}`}</button>
+      </form>
+    </section>
+  </div>;
+}
+
+function AdminDeliveryPartnerPage(): ReactNode {
+  const { id = '' } = useParams();
+  const [page, setPage] = useState(1);
+  const result = useLoad(() => api.deliveryPartner(id, page), [id, page]);
+  useRefreshOnFocus(result.reload);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const details = result.data;
+  const partner = details?.partner;
+  const toggleStatus = async () => {
+    if (!partner) return;
+    const status = partner.status === 'disabled' ? 'active' : 'disabled';
+    setError('');
+    setMessage('');
+    try {
+      await api.updateDeliveryPartnerStatus(id, status);
+      await result.reload(false);
+      setMessage(`Partner account ${status === 'active' ? 'activated' : 'deactivated'}.`);
+    } catch (cause) {
+      setError(displayError(cause));
+    }
+  };
+  if (result.loading) return <div className="admin-page"><Loading /></div>;
+  if (!details || !partner) return <div className="admin-page"><Notice tone="error">{result.error || 'Delivery partner not found.'}</Notice></div>;
+  return <div className="admin-page">
+    <div className="breadcrumbs"><Link to="/admin/delivery-partners">Delivery Partners</Link><span>/</span>Partner details</div>
+    <PageIntro eyebrow="Delivery partner profile" title={partner.name || 'Delivery Partner'} description="Account details and orders currently assigned to this partner." />
+    {error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}
+    <section className="panel delivery-partner-card"><strong>Partner details</strong><span>Mobile: <a href={`tel:${partner.phoneE164 ?? partner.phone}`}>{partner.phoneE164 ?? partner.phone}</a></span><span>Email: {partner.email || 'Not available'}</span><span>Account ID: <code>{getId(partner)}</code></span><span>Status: <StatusBadge value={partner.status ?? 'active'} /></span><span>Assigned orders on this list: {details.orders.pagination.total}</span><button className="button button-outline" onClick={() => void toggleStatus()}>{partner.status === 'disabled' ? 'Activate partner' : 'Deactivate partner'}</button></section>
+    <section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">Current assignments</span><h2>Orders assigned to this partner</h2></div></div>
+      {details.orders.data.length ? <div className="admin-table-wrap"><table><thead><tr><th>Order</th><th>Customer</th><th>Delivery status</th><th>Assigned at</th><th>Open</th></tr></thead><tbody>{details.orders.data.map((order) => <tr key={order._id}><td>{order.orderReference}</td><td>{order.customerName}<small>{order.customerPhoneE164}</small></td><td><StatusBadge value={order.fulfilmentStatus} fulfilmentMethod={order.fulfilmentMethod} /></td><td>{order.deliveryPartner?.assignedAt ? new Date(order.deliveryPartner.assignedAt).toLocaleString('en-IN') : '—'}</td><td><Link to={`/admin/orders/${order._id}`}>Open order</Link></td></tr>)}</tbody></table></div> : <EmptyState title="No current orders assigned" />}
+      {details.orders.pagination.totalPages > 1 && <Pagination page={page} pages={details.orders.pagination.totalPages} onChange={setPage} />}
+    </section>
+  </div>;
+}
+
+function DeliveryPartnerGate({ children }: { children: ReactNode }): ReactNode {
+  const { user, ready } = useAuth();
+  const location = useLocation();
+  if (!ready) return <div className="page-container"><Loading label="Checking your session…" /></div>;
+  if (!user) return <div className="page-container narrow"><PageIntro eyebrow="Delivery portal" title="Please sign in" description="Sign in with your delivery partner account to view assigned orders." /><Link to="/signin" state={{ from: location.pathname }} className="button">Sign in</Link></div>;
+  if (user.role !== 'delivery_partner') return <div className="page-container narrow"><Notice tone="error">This portal is available only to delivery partners.</Notice></div>;
+  return children;
+}
+
+function DeliveryPartnerPage(): ReactNode {
+  const { user } = useAuth();
+  const orders = useLoad(() => api.partnerOrders(), []);
+  useRefreshOnFocus(orders.reload);
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const updateStatus = async (id: string, status: 'out_for_delivery' | 'delivered' | 'delivery_failed') => {
+    setError('');
+    setMessage('');
+    try {
+      await api.updatePartnerOrderStatus(id, status, note.trim() || undefined);
+      setNote('');
+      setMessage('Delivery status updated.');
+      await orders.reload(false);
+    } catch (cause) {
+      setError(displayError(cause));
+    }
+  };
+  return <div className="page-container">
+    <PageIntro eyebrow="Delivery partner portal" title={`Hello${user?.name ? `, ${user.name}` : ''}`} description={`${user?.email ? `${user.email} · ` : ''}${user?.phone ?? ''} · Showing only orders assigned to this account.`} />
+    {error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}
+    <label className="field"><span>Delivery update note (optional)</span><textarea rows={2} maxLength={500} value={note} onChange={(event) => setNote(event.target.value)} /></label>
+    {orders.loading ? <Loading /> : orders.data?.length ? <div className="order-list">{orders.data.map((order) => <article className="panel delivery-partner-card" key={order._id}>
+      <div className="panel-heading"><div><span className="eyebrow">{order.orderReference}</span><h2>{order.customerName}</h2></div><StatusBadge value={order.fulfilmentStatus} fulfilmentMethod={order.fulfilmentMethod} /></div>
+      <a href={`tel:${order.customerPhoneE164}`}>Call customer {order.customerPhoneE164}</a>
+      {order.address && <address>{order.address.addressLine1}{order.address.addressLine2 ? `, ${order.address.addressLine2}` : ''}, {order.address.locality}, {order.address.city}, {order.address.state} {order.address.postalCode}</address>}
+      {order.items.map((item, index) => <span key={`${item.productId}-${index}`}>{item.productName} × {item.quantity}</span>)}
+      <small>Assigned {order.deliveryPartner?.assignedAt ? new Date(order.deliveryPartner.assignedAt).toLocaleString('en-IN') : ''}</small>
+      {['preparing', 'ready_for_pickup'].includes(order.fulfilmentStatus) && <button className="button" onClick={() => void updateStatus(order._id, 'out_for_delivery')}>Mark out for delivery</button>}
+      {order.fulfilmentStatus === 'out_for_delivery' && <div className="button-row"><button className="button" onClick={() => void updateStatus(order._id, 'delivered')}>Mark delivered</button><button className="button button-outline" onClick={() => void updateStatus(order._id, 'delivery_failed')}>Report delivery failed</button></div>}
+    </article>)}</div> : !orders.error && <EmptyState title="No orders assigned yet">Assigned delivery orders will appear here.</EmptyState>}
+  </div>;
+}
+
 function AdminCustomersPage(): ReactNode {
   const [page, setPage] = useState(1);
   const result = useLoad(() => api.customers(page), [page]);
@@ -1098,6 +1292,7 @@ function AdminCustomersPage(): ReactNode {
 
 function AdminCustomerPage(): ReactNode {
   const { id = '' } = useParams();
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const customer = useLoad(() => api.customer(id), [id]);
   const orders = useLoad(() => api.customerOrders(id, page), [id, page]);
@@ -1112,7 +1307,18 @@ function AdminCustomerPage(): ReactNode {
     try { await call(); await customer.reload(); setMessage(label); }
     catch (cause) { setError(displayError(cause)); }
   };
-  return <div className="admin-page"><div className="breadcrumbs"><Link to="/admin/customers">Customers</Link><span>/</span>Customer profile</div><PageIntro eyebrow="Customer profile" title={record.name || 'Customer'} description={`${record.phone ?? record.phoneE164} · ${record.orderCount} orders`} /><div className="panel user-actions"><div><span>Account status</span><StatusBadge value={record.status ?? 'active'} /></div><div className="button-row"><button className="button button-outline" onClick={() => void change(() => api.updateUserStatus(id, record.status === 'disabled' ? 'active' : 'disabled'), `${record.status === 'disabled' ? 'Enable' : 'Disable'} account`)}>{record.status === 'disabled' ? 'Enable account' : 'Disable account'}</button><button className="button button-outline" onClick={() => void change(() => api.updateRole(id, 'staff'), 'Grant staff access')}>Grant staff access</button><button className="button button-outline" onClick={() => void change(() => api.updateRole(id, 'customer'), 'Set role to customer')}>Set as customer</button></div></div>{error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}<section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">Customer history</span><h2>Orders</h2></div></div>{orders.error && <Notice tone="error">{orders.error}</Notice>}{orders.loading ? <Loading /> : orders.data?.data.length ? <><div className="order-list">{orders.data.data.map((order) => <OrderCard key={order._id} order={order} to={`/admin/orders/${order._id}`} />)}</div>{orders.data.pagination.totalPages > 1 && <Pagination page={page} pages={orders.data.pagination.totalPages} onChange={setPage} />}</> : <EmptyState title="No orders recorded for this customer" />}</section></div>;
+  const promoteToPartner = async () => {
+    if (!window.confirm('Grant delivery partner access to this existing account?')) return;
+    setError('');
+    setMessage('');
+    try {
+      await api.updateRole(id, 'delivery_partner');
+      navigate(`/admin/delivery-partners/${id}`, { replace: true });
+    } catch (cause) {
+      setError(displayError(cause));
+    }
+  };
+  return <div className="admin-page"><div className="breadcrumbs"><Link to="/admin/customers">Customers</Link><span>/</span>Customer profile</div><PageIntro eyebrow="Customer profile" title={record.name || 'Customer'} description={`${record.phone ?? record.phoneE164} · ${record.orderCount} orders`} /><div className="panel user-actions"><div><span>Account status</span><StatusBadge value={record.status ?? 'active'} /></div><div className="button-row"><button className="button button-outline" onClick={() => void change(() => api.updateUserStatus(id, record.status === 'disabled' ? 'active' : 'disabled'), `${record.status === 'disabled' ? 'Enable' : 'Disable'} account`)}>{record.status === 'disabled' ? 'Enable account' : 'Disable account'}</button><button className="button button-outline" onClick={() => void change(() => api.updateRole(id, 'staff'), 'Grant staff access')}>Grant staff access</button><button className="button button-outline" onClick={() => void promoteToPartner()}>Grant delivery partner access</button><button className="button button-outline" onClick={() => void change(() => api.updateRole(id, 'customer'), 'Set role to customer')}>Set as customer</button></div></div>{error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}<section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">Customer history</span><h2>Orders</h2></div></div>{orders.error && <Notice tone="error">{orders.error}</Notice>}{orders.loading ? <Loading /> : orders.data?.data.length ? <><div className="order-list">{orders.data.data.map((order) => <OrderCard key={order._id} order={order} to={`/admin/orders/${order._id}`} />)}</div>{orders.data.pagination.totalPages > 1 && <Pagination page={page} pages={orders.data.pagination.totalPages} onChange={setPage} />}</> : <EmptyState title="No orders recorded for this customer" />}</section></div>;
 }
 
 const blankSettings: Settings = {

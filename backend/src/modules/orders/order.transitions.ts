@@ -11,6 +11,15 @@ export type FulfilmentStatus =
 
 export type FulfilmentMethod = 'delivery' | 'pickup';
 
+export function canAssignDeliveryPartner(status: FulfilmentStatus, hasAssignment: boolean): boolean {
+  const assignableStatus = status === 'preparing' || status === 'out_for_delivery' || status === 'delivery_failed';
+  return assignableStatus && (!hasAssignment || status === 'delivery_failed');
+}
+
+export function statusAfterDeliveryPartnerAssignment(status: FulfilmentStatus): FulfilmentStatus {
+  return status === 'delivery_failed' ? 'preparing' : status;
+}
+
 export function nextFulfilmentStatus(
   current: FulfilmentStatus,
   method: FulfilmentMethod,

@@ -17,7 +17,7 @@ This guide documents the API implemented in `backend/src/`. It is intended for d
 
 ## Overview
 
-- **Base URL:** `http://localhost:5001` (configured in this workspace's local `.env`; the default is `http://localhost:5000`)
+- **Base URL:** `http://localhost:5000` (the backend's local default)
 - **API prefix:** `/api/v1`
 - **Content type:** JSON (`application/json`) except product image uploads, which use `multipart/form-data`
 - **Runtime:** Node.js 24, TypeScript, Express 5
@@ -61,11 +61,11 @@ For local OTP development, configure `OTP_PROVIDER=development` and a six-digit 
 npm run dev
 ```
 
-The server starts on `PORT` (default `5000`; this workspace's local `.env` sets it to `5001`). Check:
+The server starts on `PORT` (default `5000`). Check:
 
 ```powershell
-Invoke-RestMethod http://localhost:5001/health
-Invoke-RestMethod http://localhost:5001/ready
+Invoke-RestMethod http://localhost:5000/health
+Invoke-RestMethod http://localhost:5000/ready
 ```
 
 `/health` reports process liveness and does not query MongoDB. `/ready` returns `200` only when Mongoose reports a connected database; otherwise it returns `503`.
@@ -228,6 +228,12 @@ This table lists every HTTP endpoint registered by the current backend. The deta
 | `GET` | `/api/v1/admin/orders/:id` | Admin, or staff when staff access is enabled | `200` |
 | `PATCH` | `/api/v1/admin/orders/:id/fulfilment` | Admin, or staff when staff access is enabled | `200` |
 | `PUT` | `/api/v1/admin/orders/:id/delivery-partner` | Admin, or staff when staff access is enabled | `200` |
+| `POST` | `/api/v1/admin/orders/delivery-partner-assignments` | Admin, or staff when staff access is enabled | `200` |
+| `GET` | `/api/v1/admin/delivery-partners` | Admin | `200` |
+| `GET` | `/api/v1/admin/delivery-partners/:userId` | Admin | `200` |
+| `PATCH` | `/api/v1/admin/delivery-partners/:userId/status` | Admin | `200` |
+| `GET` | `/api/v1/delivery-partners/orders` | Delivery partner | `200` |
+| `PATCH` | `/api/v1/delivery-partners/orders/:id/status` | Delivery partner | `200` |
 | `POST` | `/api/v1/admin/orders/:id/notes` | Admin, or staff when staff access is enabled | `200` |
 | `POST` | `/api/v1/admin/orders/:id/payment-review` | Admin | `200` |
 | `POST` | `/api/v1/admin/orders/:id/cancellation-review` | Admin | `200` |
@@ -323,7 +329,7 @@ Invalid, expired, already-consumed, or exhausted OTP challenges return `400 OTP_
 
 - `POST /api/v1/auth/refresh` rotates the refresh cookie and returns a new access token. A missing cookie returns `401 UNAUTHORIZED`; an invalid, expired, revoked, or previously rotated cookie returns `401 REFRESH_TOKEN_INVALID`.
 - `POST /api/v1/auth/logout` revokes the refresh session when a valid cookie is supplied, clears the cookie, and returns `200`. It is safe to call without a cookie.
-- `GET /api/v1/auth/me` returns the caller's safe profile and saved addresses in frontend format (`id`, `label`, `name`, `phone`, address fields).
+- `GET /api/v1/auth/me` returns the caller's safe profile and saved addresses in frontend format (`id`, `label`, `name`, `phone`, address fields); `email` is included when present on the account.
 - `PATCH /api/v1/auth/me` accepts a strict body containing `name` (1–120 characters): `{"name":"Updated name"}`.
 - `PUT /api/v1/auth/me/addresses` replaces the caller's address list (maximum 10) and returns the saved addresses in the same frontend format. Address fields: optional `label`, `name`, `phone` (`+91` Indian mobile), `addressLine1`, optional `addressLine2`, `locality`, `city`, `state`, and six-digit `postalCode`; optional `id` retains an existing address ID. The account page's primary-address form saves one address and preloads it when reopened.
 
@@ -434,7 +440,7 @@ Role update body:
 }
 ```
 
-Only `customer` and `staff` are accepted; this endpoint cannot grant the `admin` role. An admin cannot change their own role (`400 INVALID_REQUEST`).
+`customer`, `staff`, and `delivery_partner` are accepted; this endpoint cannot grant the `admin` role. An admin cannot change their own role (`400 INVALID_REQUEST`). Grant delivery-partner access to an existing active account to reuse its phone-based sign-in; this does not create a new account.
 
 Status update body:
 
@@ -506,7 +512,13 @@ Staff with staff access enabled and admins can use these routes. Payment review 
 | `GET /api/v1/admin/orders` | Staff | `200` | `400 VALIDATION_ERROR`, `401`, `403` |
 | `GET /api/v1/admin/orders/:id` | Staff | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND` |
 | `PATCH /api/v1/admin/orders/:id/fulfilment` | Staff | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND`, `409 INVALID_STATUS_TRANSITION` |
-| `PUT /api/v1/admin/orders/:id/delivery-partner` | Staff | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `409 DELIVERY_PARTNER_NOT_ALLOWED` |
+| `PUT /api/v1/admin/orders/:id/delivery-partner` | Staff | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 DELIVERY_PARTNER_NOT_FOUND`, `409 DELIVERY_PARTNER_NOT_ALLOWED` |
+| `POST /api/v1/admin/orders/delivery-partner-assignments` | Staff | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 DELIVERY_PARTNER_NOT_FOUND`, `409 DELIVERY_PARTNER_NOT_ALLOWED` |
+| `GET /api/v1/admin/delivery-partners` | Admin | `200` | `400 VALIDATION_ERROR`, `401`, `403` |
+| `GET /api/v1/admin/delivery-partners/:userId` | Admin | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND` |
+| `PATCH /api/v1/admin/delivery-partners/:userId/status` | Admin | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND` |
+| `GET /api/v1/delivery-partners/orders` | Delivery partner | `200` | `401`, `403` |
+| `PATCH /api/v1/delivery-partners/orders/:id/status` | Delivery partner | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND`, `409 INVALID_STATUS_TRANSITION` |
 | `POST /api/v1/admin/orders/:id/notes` | Staff | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND` |
 | `POST /api/v1/admin/orders/:id/payment-review` | Admin | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `409 PAYMENT_ALREADY_REVIEWED` |
 | `POST /api/v1/admin/orders/:id/cancellation-review` | Admin | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `409` cancellation-related errors |
@@ -529,7 +541,7 @@ Valid transitions are conditional on fulfilment method:
 
 Invalid transitions return `409 INVALID_STATUS_TRANSITION`. A delivery partner must be assigned before a delivery order can move to `out_for_delivery` (`409 DELIVERY_PARTNER_REQUIRED`). Staff may add an internal note with `{"note":"Contacted customer"}`; internal notes are excluded from customer order reads.
 
-Assign or reassign a delivery partner while a delivery order is `preparing` or `out_for_delivery`:
+Assign an existing delivery-partner account to an unassigned delivery order while it is `preparing` or `out_for_delivery`:
 
 ```http
 PUT /api/v1/admin/orders/<order-id>/delivery-partner
@@ -539,13 +551,31 @@ Content-Type: application/json
 
 ```json
 {
-  "name": "Delivery Partner",
-  "phone": "9876543210",
+  "partnerId": "<delivery-partner-user-id>",
   "internalNotes": "Optional internal note"
 }
 ```
 
-The phone may be ten digits or `+91` plus ten digits; it is stored in normalized `+91` format. Assignment to pickup orders or orders outside the allowed statuses returns `409 DELIVERY_PARTNER_NOT_ALLOWED`.
+The account must have the `delivery_partner` role and be active. An assigned order cannot be assigned again while fulfilment is in progress. Once the delivery partner reports `delivery_failed`, the order can be reassigned; reassignment records the previous assignment in `deliveryPartnerHistory`, resets fulfilment to `preparing`, and adds that transition to `statusHistory`. The order then appears as active for the newly assigned partner and no longer appears in the former partner's active portal list. Legacy/manual assignment bodies containing `name` and `phone` remain supported for existing workflows and records; mobile numbers may be ten digits or `+91` plus ten digits.
+
+For bulk assignment, send one to 100 eligible order IDs and an active partner account:
+
+```http
+POST /api/v1/admin/orders/delivery-partner-assignments
+Authorization: Bearer <access-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "partnerId": "<delivery-partner-user-id>",
+  "orderIds": ["<order-id-a>", "<order-id-b>"]
+}
+```
+
+The bulk request is atomic: all orders must be unassigned delivery orders in `preparing` or `out_for_delivery`, or delivery orders in `delivery_failed`; otherwise the request returns `409 DELIVERY_PARTNER_NOT_ALLOWED` and no assignments are saved. Failed orders reset to `preparing` when reassigned. Account assignment does not create a partner account. Existing legacy assignments remain readable; when replaced after a failed attempt, their available snapshot details are appended to assignment history.
+
+The admin partner directory returns account identity, optional email, account status, and count of currently active assigned orders. Partner details include that account's assigned orders. The partner portal lists only active orders whose persisted `deliveryPartner.userId` matches the authenticated account; completed, cancelled, and failed attempts are removed from the active list. It excludes staff-only fields and permits status changes only along the assigned-order delivery transitions (`preparing`/`ready_for_pickup` → `out_for_delivery` → `delivered` or `delivery_failed`).
 
 Payment review body:
 
@@ -720,7 +750,7 @@ Routes that query or update MongoDB can also return `503 DATABASE_UNAVAILABLE` w
 
 ## Postman
 
-Import the requests in `backend/postman/eSakhi Backend API/` or use the category-wise eSakhi collection available in the connected Postman workspace. Set `baseUrl` to the backend origin (for example `http://localhost:5001` for this workspace), not the `/api/v1` prefix. Keep the cookie jar enabled for OTP refresh/logout. Set `accessToken` after verifying an OTP before calling protected routes.
+Import the requests in `backend/postman/eSakhi Backend API/` or use the category-wise eSakhi collection available in the connected Postman workspace. Set `baseUrl` to the backend origin (for example `http://localhost:5000`), not the `/api/v1` prefix. Keep the cookie jar enabled for OTP refresh/logout. Set `accessToken` after verifying an OTP before calling protected routes.
 
 The category-wise collection includes response tests for each request's documented status-code set and the standard success/error JSON envelope. Those checks do not replace integration testing of database mutations. Use placeholder values in shared collections. Do not save real OTPs, access tokens, customer data, or database credentials in collection variables or committed environment files.
 
