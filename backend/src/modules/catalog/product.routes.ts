@@ -3,6 +3,7 @@ import { requireAuth } from '../../middleware/requireAuth.js';
 import { requireRole } from '../../middleware/requireRole.js';
 import {
   archiveProduct,
+  listBestSellingProducts,
   categoriesController,
   createProduct,
   getProductBySlug,
@@ -17,6 +18,7 @@ export const adminProductRoutes = Router();
 
 productRoutes.get('/', listProducts);
 productRoutes.get('/categories', categoriesController);
+productRoutes.get('/bestsellers', listBestSellingProducts);
 productRoutes.get('/:slug', getProductBySlug);
 
 adminProductRoutes.use(requireAuth, requireRole('admin', 'staff'));

@@ -388,11 +388,80 @@ function ProductGrid({ products, loading, error, reload }: { products: Product[]
   return <div className="product-grid">{products.map((product) => <ProductCard key={getId(product) || product.slug} product={product} />)}</div>;
 }
 
+function HeroCarousel({ products }: { products: Product[] }): ReactNode {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const activeProduct = products[activeIndex];
+  const image = activeProduct?.imageUrls?.[0];
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [products]);
+
+  useEffect(() => {
+    if (products.length < 2 || paused || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
+    const timer = window.setInterval(() => {
+      setActiveIndex((index) => (index + 1) % products.length);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [paused, products.length]);
+
+  const showProduct = (index: number) => setActiveIndex((index + products.length) % products.length);
+
+  return (
+    <div
+      className="hero-carousel"
+      aria-label="Customer favourite products"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocus={() => setPaused(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPaused(false);
+      }}
+    >
+      <Link
+        to={activeProduct ? `/products/${encodeURIComponent(activeProduct.slug)}` : '/shop'}
+        className="hero-photo"
+        aria-label={activeProduct ? `View ${activeProduct.name}` : 'Browse handmade products'}
+      >
+        {image
+          ? <img src={resolveProductImageUrl(image)} alt={activeProduct.name} />
+          : <img src="/images/esakhi-emblem.png" alt="eSakhi emblem representing women creating together" />}
+      </Link>
+      {products.length > 1 && (
+        <div className="hero-carousel-controls" aria-label="Featured product slides">
+          <button className="hero-carousel-arrow" onClick={() => showProduct(activeIndex - 1)} aria-label="Previous product">‹</button>
+          <div className="hero-carousel-dots">
+            {products.map((product, index) => (
+              <button
+                key={getId(product) || product.slug}
+                className={`hero-carousel-dot${index === activeIndex ? ' active' : ''}`}
+                onClick={() => showProduct(index)}
+                aria-label={`Show ${product.name}`}
+                aria-current={index === activeIndex ? 'true' : undefined}
+              />
+            ))}
+          </div>
+          <button className="hero-carousel-arrow" onClick={() => showProduct(activeIndex + 1)} aria-label="Next product">›</button>
+        </div>
+      )}
+      <div className="hero-stamp"><img src="/images/esakhi-emblem.png" alt="" /><span>Made<br />together</span></div>
+      <div className="hero-note">
+        <span className="note-flower" aria-hidden="true">✿</span>
+        <span>
+          {activeProduct
+            ? <><span className="hero-product-category">Customer favourite · {activeProduct.category}</span><strong>{activeProduct.name}</strong><span>{formatMoney(activeProduct.pricePaise)}</span></>
+            : <>Thoughtful craft.<br />A community of makers.</>}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function HomePage(): ReactNode {
-  const products = useLoad(() => api.products(new URLSearchParams({ page: '1', limit: '4' })));
+  const products = useLoad(() => api.bestSellingProducts(8));
   const service = useLoad(() => api.serviceArea());
   const categories = useLoad(() => api.categories());
-  const heroProduct = products.data?.data.find((product) => product.imageUrls?.[0]);
   return (
     <>
       <section className="hero">
@@ -405,11 +474,7 @@ function HomePage(): ReactNode {
         </div>
         <div className="hero-art">
           <div className="hero-orbit orbit-one" /><div className="hero-orbit orbit-two" />
-          <div className="hero-photo">
-            {heroProduct?.imageUrls[0] ? <img src={resolveProductImageUrl(heroProduct.imageUrls[0])} alt={`Handmade ${heroProduct.category.toLowerCase()} from the eSakhi catalogue`} /> : <img src="/images/esakhi-emblem.png" alt="eSakhi emblem representing women creating together" />}
-          </div>
-          <div className="hero-stamp"><img src="/images/esakhi-emblem.png" alt="" /><span>Made<br />together</span></div>
-          <div className="hero-note"><span className="note-flower">✿</span><span>Thoughtful craft.<br />A community of makers.</span></div>
+          <HeroCarousel products={products.data ?? []} />
         </div>
       </section>
       <section className="section section-categories">
@@ -423,7 +488,7 @@ function HomePage(): ReactNode {
       </section>
       <section className="section section-products">
         <div className="section-heading"><div><span className="eyebrow">Selected with care</span><h2>Pieces with a <em>purpose.</em></h2></div><Link to="/shop" className="quiet-link">Shop all pieces →</Link></div>
-        <ProductGrid products={products.data?.data ?? []} loading={products.loading} error={products.error} reload={products.reload} />
+        <ProductGrid products={(products.data ?? []).slice(0, 4)} loading={products.loading} error={products.error} reload={products.reload} />
       </section>
       <section className="story-band">
         <div className="story-band-mark"><img src="/images/esakhi-emblem.png" alt="" /></div>

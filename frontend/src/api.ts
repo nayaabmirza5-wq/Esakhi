@@ -90,6 +90,7 @@ export const api = {
   categories: () => request<string[]>('/api/v1/categories'),
   categoryAlias: () => request<string[]>('/api/v1/products/categories'),
   products: (query: URLSearchParams = new URLSearchParams()) => request<PageResult<Product>>(`/api/v1/products${query.size ? `?${query}` : ''}`),
+  bestSellingProducts: (limit = 5) => request<Product[]>(`/api/v1/products/bestsellers?limit=${limit}`),
   product: (slug: string) => request<Product>(`/api/v1/products/${encodeURIComponent(slug)}`),
   serviceArea: () => request<ServiceArea>('/api/v1/service-area'),
   createOrder: (payload: Record<string, unknown>) => request<{ order: Order; paymentInstructions: Record<string, unknown> }>('/api/v1/orders', { method: 'POST', body: JSON.stringify(payload) }),

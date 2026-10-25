@@ -119,14 +119,23 @@ h1 em, h2 em { color: var(--rose); font-weight: 500; }
 .hero-caption { margin-top: 65px; display: flex; align-items: center; gap: 12px; color: var(--text-muted); font-size: .77rem; letter-spacing: .04em; }
 .caption-rule { width: 42px; height: 1px; background: var(--marigold); }
 .hero-art { min-height: 430px; position: relative; display: grid; place-items: center; }
-.hero-photo { position: relative; z-index: 1; width: min(78%, 410px); height: 420px; overflow: hidden; border-radius: 48% 48% 22px 22px; background: var(--rose-soft); box-shadow: 0 32px 75px rgba(101, 41, 63, .19), inset 0 0 0 10px color-mix(in srgb, #fff 26%, transparent); transform: rotate(2deg); }
+.hero-carousel { position: relative; z-index: 1; width: min(78%, 410px); height: 420px; }
+.hero-photo { position: relative; z-index: 1; display: block; width: 100%; height: 100%; overflow: hidden; border-radius: 48% 48% 22px 22px; background: var(--rose-soft); box-shadow: 0 32px 75px rgba(101, 41, 63, .19), inset 0 0 0 10px color-mix(in srgb, #fff 26%, transparent); transform: rotate(2deg); }
 .hero-photo img { width: 100%; height: 100%; object-fit: cover; padding: 4px; border-radius: inherit; }
 .hero-photo img[src$='esakhi-emblem.png'] { object-fit: contain; padding: 48px; background: var(--surface); }
+.hero-carousel-controls { position: absolute; z-index: 4; right: 10px; bottom: 14px; left: 10px; display: flex; align-items: center; justify-content: space-between; }
+.hero-carousel-arrow { width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--rose-deep); font-size: 1.4rem; line-height: 1; cursor: pointer; box-shadow: var(--shadow); }
+.hero-carousel-dots { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border-radius: 20px; background: color-mix(in srgb, var(--surface) 88%, transparent); }
+.hero-carousel-dot { width: 8px; height: 8px; padding: 0; border: 0; border-radius: 50%; background: var(--text-muted); opacity: .55; cursor: pointer; }
+.hero-carousel-dot.active { width: 20px; border-radius: 8px; background: var(--rose); opacity: 1; }
 .hero-orbit { position: absolute; width: 82%; height: 80%; border: 1px solid color-mix(in srgb, var(--rose) 30%, transparent); border-radius: 50%; transform: rotate(-28deg); }
 .orbit-two { width: 91%; height: 66%; transform: rotate(30deg); border-color: color-mix(in srgb, var(--marigold) 60%, transparent); }
 .hero-stamp { position: absolute; z-index: 3; top: 45px; right: 0; width: 130px; height: 130px; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); box-shadow: var(--shadow); display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--rose); font-family: 'Playfair Display', Georgia, serif; font-size: .9rem; text-align: center; transform: rotate(9deg); }
 .hero-stamp img { width: 49px; height: 52px; object-fit: contain; }
-.hero-note { position: absolute; z-index: 3; left: 0; bottom: 26px; display: flex; align-items: center; gap: 12px; max-width: 230px; padding: 14px 18px; border-radius: 15px; background: var(--surface); box-shadow: var(--shadow); color: var(--text-muted); font-size: .76rem; line-height: 1.6; }
+.hero-note { position: absolute; z-index: 5; left: -28px; bottom: 26px; display: flex; align-items: center; gap: 12px; max-width: 260px; padding: 14px 18px; border-radius: 15px; background: var(--surface); box-shadow: var(--shadow); color: var(--text-muted); font-size: .76rem; line-height: 1.6; }
+.hero-note > span:last-child { display: grid; }
+.hero-note strong { max-width: 195px; overflow: hidden; color: var(--text); font-size: .88rem; text-overflow: ellipsis; white-space: nowrap; }
+.hero-product-category { color: var(--rose); font-size: .61rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .note-flower { color: var(--marigold); font-size: 1.7rem; }
 
 .section { max-width: 1240px; margin: auto; padding: 82px 34px; }
@@ -412,7 +421,7 @@ td a { color: var(--rose); font-weight: 600; }
 
 @media (max-width: 1000px) {
   .hero { min-height: 540px; padding-inline: 48px; }
-  .hero-photo { width: 82%; height: 360px; }
+  .hero-carousel { width: 82%; height: 360px; }
   .hero-art { min-height: 400px; }
   .product-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .product-image { height: 230px; }
@@ -438,10 +447,10 @@ td a { color: var(--rose); font-weight: 600; }
   .hero h1 { font-size: clamp(3.2rem, 15vw, 5rem); }
   .hero-caption { margin-top: 34px; }
   .hero-art { min-height: 340px; }
-  .hero-photo { width: min(73%, 330px); height: 320px; }
+  .hero-carousel { width: min(73%, 330px); height: 320px; }
   .hero-stamp { top: 18px; right: 2%; width: 100px; height: 100px; font-size: .75rem; }
   .hero-stamp img { width: 39px; height: 39px; }
-  .hero-note { left: 0; bottom: 9px; padding: 10px 12px; }
+  .hero-note { left: 0; bottom: 9px; max-width: 235px; padding: 10px 12px; }
   .section { padding: 60px 20px; }
   .section-heading { align-items: start; flex-direction: column; }
   .category-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
