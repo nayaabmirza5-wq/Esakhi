@@ -61,5 +61,9 @@ export const productListQuerySchema = z.object({
   q: z.string().trim().max(100).optional(),
 }).strict();
 
+export const bestSellerQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(12).default(5),
+}).strict();
+
 export const slugParamsSchema = z.object({ slug: z.string().min(1).max(180) });
 export const idParamsSchema = z.object({ id: z.string().regex(/^[a-f\d]{24}$/i) });

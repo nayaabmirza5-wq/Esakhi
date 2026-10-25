@@ -6,7 +6,8 @@ import { sendData, sendPage } from '../../utils/apiResponse.js';
 import { AppError } from '../../utils/AppError.js';
 import { authenticatedUserId } from '../../utils/authenticatedUser.js';
 import { Product } from './product.model.js';
-import { idParamsSchema, productCreateSchema, productListQuerySchema, productUpdateSchema, slugParamsSchema } from './product.schemas.js';
+import { Order } from '../orders/order.model.js';
+import { bestSellerQuerySchema, idParamsSchema, productCreateSchema, productListQuerySchema, productUpdateSchema, slugParamsSchema } from './product.schemas.js';
 
 export const listProducts: RequestHandler = async (req, res) => {
   const query = productListQuerySchema.parse(req.query);
@@ -26,6 +27,53 @@ export const listProducts: RequestHandler = async (req, res) => {
     Product.countDocuments(filter),
   ]);
   sendPage(res, products, query.page, query.limit, total);
+};
+
+export const listBestSellingProducts: RequestHandler = async (req, res) => {
+  const { limit } = bestSellerQuerySchema.parse(req.query);
+  const bestSellers = await Order.aggregate([
+    { $match: { paymentStatus: 'confirmed', fulfilmentStatus: { $ne: 'cancelled' } } },
+    { $unwind: '$items' },
+    { $group: { _id: '$items.productId', unitsPurchased: { $sum: '$items.quantity' } } },
+    { $sort: { unitsPurchased: -1, _id: 1 } },
+    {
+      $lookup: {
+        from: Product.collection.name,
+        localField: '_id',
+        foreignField: '_id',
+        as: 'product',
+      },
+    },
+    { $unwind: '$product' },
+    { $match: { 'product.isActive': true, 'product.isArchived': false } },
+    {
+      $project: {
+        _id: '$product._id',
+        name: '$product.name',
+        slug: '$product.slug',
+        description: '$product.description',
+        category: '$product.category',
+        pricePaise: '$product.pricePaise',
+        imageUrls: '$product.imageUrls',
+        variants: '$product.variants',
+        stock: '$product.stock',
+      },
+    },
+    { $limit: limit },
+  ]);
+  const remaining = limit - bestSellers.length;
+  const recentProducts = remaining > 0
+    ? await Product.find({
+      isActive: true,
+      isArchived: false,
+      ...(bestSellers.length ? { _id: { $nin: bestSellers.map((product) => product._id) } } : {}),
+    })
+      .select('name slug description category pricePaise imageUrls variants stock')
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(remaining)
+      .lean()
+    : [];
+  sendData(res, [...bestSellers, ...recentProducts]);
 };
 
 export const getProductBySlug: RequestHandler = async (req, res) => {

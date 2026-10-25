@@ -205,6 +205,7 @@ This table lists every HTTP endpoint registered by the current backend. The deta
 | `GET` | `/api/v1/categories` | Public | `200` |
 | `GET` | `/api/v1/products/categories` | Public; alias of `/api/v1/categories` | `200` |
 | `GET` | `/api/v1/products` | Public | `200` |
+| `GET` | `/api/v1/products/bestsellers` | Public | `200` |
 | `GET` | `/api/v1/products/:slug` | Public | `200` |
 | `GET` | `/api/v1/service-area` | Public | `200` |
 | `POST` | `/api/v1/orders` | Authenticated customer | `201` new order; `200` idempotent replay |
@@ -340,6 +341,7 @@ Invalid, expired, already-consumed, or exhausted OTP challenges return `400 OTP_
 | `GET /api/v1/categories` | Public | `200` | — |
 | `GET /api/v1/products/categories` | Public | `200` | — |
 | `GET /api/v1/products` | Public | `200` | `400 VALIDATION_ERROR` |
+| `GET /api/v1/products/bestsellers` | Public | `200` | `400 VALIDATION_ERROR` |
 | `GET /api/v1/products/:slug` | Public | `200` | `400 VALIDATION_ERROR`, `404 NOT_FOUND` |
 | `GET /api/v1/service-area` | Public | `200` | — |
 
@@ -355,6 +357,8 @@ Product list query parameters:
 | `q` | String, up to 100 characters | Optional text search |
 
 The public catalogue returns only active, non-archived products. Price fields use integer paise. `GET /api/v1/service-area` returns `configured: false` when neither pickup nor delivery is enabled. When delivery is enabled, it returns the configured localities and six-digit postal codes. Checkout validates the locality and postal code against this configuration; it does not perform a municipal-boundary or geospatial address check.
+
+`GET /api/v1/products/bestsellers` returns up to five products by default (set `limit` from 1 to 12). Ranking uses total units in orders with confirmed payment, excluding cancelled orders. When there are fewer ranked products than requested, the response is filled with the newest active, non-archived catalogue products.
 
 ### Customer orders
 

@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import { requestOtpSchema, savedAddressSchema } from '../src/modules/auth/auth.schemas.js';
-import { productCreateSchema } from '../src/modules/catalog/product.schemas.js';
+import { bestSellerQuerySchema, productCreateSchema } from '../src/modules/catalog/product.schemas.js';
 import {
   createOrderSchema,
   bulkDeliveryPartnerSchema,
@@ -169,6 +169,13 @@ describe('backend API foundation', () => {
       variants: [{ attributes: { size: 'Small' }, stock: 2 }],
     });
     expect(parsed.success).toBe(false);
+  });
+
+  it('limits public bestseller requests to a bounded number of products', () => {
+    expect(bestSellerQuerySchema.parse({})).toEqual({ limit: 5 });
+    expect(bestSellerQuerySchema.parse({ limit: '12' })).toEqual({ limit: 12 });
+    expect(bestSellerQuerySchema.safeParse({ limit: '13' }).success).toBe(false);
+    expect(bestSellerQuerySchema.safeParse({ page: '2' }).success).toBe(false);
   });
 
   it('enforces separate delivery and pickup status transitions', () => {
