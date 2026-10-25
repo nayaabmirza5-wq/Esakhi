@@ -1,7 +1,7 @@
 $kind: collection
 description: Local development collection. Configure a local OTP provider and obtain an access token using the OTP requests.
 variables:
-  baseUrl: http://localhost:5001
+  baseUrl: http://localhost:5000
 auth:
   - id: f8ff8d86-856f-4374-bf4a-c162a9eef11d
     type: bearer

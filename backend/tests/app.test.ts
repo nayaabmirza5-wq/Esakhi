@@ -5,12 +5,17 @@ import { requestOtpSchema, savedAddressSchema } from '../src/modules/auth/auth.s
 import { productCreateSchema } from '../src/modules/catalog/product.schemas.js';
 import {
   createOrderSchema,
+  bulkDeliveryPartnerSchema,
   deliveryPartnerSchema,
   fulfilmentUpdateSchema,
   orderListQuerySchema,
   orderPaginationQuerySchema,
 } from '../src/modules/orders/order.schemas.js';
-import { nextFulfilmentStatus } from '../src/modules/orders/order.transitions.js';
+import {
+  canAssignDeliveryPartner,
+  nextFulfilmentStatus,
+  statusAfterDeliveryPartnerAssignment,
+} from '../src/modules/orders/order.transitions.js';
 import { pushTokenSchema } from '../src/modules/notifications/notification.schemas.js';
 import { settingsUpdateSchema } from '../src/modules/settings/settings.schemas.js';
 
@@ -38,6 +43,7 @@ const protectedRoutes = [
   ['POST', '/api/v1/admin/orders/64a1b2c3d4e5f6a7b8c9d0e1/notes'],
   ['POST', '/api/v1/admin/orders/64a1b2c3d4e5f6a7b8c9d0e1/payment-review'],
   ['POST', '/api/v1/admin/orders/64a1b2c3d4e5f6a7b8c9d0e1/cancellation-review'],
+  ['POST', '/api/v1/admin/orders/delivery-partner-assignments'],
   ['GET', '/api/v1/admin/notifications'],
   ['POST', '/api/v1/admin/notifications/64a1b2c3d4e5f6a7b8c9d0e1/retry'],
   ['GET', '/api/v1/admin/settings'],
@@ -47,14 +53,19 @@ const protectedRoutes = [
   ['GET', '/api/v1/admin/customers'],
   ['GET', '/api/v1/admin/customers/64a1b2c3d4e5f6a7b8c9d0e1'],
   ['GET', '/api/v1/admin/customers/64a1b2c3d4e5f6a7b8c9d0e1/orders'],
+  ['GET', '/api/v1/admin/delivery-partners'],
+  ['GET', '/api/v1/admin/delivery-partners/64a1b2c3d4e5f6a7b8c9d0e1'],
+  ['PATCH', '/api/v1/admin/delivery-partners/64a1b2c3d4e5f6a7b8c9d0e1/status'],
   ['PATCH', '/api/v1/admin/users/64a1b2c3d4e5f6a7b8c9d0e1/role'],
   ['PATCH', '/api/v1/admin/users/64a1b2c3d4e5f6a7b8c9d0e1/status'],
+  ['GET', '/api/v1/delivery-partners/orders'],
+  ['PATCH', '/api/v1/delivery-partners/orders/64a1b2c3d4e5f6a7b8c9d0e1/status'],
 ] as const;
 
 beforeAll(async () => {
   process.env.NODE_ENV = 'test';
   process.env.MONGODB_URI = 'mongodb://127.0.0.1:27017/esakhi-test?replicaSet=rs0';
-  process.env.CLIENT_ORIGINS = 'http://localhost:5173';
+  process.env.CLIENT_ORIGINS = 'http://localhost:5173/,http://localhost:5174/';
   process.env.JWT_ACCESS_SECRET = 'a'.repeat(128);
   process.env.JWT_REFRESH_SECRET = 'b'.repeat(128);
   process.env.OTP_PROVIDER = 'development';
@@ -169,10 +180,34 @@ describe('backend API foundation', () => {
     expect(nextFulfilmentStatus('cancelled', 'delivery')).toBeNull();
   });
 
+  it('allows delivery partner assignment only once until a delivery attempt fails', () => {
+    expect(canAssignDeliveryPartner('preparing', false)).toBe(true);
+    expect(canAssignDeliveryPartner('preparing', true)).toBe(false);
+    expect(canAssignDeliveryPartner('out_for_delivery', true)).toBe(false);
+    expect(canAssignDeliveryPartner('delivery_failed', true)).toBe(true);
+    expect(canAssignDeliveryPartner('delivered', false)).toBe(false);
+  });
+
+  it('resets a failed delivery to preparing when a new partner is assigned', () => {
+    expect(statusAfterDeliveryPartnerAssignment('delivery_failed')).toBe('preparing');
+    expect(statusAfterDeliveryPartnerAssignment('preparing')).toBe('preparing');
+    expect(statusAfterDeliveryPartnerAssignment('out_for_delivery')).toBe('out_for_delivery');
+  });
+
   it('validates delivery partner details and the delivered status', () => {
     expect(deliveryPartnerSchema.safeParse({ name: 'Delivery Partner', phone: '9876543210' }).success).toBe(true);
+    expect(deliveryPartnerSchema.safeParse({ partnerId: '64a1b2c3d4e5f6a7b8c9d0e1' }).success).toBe(true);
     expect(deliveryPartnerSchema.safeParse({ name: 'Partner', phone: '12345' }).success).toBe(false);
     expect(fulfilmentUpdateSchema.safeParse({ status: 'delivered' }).success).toBe(true);
+  });
+
+  it('validates unique, bounded bulk delivery assignments', () => {
+    const request = {
+      partnerId: '64a1b2c3d4e5f6a7b8c9d0e1',
+      orderIds: ['64a1b2c3d4e5f6a7b8c9d0e2', '64a1b2c3d4e5f6a7b8c9d0e3'],
+    };
+    expect(bulkDeliveryPartnerSchema.safeParse(request).success).toBe(true);
+    expect(bulkDeliveryPartnerSchema.safeParse({ ...request, orderIds: [request.orderIds[0], request.orderIds[0]] }).success).toBe(false);
   });
 
   it('validates push tokens', () => {
@@ -198,6 +233,28 @@ describe('backend API foundation', () => {
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ success: true, data: { status: 'ok' } });
+  });
+
+  it('allows configured browser origins and credentialed preflight requests', async () => {
+    const response = await request(app)
+      .options('/api/v1/auth/otp/request')
+      .set('Origin', 'http://localhost:5173')
+      .set('Access-Control-Request-Method', 'POST')
+      .set('Access-Control-Request-Headers', 'content-type');
+
+    expect(response.status).toBe(204);
+    expect(response.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+    expect(response.headers['access-control-allow-credentials']).toBe('true');
+    expect(response.headers['access-control-allow-methods']).toContain('POST');
+  });
+
+  it('rejects browser origins that are not configured', async () => {
+    const response = await request(app)
+      .get('/health')
+      .set('Origin', 'https://unconfigured.example');
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe('CORS_ORIGIN_DENIED');
   });
 
   it('serves the fixed product categories', async () => {

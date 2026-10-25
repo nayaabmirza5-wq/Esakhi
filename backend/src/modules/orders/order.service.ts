@@ -145,6 +145,7 @@ export async function createOrder(actorId: string, input: Checkout): Promise<{ o
         customerId: actorId,
         customerName: input.customerName,
         customerPhoneE164: input.customerPhone,
+        ...(input.deliveryInstructions ? { deliveryInstructions: input.deliveryInstructions } : {}),
         ...(input.fulfilmentMethod === 'delivery' && input.address ? {
           address: {
             name: input.address.name,

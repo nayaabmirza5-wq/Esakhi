@@ -67,14 +67,14 @@ export const getCustomer: RequestHandler = async (req, res) => {
 
 export const updateCustomerRole: RequestHandler = async (req, res) => {
   const { userId } = z.object({ userId: z.string().regex(/^[a-f\d]{24}$/i) }).parse(req.params);
-  const { role } = z.object({ role: z.enum(['customer', 'staff']) }).strict().parse(req.body);
+  const { role } = z.object({ role: z.enum(['customer', 'staff', 'delivery_partner']) }).strict().parse(req.body);
   const actorId = authenticatedUserId(req);
   if (userId === actorId) throw new AppError(400, 'INVALID_REQUEST', 'You cannot change your own role.');
   const session = await mongoose.startSession();
   let user;
   try {
     user = await session.withTransaction(async () => {
-      const updated = await User.findByIdAndUpdate(userId, { $set: { role } }, { new: true, session })
+      const updated = await User.findOneAndUpdate({ _id: userId, role: { $in: ['customer', 'staff', 'delivery_partner'] } }, { $set: { role } }, { new: true, session })
         .select('phoneE164 name role status');
       if (!updated) throw new AppError(404, 'NOT_FOUND', 'Customer not found.');
       await AuditLog.create([{
@@ -127,16 +127,34 @@ export const updateCustomerStatus: RequestHandler = async (req, res) => {
 export const listDeliveryPartners: RequestHandler = async (req, res) => {
   const { page, limit } = pageSchema.parse(req.query);
   const [partners, total] = await Promise.all([
-    User.find({ role: 'delivery_partner' }).select('phoneE164 name role status createdAt').sort({ createdAt: -1 })
+    User.find({ role: 'delivery_partner' }).select('phoneE164 name email role status createdAt').sort({ createdAt: -1 })
       .skip((page - 1) * limit).limit(limit).lean(),
     User.countDocuments({ role: 'delivery_partner' }),
   ]);
-  const workload = await Promise.all(partners.map(async (partner) => {
-    const assignedCount = await Order.countDocuments({ 'deliveryPartner.userId': partner._id });
-    const inProgressCount = await Order.countDocuments({ 'deliveryPartner.userId': partner._id, fulfilmentStatus: { $in: ['preparing', 'out_for_delivery'] } });
-    return { ...partner, assignedCount, inProgressCount };
+  const workloads = await Order.aggregate([
+    { $match: { fulfilmentMethod: 'delivery', fulfilmentStatus: { $nin: ['delivered', 'completed', 'cancelled'] } } },
+    { $group: { _id: '$deliveryPartner.userId', assignedCount: { $sum: 1 } } },
+  ]);
+  const workloadByPartner = new Map(workloads.map((workload) => [String(workload._id), workload.assignedCount]));
+  const workload = partners.map((partner) => ({
+    ...partner,
+    assignedCount: workloadByPartner.get(String(partner._id)) ?? 0,
   }));
   sendPage(res, workload, page, limit, total);
+};
+
+export const getDeliveryPartner: RequestHandler = async (req, res) => {
+  const { userId } = z.object({ userId: z.string().regex(/^[a-f\d]{24}$/i) }).parse(req.params);
+  const { page, limit } = pageSchema.parse(req.query);
+  const partner = await User.findOne({ _id: userId, role: 'delivery_partner' })
+    .select('phoneE164 name email role status createdAt').lean();
+  if (!partner) throw new AppError(404, 'NOT_FOUND', 'Delivery partner not found.');
+  const filter = { 'deliveryPartner.userId': partner._id };
+  const [orders, total] = await Promise.all([
+    Order.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    Order.countDocuments(filter),
+  ]);
+  sendData(res, { partner, orders: { data: orders, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } } });
 };
 
 export const updateDeliveryPartnerStatus: RequestHandler = async (req, res) => {

@@ -99,7 +99,7 @@ api.get('/', (_req, res) => {
     success: true,
     data: {
       message: 'eSakhi API v1',
-      endpoints: ['/auth', '/products', '/categories', '/service-area', '/orders', '/admin'],
+      endpoints: ['/auth', '/products', '/categories', '/service-area', '/orders', '/delivery-partners', '/admin'],
       health: '/health',
     },
   });

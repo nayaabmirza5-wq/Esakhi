@@ -21,6 +21,7 @@ export const createOrderSchema = z.object({
   customerPhone: z.string().trim().regex(/^\+91[6-9]\d{9}$/),
   fulfilmentMethod: z.enum(['delivery', 'pickup']),
   address: addressSchema.optional(),
+  deliveryInstructions: z.string().trim().max(500).optional(),
   items: z.array(orderItemSchema).min(1).max(30),
   paymentMethod: z.enum(['upi', 'cash']),
 }).strict().superRefine((order, context) => {
@@ -29,6 +30,9 @@ export const createOrderSchema = z.object({
   }
   if (order.address && order.address.phone !== order.customerPhone) {
     context.addIssue({ code: 'custom', path: ['address', 'phone'], message: 'The delivery phone must match the order contact.' });
+  }
+  if (order.deliveryInstructions && order.fulfilmentMethod !== 'delivery') {
+    context.addIssue({ code: 'custom', path: ['deliveryInstructions'], message: 'Delivery instructions are only available for delivery orders.' });
   }
   const uniqueLines = new Set(order.items.map((item) => `${item.productId}:${item.variantId ?? 'base'}`));
   if (uniqueLines.size !== order.items.length) {
@@ -52,10 +56,23 @@ export const fulfilmentUpdateSchema = z.object({
 }).strict();
 export const deliveryPartnerSchema = z.object({
   partnerId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
-  name: z.string().trim().min(1).max(120),
-  phone: z.string().trim().regex(/^(\+91)?[6-9]\d{9}$/),
+  name: z.string().trim().min(1).max(120).optional(),
+  phone: z.string().trim().regex(/^(\+91)?[6-9]\d{9}$/).optional(),
   internalNotes: z.string().trim().max(500).optional(),
-}).strict();
+}).strict().superRefine((input, context) => {
+  if (!input.partnerId && (!input.name || !input.phone)) {
+    context.addIssue({ code: 'custom', path: ['partnerId'], message: 'Select a delivery partner or provide a name and phone number.' });
+  }
+});
+export const bulkDeliveryPartnerSchema = z.object({
+  partnerId: z.string().regex(/^[a-f\d]{24}$/i),
+  orderIds: z.array(z.string().regex(/^[a-f\d]{24}$/i)).min(1).max(100),
+  internalNotes: z.string().trim().max(500).optional(),
+}).strict().superRefine((input, context) => {
+  if (new Set(input.orderIds).size !== input.orderIds.length) {
+    context.addIssue({ code: 'custom', path: ['orderIds'], message: 'Each order can be included only once.' });
+  }
+});
 export const internalNoteSchema = z.object({
   note: z.string().trim().min(1).max(1000),
 }).strict();

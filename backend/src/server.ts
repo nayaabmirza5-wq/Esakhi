@@ -48,6 +48,7 @@ process.once('SIGTERM', () => void shutdown('SIGTERM'));
 start().catch(async (error: unknown) => {
   logger.error('Backend startup failed', {
     name: error instanceof Error ? error.name : 'Unknown startup error',
+    message: error instanceof Error ? error.message : 'Unknown startup error',
   });
   await disconnectDatabase();
   process.exitCode = 1;

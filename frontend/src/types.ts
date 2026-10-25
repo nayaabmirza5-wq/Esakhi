@@ -1,11 +1,13 @@
-export type Role = 'customer' | 'staff' | 'admin';
+export type Role = 'customer' | 'staff' | 'admin' | 'delivery_partner';
 
 export interface User {
   id: string;
+  _id?: string;
   createdAt?: string;
   phone?: string;
   phoneE164?: string;
   name?: string;
+  email?: string;
   role: Role;
   status?: 'active' | 'disabled';
   savedAddresses?: Address[];
@@ -87,11 +89,19 @@ export interface Order {
     note?: string;
   }>;
   deliveryPartner?: {
+    userId?: string;
     name: string;
     phoneE164: string;
     assignedAt: string;
     internalNotes?: string;
   };
+  deliveryPartnerHistory?: Array<{
+    userId?: string;
+    name: string;
+    phoneE164: string;
+    assignedAt: string;
+    unassignedAt: string;
+  }>;
   cancellationRequest?: {
     requestedAt?: string;
     customerNote?: string;
@@ -105,6 +115,13 @@ export interface Order {
   }>;
   internalNotes?: string[];
   createdAt?: string;
+}
+
+export interface DeliveryPartner extends Omit<User, 'id'> {
+  id?: string;
+  _id: string;
+  role: 'delivery_partner';
+  assignedCount: number;
 }
 
 export interface Locality {

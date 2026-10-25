@@ -26,22 +26,32 @@ if (!parsed.success) {
 }
 
 const config = parsed.data;
-const corsOrigins = config.CLIENT_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean);
+const configuredCorsOrigins = config.CLIENT_ORIGINS
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
-if (corsOrigins.length === 0 || corsOrigins.some((origin) => origin === '*')) {
+if (configuredCorsOrigins.length === 0 || configuredCorsOrigins.some((origin) => origin === '*')) {
   throw new Error('CLIENT_ORIGINS must contain one or more explicit origins.');
 }
-for (const origin of corsOrigins) {
+
+const corsOrigins = configuredCorsOrigins.map((origin) => {
   let parsedOrigin: URL;
   try {
     parsedOrigin = new URL(origin);
   } catch {
     throw new Error('CLIENT_ORIGINS must contain valid absolute origins.');
   }
-  if (parsedOrigin.origin !== origin || (config.NODE_ENV === 'production' && parsedOrigin.protocol !== 'https:')) {
-    throw new Error('CLIENT_ORIGINS must be exact origins; production origins must use HTTPS.');
+
+  if (parsedOrigin.origin !== origin && `${parsedOrigin.origin}/` !== origin) {
+    throw new Error('CLIENT_ORIGINS must be exact origins without a path.');
   }
-}
+  if (config.NODE_ENV === 'production' && parsedOrigin.protocol !== 'https:') {
+    throw new Error('CLIENT_ORIGINS must use HTTPS in production.');
+  }
+
+  return parsedOrigin.origin;
+});
 
 if (config.JWT_ACCESS_SECRET === config.JWT_REFRESH_SECRET) {
   throw new Error('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different.');

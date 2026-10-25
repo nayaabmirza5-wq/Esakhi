@@ -10,6 +10,8 @@ Backend-only implementation for the eSakhi handmade-products marketplace. It use
 
 ## Local setup
 
+From the repository root, run `npm run dev` to start both the backend and frontend together. The command stops both services if either one fails and shuts them down when you press Ctrl+C. For first-time setup, install dependencies with `npm --prefix backend ci` and `npm --prefix frontend ci`, then configure `backend/.env` as described below.
+
 1. From `backend/`, run `npm ci`.
 2. Copy `.env.example` to `.env`.
 3. Generate two different JWT secrets:
@@ -59,7 +61,7 @@ The API listens on `PORT` (default `5000`). `GET /health` is process liveness; `
 
 - Access tokens last 15 minutes and are returned in the JSON response. The future frontend should keep them in memory and send them as `Authorization: Bearer ...`.
 - Refresh tokens last seven days, are stored hashed in MongoDB, rotated on refresh, and sent only as an HttpOnly cookie with `SameSite=Strict` and `Secure` in production. Deploy frontend and API on the same site (for example sibling subdomains); unrelated cross-site domains will not send a Strict cookie.
-- Configure `CLIENT_ORIGINS` with exact frontend origins. Do not use `*`.
+- Configure `CLIENT_ORIGINS` as a comma-separated list of frontend origins, for example `http://localhost:5173,https://your-frontend.example.com`. Use the frontend's origin only (scheme, hostname, and optional port), not the API URL or a page path. A trailing slash is accepted; `*` and wildcard domains are not. For a deployed frontend, set its exact HTTPS origin in the backend hosting environment.
 - Configure MongoDB as a least-privilege application user and use HTTPS and deployment-managed secrets in production.
 - Stock reservation and order creation are transactional; a standalone MongoDB server is not sufficient.
 - Admin product images can be uploaded as JPEG, PNG, or WebP files up to 5 MB each. The backend stores them in `backend/uploads/product-images/`; this directory is ignored by Git. Configure persistent storage for this directory in deployments, or uploaded images will be lost when an ephemeral instance is replaced. Payment-proof uploads are not implemented; payment is reconciled manually by an authorized admin.

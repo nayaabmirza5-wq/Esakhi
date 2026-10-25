@@ -4,15 +4,15 @@ React, TypeScript, and Vite customer storefront and admin workspace.
 
 ## Run locally
 
-From this directory:
+From the repository root, install dependencies and start both the backend and frontend:
 
 ```powershell
-npm ci
-Copy-Item .env.example .env
+npm --prefix backend ci
+npm --prefix frontend ci
 npm run dev
 ```
 
-The Vite development server defaults to `http://localhost:5173` and proxies API calls to `http://localhost:5001`. Set `VITE_API_PROXY_TARGET` in `.env` if the backend runs at a different origin. Alternatively, set `VITE_API_BASE_URL` to the API origin for a deployment that does not use the Vite proxy. Browser requests include credentials for the HttpOnly refresh cookie; configure the backend's `CLIENT_ORIGINS` to allow the frontend origin when calling the API directly.
+Open the Vite URL printed in the terminal (normally `http://localhost:5173`). API and image requests go through the Vite proxy, which removes the browser's `Origin` header before forwarding requests to the backend. This avoids development CORS errors even when opening the frontend from another device on the same network. Leave `VITE_API_BASE_URL` empty when using this proxy. If you configure it to call the backend directly, configure the backend's `CLIENT_ORIGINS` with the exact frontend origin.
 
 Run the production type-check and build with:
 

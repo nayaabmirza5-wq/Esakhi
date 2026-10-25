@@ -4,6 +4,7 @@ import { requireRole } from '../../middleware/requireRole.js';
 import {
   addInternalNote,
   assignDeliveryPartner,
+  bulkAssignDeliveryPartner,
   createOrderController,
   getAdminOrder,
   getMyOrder,
@@ -34,6 +35,7 @@ deliveryPartnerRoutes.patch('/orders/:id/status', updatePartnerOrderStatus);
 adminOrderRoutes.use(requireAuth, requireRole('admin', 'staff'));
 adminOrderRoutes.get('/', listAdminOrders);
 adminOrderRoutes.get('/:id', getAdminOrder);
+adminOrderRoutes.post('/delivery-partner-assignments', bulkAssignDeliveryPartner);
 adminOrderRoutes.patch('/:id/fulfilment', updateFulfilmentStatus);
 adminOrderRoutes.put('/:id/delivery-partner', assignDeliveryPartner);
 adminOrderRoutes.post('/:id/notes', requireRole('admin', 'staff'), addInternalNote);
