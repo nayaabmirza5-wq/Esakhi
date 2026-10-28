@@ -1,4 +1,5 @@
 import { Schema, model } from 'mongoose';
+import { userRoles } from './roles.js';
 
 const savedAddressSchema = new Schema(
   {
@@ -20,7 +21,8 @@ const userSchema = new Schema(
     phoneE164: { type: String, required: true, unique: true },
     name: { type: String, trim: true, maxlength: 120 },
     email: { type: String, trim: true, lowercase: true, maxlength: 254 },
-    role: { type: String, enum: ['customer', 'staff', 'admin', 'delivery_partner'], default: 'customer', required: true },
+    role: { type: String, enum: [...userRoles], default: 'customer', required: true },
+    assignedCity: { type: String, trim: true, maxlength: 100 },
     status: { type: String, enum: ['active', 'disabled'], default: 'active', required: true },
     refreshTokenHash: { type: String, select: false },
     savedAddresses: { type: [savedAddressSchema], default: [] },

@@ -86,7 +86,7 @@ export const requestOrderCancellation: RequestHandler = async (req, res) => {
     actorId: authenticatedUserId(req),
     action: 'order.cancellation_requested',
     resourceType: 'order',
-    resourceId: order.id,
+    resourceId: String(order.id),
     metadata: { orderReference: order.orderReference },
   });
   sendData(res, toCustomerOrder(order.toObject()));
@@ -178,7 +178,7 @@ export const updateFulfilmentStatus: RequestHandler = async (req, res) => {
         actorId,
         action: 'order.fulfilment_updated',
         resourceType: 'order',
-        resourceId: updated.id,
+        resourceId: String(updated.id),
         metadata: { status },
       }], { session });
       return updated;
@@ -357,6 +357,24 @@ export const listAssignedPartnerOrders: RequestHandler = async (req, res) => {
   })
     .select('-internalNotes -paymentEvents -idempotencyKey -deliveryPartnerHistory -deliveryPartner.internalNotes -deliveryPartner.assignedBy -deliveryPartner.userId -cancellationRequest.reviewedBy -cancellationRequest.adminNote')
     .sort({ createdAt: -1 }).lean();
+  sendData(res, orders.map((order) => order.fulfilmentStatus === 'out_for_delivery'
+    ? order
+    : { ...order, customerName: 'Customer', customerPhoneE164: undefined, customerPhone: undefined, address: undefined }));
+};
+
+export const listPartnerDeliveryHistory: RequestHandler = async (req, res) => {
+  const partnerId = authenticatedUserId(req);
+  const orders = await Order.find({
+    fulfilmentStatus: { $in: ['delivered', 'completed', 'delivery_failed', 'cancelled'] },
+    $or: [
+      { 'deliveryPartner.userId': partnerId },
+      { 'deliveryPartnerHistory.userId': partnerId },
+    ],
+  })
+    .select('orderReference items.productName items.quantity fulfilmentMethod fulfilmentStatus createdAt updatedAt statusHistory.status statusHistory.changedAt deliveryPartner.assignedAt address.locality address.city')
+    .sort({ updatedAt: -1 })
+    .limit(100)
+    .lean();
   sendData(res, orders);
 };
 

@@ -1,634 +1,731 @@
-# eSakhi — Product Requirements Document (PRD)
+# eSakhi — Overall Product Requirements Document (PRD)
 
-**Document status:** Draft for review  
-**Product:** eSakhi — Local marketplace for handmade products  
-**Version:** 1.0  
-**Date:** 20 October 2026
+**Document status:** Consolidated working draft for review  
+**Product:** eSakhi — Handmade with Love. Empowered by You.  
+**Initial launch market:** Damoh, Madhya Pradesh, India  
+**Product model:** Local marketplace for ready-made handmade products created by women’s Self-Help Groups (SHGs)  
+**Primary objective:** Build a trustworthy, operationally complete marketplace with distinct dashboards for every user role, secure order fulfilment, transparent money movement, and a foundation for adding more cities later.
 
-> **Source note:** This PRD uses the eSakhi requirements shared in the conversation. The linked Google Doc could not be retrieved in this session, so its contents have not been independently reviewed. Please compare this draft with the document and share any missing requirements before treating this as final.
-
----
-
-## 1. Product Overview
-
-eSakhi is a full-featured e-commerce platform for handmade products offered by a women’s self-help group in India. It will help customers discover and purchase ready-made products, while giving the group an administrative workspace to manage products, inventory, orders, customers, and local fulfilment.
-
-The platform is intended to be a complete product, not an MVP. Features should be designed as a coherent system, with a maintainable architecture that can be expanded as the business grows.
-
-### 1.1 Product vision
-
-Make locally made, handmade products easy to discover and buy, while helping the women’s self-help group manage sales and fulfilment digitally.
-
-### 1.2 Business goals
-
-- Present the group and its products through a trustworthy, polished online storefront.
-- Make it easy for customers in the supported local service area to browse products and place orders.
-- Keep product availability and stock quantities accurate.
-- Support manual order and payment confirmation initially.
-- Give administrators clear control over products, inventory, orders, and fulfilment.
-- Provide a foundation that can support additional locations and payment integrations later, without promising those capabilities in the initial release.
-
-### 1.3 Target users
-
-1. **Customers:** People within the serviceable local city who want to buy handmade products.
-2. **Administrators:** Authorized members of the self-help group who maintain the catalogue and manage orders.
-3. **Order-fulfilment staff:** Authorized users who prepare, pack, and hand over or deliver orders, where this role is needed.
+> **Implementation rule:** This PRD describes the intended product. It does not mean every feature already exists in the current repository. First audit the existing backend, routes, schemas, environment, and tests. Preserve working code, map current capabilities to this PRD, and implement missing features in small, tested phases. Never show fake data or report an action as successful before the backend confirms it.
 
 ---
 
-## 2. Scope and Product Principles
+## 1. Product vision and principles
 
-### 2.1 Full-product scope
+eSakhi helps customers discover and buy handmade products while creating a digital sales channel for women-led SHGs. It also gives local operations teams the tools to manage sellers, inventory, delivery, payments, settlements, and customer support.
 
-This is not an MVP specification. The product should include the complete customer shopping journey, operational administration, inventory and order management, security, responsive design, error handling, and deployment readiness.
+### Product principles
+- **Local-first:** Launch only in approved Damoh service areas. Do not silently accept orders from outside the configured area.
+- **People-first:** Respectfully tell the SHG maker story. Use genuine photographs only with permission; never present stock or AI-generated people as actual SHG members.
+- **Ready-made inventory:** Products are existing stock, not made-to-order unless a future product policy explicitly adds that option.
+- **Operational clarity:** Every order, assignment, payment, refund, handover, settlement, and payout has a defined status and audit trail.
+- **Least privilege:** Each role sees only the information and actions required for that role.
+- **Truthful UI:** All products, prices, stock, settings, order data, metrics, and financial records come from the backend. No fake ratings, order counts, revenue, stock, or success messages.
+- **Expandable architecture:** Start with one city but keep city/service-zone identifiers and permissions ready for future expansion.
+- **Accessible and responsive:** Support mobile-first use, desktop operations, keyboard navigation, readable contrast, and reduced motion.
 
-Implementation may be delivered in phases, but phasing must not silently remove requirements from the agreed product scope.
+## 2. User roles and separate workspaces
 
-### 2.2 Product principles
+Create role-specific routes, navigation, APIs, and authorization. Hiding a button in the frontend is not security; the backend must enforce permissions.
 
-- **Local-first fulfilment:** The store serves only the configured city/service area at launch.
-- **Stock accuracy:** Customers should not be able to place confirmed orders for unavailable stock.
-- **Manual payment confirmation initially:** Do not represent an order as paid until an authorized administrator verifies payment.
-- **Mobile-first usability:** Core shopping and order tracking must work well on mobile devices.
-- **Accessible and clear:** Use readable typography, visible focus states, clear form errors, and accessible colour contrast.
-- **Trust and transparency:** Show product details, prices, stock/availability, service-area rules, and order status clearly.
-- **Maintainable implementation:** Use validated APIs, consistent schemas, reusable UI components, and environment-based configuration.
+### 2.1 Customer storefront and account
+Customers browse products, manage addresses, place orders, pay using enabled methods, track orders, request cancellation where eligible, and contact support.
 
----
+### 2.2 SHG / Seller dashboard
+Approved SHGs manage their seller profile and permitted product/inventory information, receive order preparation tasks, mark packing/readiness steps where authorized, and view sales and settlement records. Seller registration remains pending until reviewed and approved.
 
-## 3. Product Categories
+### 2.3 Delivery Partner dashboard
+A delivery partner sees only orders assigned to that partner, essential pickup/customer delivery information, delivery instructions, permitted contact information, delivery status actions, delivery QR/label details, COD collection records, cash handovers, and earnings/payout history. A partner must never browse all customers or unassigned orders.
 
-The primary categories are fixed as follows:
+### 2.4 City Admin dashboard
+A City Admin operates only their assigned city and service zones. They manage local SHGs/sellers, products and stock where authorized, orders, manual delivery assignments, partner accounts, local support, COD collection/handover records, exceptions, and local operational reports. City Admin permissions must not extend to other cities or global platform settings unless explicitly granted.
 
-1. **Bangles**
-2. **Jewellery**
-3. **Dupattas**
-4. **Others**
+### 2.5 Super Admin dashboard
+The Super Admin oversees the platform across cities, approves or appoints City Admins, configures cities and service zones, manages roles and permissions, reviews platform-wide reports, verifies bank deposits/remittances, oversees refunds and settlements, manages policies/settings, and reviews audit/security events.
 
-Administrators should be able to assign each product to one of these categories. Product browsing should support category filtering. If additional categories are required in the future, that should be handled through a controlled catalogue update rather than hard-coded assumptions throughout the UI.
+### 2.6 Finance / Accounts workspace (permission-based)
+If finance staff are added as a distinct role, they should see only permitted payments, refunds, reconciliations, seller settlements, partner payouts, City Admin compensation, bank deposits, ledgers, and reports. Until that role is formally approved, these modules remain accessible only to explicitly authorized admins.
 
----
-
-## 4. Geographic and Fulfilment Requirements
-
-### 4.1 Launch service area
-
-- The store must serve customers only within the business’s configured local city/service area at launch.
-- The supported city and any included localities or PIN codes must be configurable by an administrator or through application configuration.
-- The website must clearly communicate the service-area restriction before the customer completes checkout.
-- Customers outside the supported area must not be able to place an order for unavailable delivery coverage.
-- Do not assume that nationwide shipping is available.
-- The service-area validation must happen on the backend as well as in the frontend; frontend-only restrictions are insufficient.
-
-### 4.2 Address and fulfilment
-
-- Collect the customer’s name, phone number, and delivery address details needed to fulfil the order.
-- Validate the address against the configured service area.
-- Support the fulfilment methods actually offered by the group, such as local delivery or pickup, once the business confirms which methods are available.
-- Store the selected fulfilment method and address snapshot with the order so later profile edits do not change historical order details.
-- Communicate any delivery fee, delivery estimate, or pickup instructions only when the business has configured those values.
-
-**Decision to confirm:** Exact city, supported PIN codes/localities, whether pickup is available, delivery charges, and delivery-time rules.
+### 2.7 Customer support workspace (optional separate role)
+If introduced, support staff can view necessary customer/order information, create support cases, add internal notes, and escalate issues. They cannot change payment verification, issue refunds, alter role permissions, or edit financial ledgers unless separately authorized.
 
 ---
 
-## 5. Brand and UI Design Requirements
+## 3. City and service-zone model
 
-### 5.1 Brand direction
+### Launch scope
+- Initial city: **Damoh, Madhya Pradesh**.
+- Start with the city-wide coverage and localities explicitly configured and approved by the business.
+- Candidate localities discussed for initial configuration include Main Damoh, Ghanta Ghar, Pathani Mahalla, Nuri Nagar, Jabalpur Naka, Sagar Naka, and Gading Mahalla. Treat these as **proposed configuration values**, not guaranteed coverage, until verified and enabled by an authorized admin.
+- Nearby villages such as Tendu Khaira and Gopalpura must remain unavailable until explicitly reviewed and enabled.
+- Do not promise service in any locality merely because it appears in this document.
 
-eSakhi should feel warm, trustworthy, contemporary, community-centred, and suitable for a handmade-products brand. The interface should make product photography and product details prominent without overwhelming the customer.
+### City and zone capabilities
+- Create/edit/activate/deactivate cities and service zones.
+- Define delivery eligibility by city, locality, postal code, or another validated location rule supported by the backend.
+- Configure delivery fee, minimum order, supported payment methods, delivery/pickup options, and operating status per city/zone where approved.
+- Prevent checkout when the address is outside an active service area; explain how the customer can correct the address.
+- Assign each seller, order, City Admin, and delivery partner to the appropriate city/zone scope.
+- Allow a City Admin to view only their assigned city and permitted zones.
+- Support future multi-city expansion without exposing cross-city data to local admins.
 
-### 5.2 Colour tokens
-
-| Token | Value | Intended use |
-|---|---|---|
-| Primary — Deep Rose Pink | `#D6336C` | Primary buttons, active navigation, key brand elements |
-| Canvas — Soft Blush | `#FDEEF0` | Soft page backgrounds and selected surfaces |
-| Accent — Marigold Yellow | `#F7C948` | Small highlights, badges, decorative accents |
-| Neutral text | Choose accessible dark neutral | Main text and headings |
-| Neutral surface | White or near-white | Product cards, forms, panels |
-| Borders | Muted neutral | Dividers, input borders, card boundaries |
-
-The marigold accent should be used selectively. Text and controls must maintain adequate contrast and must not rely on colour alone to communicate errors or status.
-
-### 5.3 Experience requirements
-
-- Responsive layouts for mobile, tablet, and desktop.
-- Consistent header, navigation, footer, buttons, form controls, cards, alerts, and status indicators.
-- Product imagery with a consistent aspect ratio and graceful image fallbacks.
-- Loading, empty, success, and error states for every data-dependent page.
-- Accessible labels, keyboard navigation, visible focus indicators, semantic headings, and descriptive image alt text.
-- Clear confirmation before destructive administrative actions.
-- Avoid fake ratings, fabricated reviews, misleading stock claims, and unconfigured delivery promises.
+### Cross-zone deliveries
+A seller and customer may be in different zones. The order must be considered against the configured city-level serviceability and delivery rules, not just the seller’s zone. The City Admin sees eligible orders and manually assigns an active, eligible partner who can serve the destination zone. Phase 1 should not auto-assign the nearest partner. If no eligible partner is available, keep the order in an unassigned/exception queue and show a clear reason. Zone-transfer or inter-zone fees, if any, must be defined by business rules rather than invented by the frontend.
 
 ---
 
-## 6. Technical Architecture
+## 4. Information architecture and dashboards
 
-### 6.1 Frontend
+### 4.1 Customer storefront
 
-- **Framework:** React.js
-- **Build tool:** Vite
-- **Application type:** Single Page Application (SPA)
-- **Styling:** Custom CSS components and/or Tailwind CSS utility classes
-- **Architecture:** Reusable components, page-level views, shared layouts, API/service layer, form validation, and centralized handling for loading/errors.
-- **Routing:** Client-side routing for public, customer, and protected admin pages.
-- **API communication:** A dedicated API client configured using environment variables; do not hard-code deployment URLs or secrets.
+**Public pages**
+- Home: brand hero, Shop Handmade action, category shortcuts, real active products from the API, service-area guidance, and maker-story preview.
+- Shop/catalogue: search and filters only where supported by API; categories are Bangles, Jewellery, Dupattas, and Others, reconciled against backend configuration.
+- Product details: genuine images, description, price, available stock, quantity control, and add-to-cart action.
+- Our Story: approved SHG story and maker information.
+- Service area, delivery, payments, FAQs, privacy, terms, cancellation/refund policy, and contact/support information from approved business content.
+- Sign in/register using phone OTP.
 
-Choose either a consistent custom-CSS approach or a consistent Tailwind approach for each component area. Avoid mixing styling patterns arbitrarily.
+**Customer account**
+- Profile and saved addresses.
+- Cart with editable quantities, remove action, availability checks, and clear empty state.
+- Checkout with address validation, delivery method and payment methods returned by backend configuration.
+- Order confirmation using the actual server-generated order reference.
+- Order history and order detail/tracking.
+- Cancellation request where allowed by current order status and policy.
+- Support/help entry point.
 
-### 6.2 Backend
+**Customer dashboard summary**
+- Recent orders and current order statuses.
+- Saved addresses and profile.
+- Payment/refund status for the customer’s own orders.
+- No internal notes, partner private details, seller settlement information, or other customers’ data.
 
-- **Runtime:** Node.js Active LTS line
-- **Framework:** Express.js
-- **API style:** RESTful JSON APIs
-- **Responsibilities:** Authentication and authorization, catalogue, stock validation, cart/checkout validation, order creation, payment verification records, fulfilment, and admin operations.
-- **Cross-cutting concerns:** Request validation, centralized error handling, security headers, rate limiting where appropriate, logging, and API versioning strategy.
+### 4.2 SHG / Seller dashboard
 
-### 6.3 Database
+**Navigation**
+- Overview
+- SHG profile and verification
+- Products
+- Inventory
+- Incoming orders / preparation
+- Sales
+- Settlements and payout history
+- Notifications
+- Help/support
 
-- **Database:** MongoDB Atlas
-- **ODM:** Mongoose
-- **Data validation:** Explicit schemas, required fields, enums, indexes, and model-level validation where appropriate.
-- **Data integrity:** Enforce critical business rules in backend services. Use transactions where supported and justified, and use conditional stock updates to reduce overselling risks.
-- **Secrets:** Database credentials and signing secrets must be stored in environment variables or the deployment platform’s secret manager, never committed to source control.
+**Capabilities**
+- Submit SHG/seller application with group name, authorized contact, phone, address, city/zone, required verification information, and bank/payout details through a secure flow.
+- Show application status: Draft, Submitted, Under Review, Needs Information, Approved, Rejected, Suspended.
+- Require review and approval before publishing products or receiving live orders.
+- Manage only the seller’s own products and allowed fields.
+- Maintain ready-made stock with adjustment history and reason.
+- Show order items, quantities, packing/readiness deadlines, and permitted order statuses.
+- Show gross sales, returns/refunds, agreed commissions/fees, net payable, paid/pending amounts, and settlement references from backend ledger data.
+- Keep bank account details masked in normal views; changes to verified payout details require re-verification and audit logs.
+- Sellers cannot approve their own applications, edit platform commission rules, verify their own payments, or alter payout ledger entries.
 
-### 6.4 Suggested high-level structure
+### 4.3 Delivery Partner dashboard
 
-```text
-eSakhi/
-├── client/                 # React + Vite
-│   └── src/
-│       ├── components/
-│       ├── pages/
-│       ├── layouts/
-│       ├── routes/
-│       ├── services/       # API client and endpoint functions
-│       ├── hooks/
-│       ├── context/        # Only for suitable shared client state
-│       ├── utils/
-│       └── styles/
-└── server/                 # Node + Express
-    └── src/
-        ├── config/
-        ├── models/
-        ├── routes/
-        ├── controllers/
-        ├── services/
-        ├── middleware/
-        ├── validators/
-        ├── utils/
-        └── app.js
-```
+**Navigation**
+- Overview
+- My Assigned Orders
+- Order Details / Pickup
+- Delivery confirmation
+- COD collections and handovers
+- Earnings and payouts
+- Profile and availability
+- Help/support
 
-This is a suggested organization, not a requirement to create every folder regardless of need.
+**Account lifecycle**
+- Created/invited by an authorized City Admin or approved onboarding flow.
+- Account has name, Indian mobile number, internal admin notes, assigned city/eligible zones, active/suspended status, and verified payout details if payouts are enabled.
+- An account must be active and eligible before appearing in assignment options.
+- Do not allow partners to elevate their own role or assign orders to themselves unless a future approved workflow explicitly allows it.
 
----
+**Order workflow**
+- Partner sees only assigned orders.
+- Show relevant order ID, pickup/seller details, delivery address and contact details necessary to complete delivery, delivery instructions, order amount and payment method, and current status.
+- Partner accepts/acknowledges an assignment if that step is enabled; otherwise the City Admin’s assignment remains authoritative.
+- Pickup confirmation, in-transit, delivery attempt, delivered, failed delivery, return-to-seller, and exception actions must follow backend-allowed transitions.
+- Failed delivery requires a reason and may require an evidence/notes flow.
+- Partner must not mark an order delivered merely by opening/scanning a QR code. Server validation must verify the order, partner assignment, allowed status, and any required confirmation.
 
-## 7. Functional Requirements — Customer Storefront
+**Delivery QR and printable label**
+- Generate a printable order label/QR using a server-issued opaque or signed identifier, not exposed personal data.
+- QR identifies the order/label; it is not payment proof.
+- Scan/verify at the doorstep and confirm delivery using the approved workflow (for example, customer confirmation/OTP where implemented).
+- Prevent replay, wrong-order scans, unauthorized partner use, and duplicate completion.
+- Keep manual fallback for a damaged/unavailable QR, with reason and audit trail.
+- Do not claim scanning is implemented unless scanner UI and secure backend validation both exist.
 
-### 7.1 Home page
+**Partner earnings**
+- Show completed eligible deliveries, earned amounts, adjustments, payout status, and payout reference from the ledger.
+- Separate earned, approved, paid, and disputed amounts.
+- A partner cannot edit their earnings or mark their own payout as paid.
 
-- Communicate the eSakhi brand and its handmade-products purpose.
-- Display the four main categories.
-- Show selected products and relevant catalogue sections based on available data.
-- Provide clear routes to browse products, view product details, and access the cart.
-- Show service-area information and how ordering/payment confirmation works.
-- Include contact/help information configured by the business.
+### 4.4 City Admin dashboard
 
-### 7.2 Product catalogue
+**Navigation**
+- Overview
+- City & Service Zones (read/edit only within permission)
+- SHGs & Sellers
+- Products & Inventory
+- Orders & Assignments
+- Delivery Partners
+- Customers
+- Support & Disputes
+- Payments / COD Operations
+- Refund requests (review/approve only if authorized)
+- Seller settlements (view/reconcile only if authorized)
+- Partner earnings/payouts (view/reconcile only if authorized)
+- City reports and analytics
+- City settings (limited)
+- Audit activity (read-only or permission-based)
 
-- Browse products and filter by category.
-- Support search by product name and, where practical, product description.
-- Show product image, name, price, and availability.
-- Support pagination or an equivalent scalable loading strategy.
-- Handle no-results and loading states.
-- Only show products that are active/published to customers.
-- Respect stock status and avoid showing unavailable products as purchasable.
+**Overview metrics**
+- Orders by status
+- Unassigned and overdue orders
+- Orders by delivery zone
+- Active sellers/SHGs
+- Low-stock items
+- Active/available delivery partners
+- Failed delivery and cancellation exceptions
+- COD outstanding, cash handovers pending, bank remittances pending
+- Pending seller/partner operational actions
+All metrics must come from real API responses and include loading, empty, and error states.
 
-### 7.3 Product detail page
+**Order assignment**
+- Create and manage delivery partner accounts.
+- Account creation form includes partner name, Indian mobile, internal notes, city and eligible zones, status, and required onboarding details.
+- Newly approved/active eligible partner appears in the assignment dropdown without a manual page refresh when practical.
+- Assignment UI displays partner name and mobile clearly.
+- Support assigning multiple eligible orders to one partner, reassignment with a reason, and visibility of the current assigned partner in every relevant order list/card.
+- Preserve a manual assignment option only if it has a defined operational meaning; do not leave a confusing “Manual assignment (legacy)” option as the only choice.
+- Reject assignments to inactive, suspended, wrong-city, or destination-ineligible partners.
+- Assignment changes must be recorded in the audit trail.
 
-- Show product name, images, price, description, category, and available stock status.
-- Show any product options that genuinely apply, such as size, colour, or design, only when configured for that product.
-- Allow customers to choose quantity within the available stock.
-- Prevent adding invalid quantities.
-- Display a clear unavailable/out-of-stock state.
-- Provide an add-to-cart action with visible feedback.
+**City boundaries**
+- City Admin cannot create/edit another city or view other cities’ private data.
+- City Admin cannot appoint Super Admins or alter global permissions.
+- City Admin cannot verify a bank deposit they made if separation of duties requires independent verification.
 
-### 7.4 Cart
+### 4.5 Super Admin dashboard
 
-- Add, remove, and update product quantities.
-- Recalculate line totals and cart subtotal.
-- Validate current price and stock again on the server during checkout; never trust totals submitted by the browser.
-- Persist cart state appropriately for the chosen guest/account experience.
-- Explain when an item becomes unavailable or the available quantity changes.
-- Show a clear empty-cart state and a path back to shopping.
+**Navigation**
+- Global Overview
+- Cities & Service Zones
+- City Administrators
+- SHGs & Sellers
+- Products & Inventory (cross-city oversight, permission-controlled)
+- Orders & Assignments (cross-city oversight)
+- Delivery Partners
+- External Delivery Providers
+- Customers
+- Support & Disputes
+- Payments & Reconciliation
+- Refunds
+- Seller Settlements
+- Delivery Partner Payouts
+- City Admin Compensation
+- Platform Revenue & Expenses
+- Reports & Analytics
+- Platform Settings
+- Roles & Permissions
+- Security & Audit Logs
 
-### 7.5 Customer account
+**Global overview**
+- Orders and fulfilment by city
+- Gross order value, collected payments, refunds, outstanding COD, verified bank deposits, seller liabilities, partner liabilities, City Admin compensation liabilities, platform revenue and expenses
+- Pending approvals and unresolved operational/financial exceptions
+- Serviceable cities/zones and activation status
+- Never treat gross order value as platform revenue.
 
-The full product should support a defined customer identity approach. If accounts are enabled, customers should be able to register/sign in, manage relevant profile details, save or update addresses, and view their order history.
+**City administration**
+- Create city records and service zones.
+- Appoint/revoke City Admin access with scoped permissions.
+- Define which admin is responsible for which city and dates of assignment.
+- Review city performance and operational exceptions.
+- Enable new localities/villages only after operational coverage, pricing, delivery feasibility, and policy approval.
 
-Authentication method (phone OTP, email/password, or another method) must be confirmed before implementation. Do not claim an OTP service is available until a provider is selected and configured.
+**External delivery providers**
+- Keep internal delivery partners separate from third-party logistics providers such as Shiprocket, Amazon Shipping, or other services.
+- Do not advertise provider coverage or availability until a contract, serviceability check, rates, and integration have been verified.
+- Track provider configuration, eligible areas, tracking references, pickup/delivery statuses, costs, exceptions, and reconciliation if integration is approved.
+- Manual local delivery remains a supported initial path.
 
-### 7.6 Checkout
+### 4.6 Finance and reconciliation workspace
 
-- Collect and validate contact and address information.
-- Validate that the order is within the configured local service area.
-- Show an order summary with quantities, prices, subtotal, delivery fee if configured, and final total.
-- Revalidate product activity, current prices, and stock on the backend.
-- Require the customer to review the order before submitting.
-- Create an order with a unique human-readable order reference.
-- Show a confirmation page with the order reference and next steps for manual payment confirmation.
-- Protect against duplicate submissions and accidental duplicate orders.
+**Navigation**
+- Payment transactions
+- Payment verification queue
+- COD collection ledger
+- Cash handovers
+- Bank remittances/deposits
+- Reconciliation and discrepancies
+- Refunds
+- Seller settlements
+- Delivery partner payouts
+- City Admin compensation
+- Platform revenue and expenses
+- Reports/export
+- Finance audit log
 
-### 7.7 Manual payment workflow
-
-- Clearly explain the approved payment instructions configured by the business.
-- Record the selected payment method and payment status.
-- Initial payment statuses should distinguish at least **Pending Verification**, **Confirmed/Paid**, and **Rejected/Unverified**.
-- An authorized administrator must verify payment evidence or reconcile payment before marking an order paid.
-- If payment proof upload is enabled, restrict accepted file types and sizes, store files securely, and do not expose private proof publicly.
-- Record who confirmed/rejected a payment and when.
-- Do not store card numbers, CVVs, UPI PINs, passwords, or other payment credentials.
-- Keep manual payment confirmation separate from order fulfilment status.
-
-**Decision to confirm:** Supported manual payment method(s), payment instructions, whether customers can upload proof, and what happens to stock while payment is pending.
-
-### 7.8 Customer order tracking
-
-- Display the order reference, items, totals, payment status, and fulfilment status.
-- Explain status changes in plain language.
-- Show order history for signed-in customers.
-- Do not expose another customer’s order details through guessable IDs or insufficiently protected endpoints.
-- Provide a configured contact/help route for order questions.
-
----
-
-## 8. Functional Requirements — Administration
-
-Admin routes and APIs must be protected by server-side authorization. Hiding admin controls in React is not sufficient security.
-
-### 8.1 Admin dashboard
-
-- Summarize orders requiring action, pending payment verification, low-stock items, and recent orders.
-- Use actual database data and clearly handle empty states.
-- Do not display invented analytics or placeholder business metrics as real results.
-
-### 8.2 Product management
-
-Authorized administrators must be able to:
-
-- Create, edit, publish/unpublish, and archive products.
-- Set product name, description, category, price, images, and stock quantity.
-- Configure optional product attributes where required.
-- Validate prices and stock values.
-- Preview how product information appears to customers.
-- Prevent accidental deletion or loss of order history; prefer archiving products referenced by orders.
-
-### 8.3 Inventory management
-
-- Track available stock for each product or product variant.
-- Update stock when orders are placed, cancelled, or otherwise reach the agreed inventory event.
-- Prevent negative stock and reduce overselling with atomic/conditional database operations.
-- Warn administrators about low stock using a configurable threshold.
-- Maintain an auditable record of important stock adjustments, including reason, time, and administrator.
-- Define how stock is reserved and released while payment is pending.
-
-### 8.4 Order management
-
-Administrators must be able to:
-
-- View and search orders by order reference, date, customer, payment status, and fulfilment status.
-- Open an order and view its item, customer, address, price, and payment snapshots.
-- Update fulfilment status according to permitted transitions.
-- Cancel an order with a reason where policy permits.
-- View payment-verification history.
-- Add internal notes that are not visible to customers.
-- See who performed important order actions and when.
-
-### 8.5 Customer management
-
-- View customer details needed for legitimate order support.
-- View a customer’s order history where authorized.
-- Restrict access to personal data by role and operational need.
-- Avoid collecting personal information that is not needed for the service.
-
-### 8.6 Admin accounts and roles
-
-- Provide a secure way to create or provision the initial administrator.
-- Never expose a public endpoint that lets an arbitrary visitor promote themselves to admin.
-- Support role-based access if different admin/fulfilment permissions are needed.
-- Log security-sensitive and business-critical actions.
-- Provide a process to disable compromised or former staff accounts.
-
-### 8.7 Configuration
-
-Authorized users should be able to manage, or deployment configuration should safely define:
-
-- Business name and contact details.
-- Supported city/localities/PIN codes.
-- Fulfilment methods.
-- Delivery charges and applicable rules.
-- Payment instructions.
-- Low-stock threshold.
-- Customer-facing policies and help content.
-
-Any setting that changes order totals or serviceability must be validated by the backend.
+Access is permission-based. Financial records should be immutable or corrected with adjustment entries, not silently overwritten.
 
 ---
 
-## 9. Order and Payment Status Model
+## 5. Catalogue, seller, and inventory rules
 
-Payment and fulfilment are separate dimensions and must not be combined into one status.
-
-### 9.1 Suggested order/fulfilment statuses
-
-1. **Placed** — Order created and awaiting the next business action.
-2. **Accepted** — Order reviewed and accepted for fulfilment.
-3. **Preparing** — Items are being prepared/packed.
-4. **Ready for Pickup** — Use only if pickup is supported.
-5. **Out for Delivery** — Use only if local delivery is supported.
-6. **Completed** — Order successfully handed over/delivered.
-7. **Cancelled** — Order cancelled under the applicable policy.
-
-The exact allowed transitions and who may perform them must be documented and enforced by the backend.
-
-### 9.2 Suggested payment statuses
-
-1. **Pending Verification**
-2. **Confirmed/Paid**
-3. **Rejected/Unverified**
-4. **Refund Pending** — If refunds become applicable.
-5. **Refunded** — If a refund has actually been completed.
-
-Do not mark a payment as confirmed merely because the customer submitted a form or uploaded an image.
-
-### 9.3 Cancellation and stock policy
-
-Define and implement a consistent policy for when stock is reserved, released, or restored. Cancellation after preparation or completion may require different handling. These rules must be agreed before coding and tested for duplicate requests and concurrent orders.
+- Product categories for launch: **Bangles, Jewellery, Dupattas, Others**.
+- Only active, approved, available products are visible to customers.
+- Inventory represents ready-made stock.
+- Product fields must match the actual backend schema. Suggested fields, subject to schema approval: seller/SHG ID, city/zone, name, slug, description, category, price, stock, images, active status, SKU, dimensions/weight if needed, and created/updated audit fields.
+- Product creation/editing must validate price, stock, category, image URL, seller ownership, and publication eligibility on the server.
+- Stock changes use a dedicated adjustment action with quantity and reason. Maintain adjustment history.
+- Checkout must revalidate current product status, price, and stock on the server. Client totals are estimates only.
+- Prevent overselling with atomic/reserved-stock logic appropriate to the backend.
+- Product image URLs can be used if supported. Secure image upload/storage/CDN is a separate feature until implemented.
+- Do not add customer reviews, ratings, wishlists, gift cards, promo banners, coupons, or a persistent cross-device cart as if they already work. Add them only after requirements, models, APIs, moderation, and test cases are agreed.
 
 ---
 
-## 10. Suggested MongoDB/Mongoose Data Models
+## 6. Order lifecycle and fulfilment
 
-The final schema should be refined during implementation. These are logical entities, not a demand to store every field exactly as listed.
+Define allowed transitions centrally on the backend and expose only valid actions in each dashboard. Final enum names must be reconciled with the existing schema before implementation.
 
-### 10.1 User
+### Suggested operational lifecycle
+1. Cart prepared.
+2. Checkout submitted.
+3. Order created by server; price/stock/payment method validated.
+4. Payment pending, awaiting COD, or payment verified according to method.
+5. Order accepted/confirmed by authorized staff.
+6. Seller preparing/packing.
+7. Ready for pickup.
+8. Assigned to eligible delivery partner.
+9. Picked up.
+10. In transit / out for delivery.
+11. Delivered with required confirmation.
+12. Completed after required financial/operational checks, if the business uses a separate completion status.
 
-- Name and contact information
-- Authentication identifier/provider metadata (never plaintext passwords)
-- Role and account status
-- Saved addresses, if supported
-- Created/updated timestamps
+### Exceptions
+- Customer cancellation request
+- Cancellation approved/rejected
+- Seller unable to fulfil
+- Out of stock
+- Partner unavailable / reassignment
+- Delivery attempt failed
+- Customer unavailable / address issue
+- Return to seller
+- Dispute/support case
+- Partial fulfilment only if explicitly supported
+- Refund pending/approved/processing/processed/failed
 
-### 10.2 Product
-
-- Name, slug, description, category
-- Price stored as an integer in the smallest currency unit (for INR, paise) or another explicitly consistent money representation
-- Image references/URLs
-- Stock quantity and low-stock configuration where appropriate
-- Optional variant data
-- Active/archive status
-- Created/updated timestamps
-
-### 10.3 Order
-
-- Unique order reference
-- Customer reference and immutable customer/contact/address snapshot
-- Item snapshots: product reference, product name, selected variant, unit price, quantity, line total
-- Subtotal, delivery fee, and final total calculated on the server
-- Fulfilment status and payment status
-- Selected fulfilment method
-- Cancellation reason, notes, and relevant timestamps
-- Created/updated timestamps
-
-### 10.4 PaymentRecord
-
-- Order reference
-- Method and amount
-- Status
-- Proof reference, if proof upload is enabled
-- Verification result, administrator reference, timestamps, and notes
-- No sensitive payment credentials
-
-### 10.5 InventoryAdjustment
-
-- Product/variant reference
-- Quantity change
-- Reason
-- Administrator reference
-- Timestamp and related order reference, where applicable
-
-### 10.6 AuditLog
-
-- Actor, action, affected resource
-- Timestamp
-- Safe metadata required to investigate important changes
-- Do not log passwords, tokens, payment credentials, or unnecessary sensitive data.
-
-### 10.7 Indexing and consistency
-
-- Unique index for order reference and any unique authentication identifiers.
-- Index catalogue fields used for category, active status, and search/filtering as justified.
-- Index orders by customer, creation date, and statuses used in the admin dashboard.
-- Validate all input and enforce critical consistency rules in the backend.
-- Use transactions when multiple writes must succeed together and the deployment topology supports them.
+Cancellation is not a refund. Delivery completion does not prove payment receipt. Payment receipt does not prove delivery. These are separate state machines.
 
 ---
 
-## 11. REST API Requirements
+## 7. Payments and payment verification
 
-The exact routes may change during implementation, but APIs should follow consistent naming, validation, authentication, authorization, and error-response conventions.
+### Launch payment methods
+- Cash on Delivery (COD), if enabled for the order’s zone.
+- Manual UPI payment with explicit instructions and an admin verification workflow.
+- A payment gateway such as Razorpay may be integrated later after business onboarding, merchant eligibility, webhooks, and refund rules are confirmed.
 
-### 11.1 Public catalogue
-
-- `GET /api/v1/products` — List/filter published products.
-- `GET /api/v1/products/:slug` — Read one published product.
-- `GET /api/v1/categories` — Read supported categories.
-- `GET /api/v1/service-area` — Read public service-area information.
-
-### 11.2 Customer and orders
-
-- Authentication endpoints according to the chosen sign-in method.
-- `POST /api/v1/orders` — Validate and create an order.
-- Protected endpoints to read a customer’s own orders.
-- A protected endpoint to retrieve a specific customer-owned order.
-- Any order cancellation endpoint must validate ownership, status, and policy.
-
-### 11.3 Admin
-
-- Protected product create/update/archive endpoints.
-- Protected inventory adjustment endpoints.
-- Protected order search/detail/status endpoints.
-- Protected payment verification endpoints.
-- Protected configuration endpoints, if configuration is editable in the UI.
-
-### 11.4 API conventions
-
-- Validate request bodies, query parameters, and path parameters.
-- Use appropriate HTTP status codes and a consistent error shape.
-- Never trust client-submitted prices, totals, roles, payment status, or stock values.
-- Enforce authentication, ownership checks, and admin authorization on the server.
-- Add pagination and bounded query limits to list endpoints.
-- Document APIs with an OpenAPI specification or equivalent maintained API reference.
+### Required safeguards
+- The backend calculates final order totals and payable amount.
+- UPI screenshots/receipts are not proof by themselves. Verify the actual transaction/reference through an approved method before marking payment verified.
+- Payment status must be separate from order status and delivery status.
+- Keep transaction reference, amount, method, timestamps, reviewer, outcome, and reason where applicable.
+- Prevent duplicate payment records, replay, overpayment/underpayment errors, and unauthorized verification.
+- Customer-facing UI must state pending/verified/rejected/failed accurately.
+- Never store raw card data or secrets in the frontend.
+- A future gateway must verify signed webhooks server-side and use idempotent processing.
 
 ---
 
-## 12. Security, Privacy, and Reliability
+## 8. COD collection, cash handover, and bank remittance
 
-- Hash passwords with a suitable password-hashing algorithm if password authentication is chosen.
-- Use secure, appropriately configured sessions or tokens; protect cookies and authentication flows.
-- Apply authorization checks to every protected API endpoint.
-- Validate and sanitize inputs; avoid unsafe query construction.
-- Configure CORS for known frontend origins in production.
-- Use security headers, rate limiting on sensitive endpoints, and safe error messages.
-- Store secrets only in environment variables/secret management.
-- Use HTTPS in production.
-- Restrict and validate uploaded file types and sizes; use private storage for payment proof.
-- Minimize customer personal data and restrict access to it.
-- Avoid logging passwords, tokens, full payment proof, or unnecessary personal information.
-- Plan database backups, restoration testing, monitoring, and incident response.
-- Provide graceful loading, retry/error messaging, and safe recovery from failed requests.
-- Follow applicable Indian privacy, consumer, tax, and e-commerce requirements with appropriate professional review before launch.
+This is a critical accounting workflow and must not be simplified to a single “paid” toggle.
 
----
+### Proposed initial flow
+1. Customer places a COD order.
+2. Delivery partner delivers and collects the actual amount due.
+3. Partner records collection against that order.
+4. Partner hands the cash to the City Admin **if that is the approved operating arrangement**; otherwise use the approved direct-deposit/handover route.
+5. Record the handover as a separate event with amount, time, parties, reference/receipt, and confirmation by both sides where feasible.
+6. Cash is deposited into the designated eSakhi business bank account.
+7. Record deposit reference, date, amount, bank/account destination (masked in UI), and supporting evidence.
+8. A separately authorized Super Admin/finance reviewer verifies the deposit against bank records.
+9. Reconcile the deposit against the relevant COD collections and flag shortfalls, excess, duplicate references, or unmatched amounts.
 
-## 13. Non-Functional Requirements
+### Required separate statuses
+- Not collected
+- Collected by partner
+- Handover pending
+- Handed over to City Admin / designated custodian
+- Deposit pending
+- Deposit submitted for verification
+- Deposit verified
+- Reconciliation discrepancy
+- Resolved/adjusted with documented approval
 
-### Performance
-- Optimize images and lazy-load non-critical imagery.
-- Paginate product and order lists.
-- Avoid unnecessary frontend re-renders and unbounded database queries.
-- Establish measurable response-time targets after expected traffic and hosting are known.
+Status labels should match the eventual ledger design. Never mark money as received by the business merely because a partner says they collected it, a cash handover was recorded, or a screenshot was uploaded.
 
-### Accessibility
-- Support keyboard navigation and visible focus.
-- Use semantic HTML, labelled controls, helpful form errors, and meaningful alt text.
-- Ensure contrast is adequate for text and interactive controls.
-
-### Compatibility
-- Support current mainstream mobile and desktop browsers.
-- Verify layouts at common mobile, tablet, and desktop widths.
-
-### Maintainability
-- Use reusable components and a clear separation of frontend, API, business logic, and data access.
-- Keep configuration separate from code.
-- Use linting, formatting, consistent naming, and documented setup steps.
-
-### Observability
-- Record useful application errors and important administrative actions.
-- Avoid exposing stack traces or internal details to customers.
-- Provide enough operational logging to diagnose failed orders without logging secrets.
+### Risk controls
+- Prefer direct deposit to the business account where practical to reduce cash-handling risk.
+- Require independent verification for bank deposits.
+- Use numbered handover/deposit references, audit logs, daily outstanding reports, escalation thresholds, and reconciliation deadlines.
+- Never allow a person to approve their own deposit where separation of duties is required.
+- Cash shortages/excess must create a discrepancy case, not silently modify an order amount.
+- The exact bank-account ownership, legal arrangement, tax/accounting treatment, and responsibility for handling third-party seller funds must be confirmed with qualified Indian accounting/legal advisers before live operation.
 
 ---
 
-## 14. Testing and Acceptance Criteria
+## 9. Refunds and cancellations
 
-### Customer journey
-- A customer can browse the four categories and open product details.
-- A customer can add an in-stock product to the cart and update/remove quantities.
-- The server recalculates prices and validates stock during checkout.
-- A customer outside the configured service area cannot complete an order.
-- A valid order receives a unique reference and an accurate order summary.
-- The customer sees that payment requires manual verification.
-- Customers can view only their own protected order information.
-
-### Inventory and order integrity
-- An order cannot reduce stock below zero.
-- Invalid quantities, inactive products, and stale prices are rejected or safely reconciled.
-- Duplicate submissions do not accidentally create duplicate orders.
-- Cancellation and stock restoration follow the agreed policy.
-- Order history retains product/price/address snapshots from the time of purchase.
-
-### Admin
-- Unauthenticated users cannot access admin APIs.
-- Non-admin users cannot perform admin actions.
-- Administrators can create/edit/archive products and manage stock.
-- Administrators can search orders and update only valid statuses.
-- Payment status changes require authorized verification and are auditable.
-
-### UI and accessibility
-- Core pages work on mobile, tablet, and desktop.
-- Loading, empty, validation, success, and failure states are present.
-- Forms are keyboard accessible and have labels and useful error messages.
-- Colour is not the only indicator of payment/order state.
-
-### Operational readiness
-- A clean setup from documented instructions works in a fresh environment.
-- Secrets are not committed to the repository.
-- Production builds and API deployment configuration are documented.
-- Backup and recovery procedures are defined and tested before launch.
+- Cancellation request and refund are separate workflows.
+- Confirm the payment was actually received before creating a refund liability.
+- An unpaid COD order generally has no customer payment to refund. If COD cash was collected, the collected amount and refund must be recorded.
+- Support full and partial refunds only with explicit policy, limits, and ledger entries.
+- Review/approval must follow role permissions and reason requirements.
+- Refund statuses: Requested, Under Review, Approved, Initiated/Processing, Processed, Failed, Rejected (final names to be aligned with implementation).
+- Do not mark a refund processed just because it was approved or initiated.
+- Prefer returning money to the original payment method where supported. Manual UPI/bank refunds require recorded transaction references and independent verification.
+- Prevent duplicate refunds and ensure total refunded cannot exceed the verified amount paid.
+- Keep the customer informed using accurate statuses and timestamps.
 
 ---
 
-## 15. Delivery and Deployment Requirements
+## 10. Financial ownership, ledgers, settlements, and payouts
 
-- Separate frontend and backend configuration by environment.
-- Provide `.env.example` files containing variable names but no real secrets.
-- Configure MongoDB Atlas network access and database users with least privilege.
-- Configure production CORS, HTTPS, logging, and error handling.
-- Establish database backup and recovery procedures.
-- Provide a README covering prerequisites, installation, local development, environment variables, tests, build, and deployment.
-- Include seed data only for development/demo environments; do not expose fake customer/order records in production.
-- Define a rollback and recovery plan for production releases.
+eSakhi may coordinate collections and payouts, but the entire customer payment is not automatically eSakhi revenue. The business must define contractual ownership and revenue recognition with professional advice.
 
----
+### Separate ledgers / balances
+- Customer payment transactions and payment allocations
+- COD collected but not handed over
+- Cash handed over but not deposited
+- Bank deposits pending verification
+- Verified collections
+- Seller/SHG payable
+- Delivery partner earnings payable
+- City Admin salary/incentive/commission payable
+- Refund liabilities and completed refunds
+- Platform commission/fees and earned revenue
+- Platform expenses and adjustments
+- Disputed/unreconciled amounts
 
-## 16. Future-Ready Extensions
+### Seller settlements
+- Calculate amounts using approved, versioned commission/fee rules.
+- Show gross eligible sales, cancellations/returns, refunds, platform fees, other approved adjustments, net payable, payout status, and reference.
+- Pay only to the verified seller/SHG payout account.
+- Keep each settlement linked to its underlying orders and ledger entries.
+- Never hardcode a revenue split. Any example split is illustrative only.
 
-These are possible future extensions, not promises that they will be available at launch:
+### Delivery partner payouts
+- Calculate earnings from approved delivery/fee rules.
+- Track earned, reviewed, approved, processing, paid, failed, and disputed amounts.
+- Link payouts to completed eligible deliveries and adjustment entries.
+- Verify the recipient account before payout.
 
-- Online payment gateway integration.
-- Additional cities or shipping partners.
-- Product reviews and ratings with moderation.
-- Wishlist and saved products.
-- Discount codes and campaigns.
-- Sales and inventory reports.
-- Customer notifications through configured email/SMS/WhatsApp providers.
-- Multiple admin roles and more detailed analytics.
-- Multilingual interface support.
+### City Admin compensation
+- Model compensation as a separately approved salary, incentive, or commission policy.
+- Keep calculation periods, eligibility, approvals, payout status, and references.
+- The Super Admin role does not automatically mean the person receives platform revenue.
 
-Architecture should avoid unnecessarily blocking these extensions, but the launch product must not display disabled or unconfigured features as if they work.
+### Platform revenue and expenses
+- Report earned commission/fees separately from gross order value and amounts held on behalf of sellers or partners.
+- Track operating expenses and approved adjustments.
+- Reconcile ledgers to verified payment and bank records.
 
----
-
-## 17. Open Decisions Before Implementation
-
-The following need confirmation with the business:
-
-1. **Local service area:** Exact city, PIN codes/localities, and whether the boundary is city-wide or a selected set of areas.
-2. **Fulfilment:** Local delivery, pickup, or both; who fulfils orders.
-3. **Payment:** Accepted manual payment methods, instructions, payment-proof upload, and verification process.
-4. **Pending-payment stock:** Whether stock is reserved immediately, for how long, and when it is released.
-5. **Authentication:** Guest checkout, customer accounts, phone OTP, or email/password.
-6. **Delivery pricing:** Fixed fee, locality-based fee, free-delivery threshold, or no delivery charge.
-7. **Returns/cancellations:** Eligibility, time limits, cancellation rules, and refund process.
-8. **Product options:** Whether any products have size/colour/design variants.
-9. **Images:** Where product images will be stored and who can upload/manage them.
-10. **Admin access:** Number of administrators and whether fulfilment staff need separate permissions.
-11. **Customer support:** Official phone number, WhatsApp number, email, and business hours.
-12. **Policies:** Approved privacy, terms, shipping/fulfilment, returns, and cancellation wording.
+### Approval controls
+- Define maker-checker separation for high-risk actions: payment verification, refund approval, bank deposit verification, settlement approval, payout execution, role changes, and financial adjustments.
+- The person who creates a financial entry must not be able to silently self-approve it where independent approval is required.
+- Keep immutable audit events with actor, timestamp, action, entity, before/after values where safe, reason, and correlation/reference IDs.
 
 ---
 
-## 18. Definition of Done
+## 11. QR codes, receipts, and printable labels
 
-The product is ready for launch only when:
+Support the following as distinct concepts:
+1. **Order/delivery label QR:** identifies the order and supports authorized delivery verification.
+2. **Payment QR:** used only for a supported payment flow and amount, if implemented.
+3. **Receipt:** documents a recorded event such as order creation, COD collection, cash handover, bank deposit, payment, refund, or payout.
 
-- The agreed customer shopping and checkout journey works end-to-end.
-- The four categories are available and product/inventory management works.
-- Local service-area rules are enforced by both UI and backend.
-- Manual payment verification is operational and auditable.
-- Order and payment statuses remain separate and follow documented transitions.
-- Admin access and customer order privacy are tested.
-- Acceptance criteria and key failure cases pass.
-- Production configuration, backups, monitoring/logging, and recovery steps are documented.
-- Business policies and all open decisions required for launch have been approved.
+Rules:
+- Never reuse one QR for unrelated security purposes.
+- Never treat an order/delivery QR scan as proof of payment.
+- Receipts must show the correct event, reference number, amount, date/time, and status; pending actions must be labelled pending.
+- Printable delivery labels should include only the minimum customer and order information required for fulfilment.
+- Receipt generation does not itself change financial status.
+- For COD orders, a receipt may confirm order/collection details, but a bank deposit receipt is not proof of a verified deposit until reconciled.
+- QR generation and scanning require both frontend support and server-side validation.
 
 ---
 
-## 19. Change Log
+## 12. Notifications and support
 
-| Version | Date | Notes |
-|---|---|---|
-| 1.0 | 20 October 2026 | Initial PRD draft based on requirements available in the conversation. |
+- Provide in-app status feedback and, if configured, SMS/WhatsApp/email notifications for OTP, order confirmation, assignment, delivery updates, cancellation/refund status, seller approval, and payout status.
+- Use only configured providers and real delivery results. Do not promise notification delivery if a provider has not confirmed it.
+- Avoid exposing OTPs, secrets, bank details, or private internal notes in notifications.
+- Support cases should have reference, category, order link where applicable, priority, status, assigned staff, internal notes, customer-visible replies, and resolution reason.
+- Escalate payment, refund, delivery, safety, fraud, and reconciliation disputes according to a documented policy.
+
+---
+
+## 13. Brand and UI system
+
+### Visual direction
+- Warm, contemporary, handmade, trustworthy, and editorial—not a generic marketplace template.
+- Use the approved eSakhi emblem without distorting proportions or colors.
+- Brand line: **“eSakhi — Handmade with Love. Empowered by You.”**
+- Palette from the current frontend plan: deep rose pink `#D6336C`, soft blush `#FDEEF0`, restrained marigold `#F7C948`, accessible neutral surfaces/text, and semantic status colors.
+- Use realistic product photography and genuine SHG imagery only with permission.
+- Use a consistent spacing/type scale, accessible components, restrained shadows, clear status badges, and purposeful motion.
+- Support **System / Light / Dark** themes. Default to system preference until a choice is made; persist the choice on the device for the first implementation.
+- Meet WCAG 2.2 AA contrast targets: at least 4.5:1 normal text and 3:1 large text and relevant non-text controls. Do not communicate status by color alone.
+
+### Responsive layouts
+- Customer storefront: mobile-first, simple shopping flow, prominent serviceability/payment information.
+- Seller/partner dashboards: usable on mobile because these roles may operate in the field.
+- City/Super Admin: responsive tables with mobile card alternatives, filter/search controls, pagination, bulk actions with confirmation, and clear audit context.
+- Every data-backed view needs loading, empty, error, retry, mutation-pending, and confirmed-success states.
+
+---
+
+## 14. Technical architecture and integration requirements
+
+### Stack and repository
+- Use the existing MERN backend and add a React + TypeScript + Vite frontend if the repository audit confirms that no frontend exists.
+- Keep the existing backend architecture; do not replace working code without justification.
+- Use typed API functions separate from UI components.
+- Use client-side routing with public/customer and role-protected layouts.
+- Keep secrets on the server; frontend environment variables must not contain API keys or credentials.
+- If Vite proxy is configured for local development, leave `VITE_API_BASE_URL` empty when appropriate and use the proxy. Production CORS must allow only exact approved HTTPS frontend origins through server configuration.
+- Handle auth/session expiry and API error responses centrally.
+- Use server-issued sessions/tokens and the existing secure cookie/session contract. Avoid storing sensitive long-lived credentials in localStorage.
+- Use idempotency for checkout and financial mutations where supported.
+- Validate all permissions, amounts, status transitions, stock changes, and city scope on the server.
+
+### Data-model areas to audit/design
+Final models must align with existing schemas. Likely domains include:
+- User, role, permission, session
+- City, service zone, serviceability rule
+- SHG/seller profile and verification
+- Product, inventory adjustment
+- Cart (device-local initially unless durable cart is approved)
+- Order, order item/address snapshots, assignment, fulfilment event
+- Delivery partner profile and eligible zones
+- Payment transaction and payment review
+- COD collection, cash handover, bank deposit, reconciliation discrepancy
+- Refund
+- Seller settlement and payout
+- Partner earning and payout
+- City Admin compensation
+- Support case and internal note
+- Notification event
+- Platform settings and versioned fee/commission rules
+- Audit event
+
+Do not create every proposed model blindly. First compare against the current backend, avoid duplicate concepts, document gaps, and implement the minimum correct model for the approved phase.
+
+### API documentation
+- Treat `backend/docs/API.md` and backend schema/controller validation as the current contract.
+- Map every current route to a screen/action, shared session behavior, health/contract test, or explicit out-of-scope note.
+- If an API contract changes, update `backend/docs/API.md`, developer documentation, validation, tests, and this PRD as necessary in the same change.
+- No frontend-only implementation for security-sensitive or financial features.
+
+---
+
+## 15. Security, privacy, and audit
+
+- Server-side authorization for every protected endpoint and object-level ownership check.
+- Strict city/zone scoping for City Admins and local partners.
+- OTP rate limits, cooldowns, expiry, attempt limits, and safe error handling.
+- Validate all user input on server; protect against injection, mass assignment, insecure direct object references, and replay.
+- Use secure HTTP-only cookies where the current auth design supports them, CSRF protections where required, HTTPS in production, secure headers, and restricted CORS.
+- Minimize customer data visible to sellers and delivery partners.
+- Mask bank and sensitive identity information except where explicitly needed.
+- Never log OTPs, secrets, full payment credentials, or unnecessary personal data.
+- Record sensitive actions in audit logs: role changes, seller approval, assignment/reassignment, stock adjustments, payment decisions, refunds, cash handovers, deposits, settlements, payouts, setting changes, and access/suspension changes.
+- Provide session revocation and account suspension.
+- Establish backup, retention, incident-response, and data-deletion policies before production.
+
+---
+
+## 16. Reports and analytics
+
+### City reports
+- Orders by date/status/zone
+- Sales and order value (clearly labelled gross)
+- Payment method and payment verification state
+- Unassigned/overdue/failed deliveries
+- Active sellers and stock alerts
+- COD collection, handover, deposit, and reconciliation aging
+- Seller settlement and partner payout obligations
+- Cancellation/refund trends
+
+### Platform reports
+- City comparison and serviceability
+- Gross order value vs verified collections vs refunds vs net platform revenue
+- Seller liabilities, partner liabilities, City Admin compensation liabilities
+- Unreconciled COD and bank deposits
+- Refund and payout aging
+- Operational exceptions and audit activity
+
+Exports must respect role permissions and avoid including unnecessary personal data. Do not present estimates as verified figures.
+
+---
+
+## 17. External delivery providers
+
+- Internal eSakhi delivery partners and external logistics providers are separate entities and workflows.
+- Add external provider integration only after serviceability, pricing, account eligibility, pickup/drop flow, tracking, cancellation/return, insurance/liability, and reconciliation requirements are confirmed.
+- Do not assume Amazon Shipping, Shiprocket, Valmo, or any provider serves a particular village/locality without current provider confirmation.
+- Store external tracking/provider references and provider events separately from internal partner assignments.
+- Keep local manual assignment available for the launch unless business policy changes.
+
+---
+
+## 18. Delivery phases
+
+### Phase 0 — Audit and decisions
+- Inspect repository, backend routes, models, middleware, tests, README, environment examples, and existing deployment assumptions.
+- Verify actual existing features against this PRD and `backend/docs/API.md`.
+- Produce a gap matrix: Existing / Partial / Missing / Needs business decision.
+- Confirm launch city/localities, delivery pricing, seller onboarding evidence, payment policy, refund policy, fee/commission rules, payout schedule, bank account ownership, and roles.
+- Do not start with a destructive rewrite.
+
+### Phase 1 — Foundation and customer storefront
+- Add React/TypeScript/Vite only if absent.
+- Build brand system, routing, auth/session client, themes, API error handling, and responsive shared components.
+- Implement home/story, catalogue, product detail, cart, OTP login, address management, checkout, order confirmation/history/details, and cancellation requests against existing APIs.
+- Use backend-configured serviceability and payment methods.
+
+### Phase 2 — Core admin workspace
+- Implement admin dashboard, products, inventory, orders, customer views, settings, payment review, cancellation review, and internal notes according to existing API capabilities.
+- Verify permissions for customer, staff, and admin roles.
+- Add the endpoint coverage matrix and integration tests.
+
+### Phase 3 — City operations, sellers, and delivery
+- Add city/zone management, SHG onboarding, seller dashboard, delivery partner account creation, active/eligible assignment dropdown, assignment/reassignment, partner portal, and QR/label workflow.
+- Implement backend APIs and tests before showing unsupported controls.
+- Validate cross-zone eligibility and city isolation.
+
+### Phase 4 — Financial controls
+- Implement payment records, COD collection ledger, cash handover, bank remittance/deposit verification, reconciliation discrepancies, refunds, seller settlements, partner payouts, City Admin compensation, and platform revenue reporting.
+- Confirm accounting/legal policy and separation of duties before live funds are processed.
+- Use ledger-based transactions and audit logs; never use frontend-only balances.
+
+### Phase 5 — External integrations and enhancements
+- Add payment gateway, SMS/WhatsApp/email, secure image upload, banners/campaigns, gift cards, reviews, wishlist, persistent cart, or external delivery provider integrations only after their requirements and contracts are approved.
+- Do not let optional enhancements block reliable core ordering, delivery, reconciliation, and support.
+
+### Phase 6 — Release readiness
+- Run build, typecheck, unit/integration tests, permission tests, and manual acceptance checks.
+- Test desktop/tablet/mobile, keyboard/screen reader, themes, reduced motion, slow/failing API, database unavailable, expired session, out-of-stock product, invalid zone, failed payment, refund failure, duplicate webhook/mutation, failed delivery, QR replay, COD shortage, and bank reconciliation discrepancy.
+- Review security, backups, logs, real product images/consent, content, policies, and production environment.
+- Do not claim production readiness until the launch gates below are passed.
+
+---
+
+## 19. Launch acceptance criteria
+
+### Customer
+- Customers can browse only real active products and see current prices/stock.
+- Customers cannot check out outside enabled service areas.
+- Checkout uses server-calculated totals and current stock.
+- Customers see only their own orders, addresses, and payment/refund details.
+- All failures and pending states are understandable and recoverable.
+
+### Seller
+- Unapproved sellers cannot publish live products or receive orders.
+- Sellers can see only their own permitted products, orders, and settlement information.
+- Stock and sales changes are server-validated and audited.
+
+### Delivery partner
+- Partners see only their assigned orders and minimum necessary customer information.
+- Only active, city/zone-eligible partners can be assigned.
+- Partner assignment details appear consistently in order lists and details.
+- QR scan cannot bypass server authorization or automatically prove payment.
+- Delivery status changes follow server-defined transitions and have an audit trail.
+
+### City Admin
+- City Admins can manage only their assigned city/zone scope.
+- New eligible partner accounts appear in assignment controls without unnecessary manual refresh.
+- Multiple orders can be assigned to a partner when eligible.
+- Assignment, reassignment, cash handling, and operational exceptions are traceable.
+
+### Super Admin and finance
+- Super Admin can manage cities/admins and see cross-city reports according to permissions.
+- Gross order value is distinct from platform revenue.
+- COD collection, cash handover, bank deposit, and deposit verification are separate records/states.
+- Refunds, settlements, and payouts have independent approval and completion states.
+- No user can silently alter a financial ledger or approve their own high-risk action where maker-checker control is required.
+- All sensitive actions are audited.
+
+### Technical and UI
+- All live business data is API-driven.
+- No secrets are shipped in frontend assets.
+- API documentation and tests are updated with contract changes.
+- UI supports responsive sizes, System/Light/Dark themes, keyboard access, readable contrast, and loading/empty/error/success states.
+- No fake data, fabricated reviews, unverified coverage claims, or false success messages appear in production.
+
+---
+
+## 20. Business decisions still requiring explicit approval
+
+Do not silently guess these decisions. Track them as a launch decision register.
+
+1. **Approved service areas:** Confirm which Damoh localities are live at launch and whether any village coverage is enabled.
+2. **Delivery fees and zone rules:** Fees, distance/zone eligibility, minimum order, delivery hours, pickup availability, and failed-delivery policy.
+3. **Seller onboarding:** Required SHG documents, authorized representative, verification owner, and suspension/rejection appeal.
+4. **Fee/commission model:** Seller share, platform commission, delivery fee, partner earning, City Admin compensation, taxes, and adjustment rules.
+5. **Fund handling:** Whether COD cash goes directly to the business bank account or via City Admin, custody responsibility, deposit deadline, and independent verifier.
+6. **Business/banking/legal model:** Which legal entity receives customer funds and pays sellers/partners; confirm with qualified Indian accounting/legal advisers.
+7. **Payment launch:** COD and manual UPI verification details; gateway provider and eligibility only after approval.
+8. **Refund/cancellation policy:** Eligibility windows, approvers, timelines, partial refunds, failed delivery, and return costs.
+9. **Delivery proof:** Customer OTP, signature, photo, or another consented/appropriate confirmation; QR role and fallback process.
+10. **Payout schedules:** Seller, partner, and City Admin payout frequency, minimums, hold rules, and dispute process.
+11. **Support contacts and policies:** Real phone/email/WhatsApp, operating hours, privacy, terms, returns, and grievance handling.
+12. **Optional features:** Decide timing for uploads, banners, promotions, gift cards, reviews, wishlist, durable cart, and external logistics providers.
+13. **Notifications:** Approved SMS/OTP provider (including the previously discussed MSG1 option, if still selected), WhatsApp/email providers, templates, cost, and consent.
+14. **Role structure:** Whether finance and support are separate roles or permission sets within admin accounts.
+
+---
+
+## 21. Repository audit checklist and implementation rules
+
+Before writing new code:
+- Inspect the root README and package scripts.
+- Inspect backend route registrations, controllers, models, validation schemas, auth middleware, role checks, and tests.
+- Read `backend/docs/API.md`, `.env.example`, and `backend/docs/PRD-INSTRUCTION-REVIEW.md`.
+- Verify actual MongoDB connection/replica-set requirements from the existing code and README; do not assume the database is available.
+- Check whether a frontend already exists before creating one.
+- Map every current endpoint to a planned page/action, session service, health/contract test, or approved out-of-scope item.
+- Record each feature as Existing / Partial / Missing / Blocked by decision.
+- Keep working code and use small, reviewable changes.
+- Add tests for each security-sensitive workflow.
+- Do not commit `.env`, secrets, real customer data, or production credentials.
+- Run the repository’s documented install, development, build, test, and typecheck commands after changes. If a command fails, report the exact failure and do not claim it passed.
+
+### Environment and development
+Follow the repository README and current scripts. The supplied frontend implementation plan mentions Node.js 24, npm, a configured MongoDB replica set, backend/frontend `npm ci`, a backend `.env` based on `.env.example`, and `npm run dev`, `npm run build`, `npm run test`, and `npm run typecheck`. Verify these commands against the actual repository before relying on them. For Vite proxy-based local development, keep `VITE_API_BASE_URL` empty if the proxy is intended to handle requests; production CORS should use exact approved HTTPS origins.
+
+---
+
+## 22. Definition of done
+
+A dashboard is not complete just because its screens look finished. It is done only when:
+1. The intended role and permissions are documented.
+2. Data comes from the correct API/database source.
+3. Backend authorization and object/city scope are tested.
+4. Loading, empty, validation, success, and failure states exist.
+5. Status transitions and business rules are enforced server-side.
+6. Financial changes are ledger-backed and auditable where applicable.
+7. Tests and API documentation are updated.
+8. The feature is checked on mobile and desktop.
+9. Unsupported integrations are clearly marked as planned, not operational.
+10. Acceptance criteria are demonstrated with a non-production test dataset.
+
+**Final implementation direction:** Start with the repository audit and gap matrix, then build in phases. Do not attempt every dashboard and financial integration in one unreviewed rewrite. Stabilize customer ordering first, then city/seller/delivery operations, then financial reconciliation and optional integrations.

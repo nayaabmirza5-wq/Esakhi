@@ -7,6 +7,6 @@ export const settingsRoutes = Router();
 export const adminSettingsRoutes = Router();
 
 settingsRoutes.get('/', getPublicServiceArea);
-adminSettingsRoutes.use(requireAuth, requireRole('admin'));
+adminSettingsRoutes.use(requireAuth, requireRole('admin', 'super_admin'));
 adminSettingsRoutes.get('/', getAdminSettings);
 adminSettingsRoutes.put('/', updateAdminSettings);

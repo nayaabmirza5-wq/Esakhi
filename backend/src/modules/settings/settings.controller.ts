@@ -61,7 +61,7 @@ export const updateAdminSettings: RequestHandler = async (req, res) => {
         actorId,
         action: 'settings.updated',
         resourceType: 'settings',
-        resourceId: updated.id,
+        resourceId: String(updated.id),
         metadata: { changedFields: Object.keys(input) },
       }], { session });
       return updated;

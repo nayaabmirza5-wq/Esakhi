@@ -67,21 +67,21 @@ export const getCustomer: RequestHandler = async (req, res) => {
 
 export const updateCustomerRole: RequestHandler = async (req, res) => {
   const { userId } = z.object({ userId: z.string().regex(/^[a-f\d]{24}$/i) }).parse(req.params);
-  const { role } = z.object({ role: z.enum(['customer', 'staff', 'delivery_partner']) }).strict().parse(req.body);
+  const { role } = z.object({ role: z.enum(['customer', 'staff', 'seller', 'delivery_partner']) }).strict().parse(req.body);
   const actorId = authenticatedUserId(req);
   if (userId === actorId) throw new AppError(400, 'INVALID_REQUEST', 'You cannot change your own role.');
   const session = await mongoose.startSession();
   let user;
   try {
     user = await session.withTransaction(async () => {
-      const updated = await User.findOneAndUpdate({ _id: userId, role: { $in: ['customer', 'staff', 'delivery_partner'] } }, { $set: { role } }, { new: true, session })
+      const updated = await User.findOneAndUpdate({ _id: userId, role: { $in: ['customer', 'staff', 'seller', 'delivery_partner'] } }, { $set: { role } }, { new: true, session })
         .select('phoneE164 name role status');
       if (!updated) throw new AppError(404, 'NOT_FOUND', 'Customer not found.');
       await AuditLog.create([{
         actorId,
         action: 'user.role_updated',
         resourceType: 'user',
-        resourceId: updated.id,
+        resourceId: String(updated.id),
         metadata: { role },
       }], { session });
       return updated;
@@ -112,7 +112,7 @@ export const updateCustomerStatus: RequestHandler = async (req, res) => {
         actorId,
         action: 'user.status_updated',
         resourceType: 'user',
-        resourceId: updated.id,
+        resourceId: String(updated.id),
         metadata: { status },
       }], { session });
       return updated;
@@ -175,7 +175,7 @@ export const updateDeliveryPartnerStatus: RequestHandler = async (req, res) => {
         actorId,
         action: 'delivery_partner.status_updated',
         resourceType: 'user',
-        resourceId: updated.id,
+        resourceId: String(updated.id),
         metadata: { status },
       }], { session });
       return updated;

@@ -16,6 +16,9 @@ import { logger } from './utils/logger.js';
 import { AppError } from './utils/AppError.js';
 import { productImagesDirectory } from './modules/catalog/productImageUpload.js';
 import { adminNotificationRoutes, pushNotificationRoutes } from './modules/notifications/notification.routes.js';
+import { superAdminRoutes } from './modules/superAdmin/superAdmin.routes.js';
+import { cityAdminRoutes } from './modules/cityAdmin/cityAdmin.routes.js';
+import { sellerRoutes } from './modules/seller/seller.routes.js';
 
 export const app = express();
 app.set('trust proxy', env.TRUST_PROXY_HOPS);
@@ -99,7 +102,7 @@ api.get('/', (_req, res) => {
     success: true,
     data: {
       message: 'eSakhi API v1',
-      endpoints: ['/auth', '/products', '/categories', '/service-area', '/orders', '/delivery-partners', '/admin'],
+      endpoints: ['/auth', '/products', '/categories', '/service-area', '/orders', '/delivery-partners', '/admin', '/super-admin'],
       health: '/health',
     },
   });
@@ -119,6 +122,9 @@ api.use('/admin/notifications', adminNotificationRoutes);
 api.use('/admin/settings', adminSettingsRoutes);
 api.use('/admin/inventory', inventoryRoutes);
 api.use('/admin', adminRoutes);
+api.use('/super-admin', superAdminRoutes);
+api.use('/city-admin', cityAdminRoutes);
+api.use('/seller', sellerRoutes);
 app.use('/api/v1', api);
 
 app.use((_req, res) => {

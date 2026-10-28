@@ -19,6 +19,7 @@ const productSchema = new Schema(
     slug: { type: String, trim: true, lowercase: true, required: true, unique: true },
     description: { type: String, trim: true, required: true, maxlength: 5000 },
     category: { type: String, enum: ['Bangles', 'Jewellery', 'Dupattas', 'Others'], required: true, index: true },
+    sellerId: { type: Schema.Types.ObjectId, ref: 'User', index: true, default: null },
     pricePaise: { type: Number, min: 1, required: true },
     imageUrls: { type: [String], default: [] },
     variants: { type: [variantSchema], default: [] },

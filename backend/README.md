@@ -1,6 +1,6 @@
 # eSakhi backend
 
-Backend-only implementation for the eSakhi handmade-products marketplace. It uses Express 5, TypeScript, MongoDB/Mongoose, Zod validation, phone OTP authentication, and versioned REST APIs. No frontend has been generated.
+Backend implementation for the eSakhi handmade-products marketplace. It uses Express 5, TypeScript, MongoDB/Mongoose, Zod validation, phone OTP authentication, and versioned REST APIs. The React frontend lives in [`../frontend`](../frontend) and uses these APIs for the storefront and existing staff/admin workflows.
 
 ## Requirements
 
@@ -31,7 +31,12 @@ From the repository root, run `npm run dev` to start both the backend and fronte
    ```
 
    The command provisions that phone number as an admin and seeds the supplied launch area (Damoh, Madhya Pradesh, PIN 470661) as disabled until the business configures fulfilment. There is no public admin-registration or role-promotion endpoint.
-8. Configure launch settings using the protected `PUT /api/v1/admin/settings` endpoint. Enable pickup/delivery and UPI/cash only after the business has confirmed the relevant instructions, serviceable localities, PIN codes, and fees. Delivery validation matches the configured locality and PIN code; it does not verify an official municipal boundary. Select a stock reservation policy: `stockReservationHours: null` keeps stock reserved until staff/admin action; an integer from 1 to 720 enables automatic expiry of unconfirmed reservations.
+8. To provision a separate Super Admin account, run `npm run super-admin:create -- +91XXXXXXXXXX` from `backend/` in a trusted terminal. This assigns the `super_admin` role and writes a system audit event; it does not grant the existing `admin` role or configure store settings.
+9. To provision a City Admin for the configured launch city, run `npm run city-admin:create -- +91XXXXXXXXXX` from a trusted terminal. This assigns the `city_admin` role and `Settings.city`, writes a system audit event, and does not grant store-wide admin privileges. If an active account already has an administrative or operational role, the command refuses to change it unless the operator explicitly adds `--replace-existing-role`; that reassigns the existing account (without deleting its user record or other profile data) and audits the previous role. Disabled accounts must go through the approved recovery process first. The City Admin portal currently provides city-scoped, read-only order and dashboard APIs.
+10. After seller approval, provision the seller account from a trusted terminal with `npm run seller:create -- +91XXXXXXXXXX`. This assigns only the `seller` role and writes a system audit event. It can create an account for a new number or promote an active customer account; it refuses disabled accounts and accounts with another operational/admin role. Product assignment and seller onboarding workflows remain separate.
+11. Configure launch settings using the protected `PUT /api/v1/admin/settings` endpoint. Enable pickup/delivery and UPI/cash only after the business has confirmed the relevant instructions, serviceable localities, PIN codes, and fees. Delivery validation matches the configured locality and PIN code; it does not verify an official municipal boundary. Select a stock reservation policy: `stockReservationHours: null` keeps stock reserved until staff/admin action; an integer from 1 to 720 enables automatic expiry of unconfirmed reservations.
+
+The initial Super Admin workspace at `/super-admin` and `/api/v1/super-admin/overview` is read-only and reports existing database counts. The City Admin workspace at `/city-admin` is limited to the configured assigned city and provides read-only order metrics and order lists. City/zone management, seller workflows, finance, refunds, payouts, support, assignment mutations, and audit-log browsing remain future phases.
 
 ## MSG91 production setup
 

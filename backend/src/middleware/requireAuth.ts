@@ -3,11 +3,13 @@ import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
 import { AppError } from '../utils/AppError.js';
 import { User } from '../modules/auth/user.model.js';
+import type { UserRole } from '../modules/auth/roles.js';
 
 export interface AuthUser {
   id: string;
-  role: 'customer' | 'staff' | 'admin' | 'delivery_partner';
+  role: UserRole;
   status: 'active' | 'disabled';
+  assignedCity?: string;
 }
 
 declare global {
@@ -41,11 +43,11 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
     next(new AppError(401, 'TOKEN_INVALID', 'The access token is invalid.'));
     return;
   }
-  const user = await User.findById(payload.sub).select('_id role status').lean();
+  const user = await User.findById(payload.sub).select('_id role status assignedCity').lean();
   if (!user || user.status !== 'active') {
     next(new AppError(401, 'UNAUTHORIZED', 'The account is unavailable.'));
     return;
   }
-  req.user = { id: user._id.toString(), role: user.role, status: user.status };
+  req.user = { id: user._id.toString(), role: user.role, status: user.status, ...(user.assignedCity ? { assignedCity: user.assignedCity } : {}) };
   next();
 };

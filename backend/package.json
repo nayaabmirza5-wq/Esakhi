@@ -12,7 +12,10 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "admin:create": "tsx src/scripts/createAdmin.ts"
+    "admin:create": "tsx src/scripts/createAdmin.ts",
+    "super-admin:create": "tsx src/scripts/createSuperAdmin.ts",
+    "city-admin:create": "tsx src/scripts/createCityAdmin.ts",
+    "seller:create": "tsx src/scripts/createSeller.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

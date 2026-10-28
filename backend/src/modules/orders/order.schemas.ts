@@ -11,6 +11,7 @@ const addressSchema = z.object({
 
 const orderItemSchema = z.object({
   productId: z.string().regex(/^[a-f\d]{24}$/i),
+  sellerId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
   variantId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
   quantity: z.number().int().min(1).max(99),
 }).strict();

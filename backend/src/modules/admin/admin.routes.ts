@@ -4,7 +4,7 @@ import { requireRole } from '../../middleware/requireRole.js';
 import { adminDashboard, getCustomer, getDeliveryPartner, listCustomerOrders, listCustomers, listDeliveryPartners, updateCustomerRole, updateCustomerStatus, updateDeliveryPartnerStatus } from './admin.controller.js';
 
 export const adminRoutes = Router();
-adminRoutes.use(requireAuth, requireRole('admin'));
+adminRoutes.use(requireAuth, requireRole('admin', 'super_admin'));
 adminRoutes.get('/dashboard', adminDashboard);
 adminRoutes.get('/customers', listCustomers);
 adminRoutes.get('/customers/:customerId', getCustomer);
