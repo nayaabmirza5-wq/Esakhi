@@ -1,4 +1,4 @@
-export type Role = 'customer' | 'staff' | 'admin' | 'delivery_partner';
+export type Role = 'customer' | 'staff' | 'admin' | 'city_admin' | 'seller' | 'delivery_partner' | 'super_admin';
 
 export interface User {
   id: string;
@@ -9,6 +9,7 @@ export interface User {
   name?: string;
   email?: string;
   role: Role;
+  assignedCity?: string;
   status?: 'active' | 'disabled';
   savedAddresses?: Address[];
 }
@@ -37,6 +38,7 @@ export interface Variant {
 export interface Product {
   _id: string;
   id?: string;
+  sellerId?: string | null;
   name: string;
   slug: string;
   description: string;
@@ -124,6 +126,32 @@ export interface DeliveryPartner extends Omit<User, 'id'> {
   assignedCount: number;
 }
 
+export interface SellerOrder {
+  _id: string;
+  orderReference: string;
+  fulfilmentMethod: 'delivery' | 'pickup';
+  fulfilmentStatus: string;
+  paymentStatus: 'pending_verification' | 'confirmed' | 'rejected';
+  items: Array<{ productName: string; quantity: number; lineTotalPaise: number }>;
+  subtotalPaise: number;
+  createdAt: string;
+}
+
+export interface SellerDashboard {
+  metrics: {
+    activeProducts: number;
+    lowStockProducts: number;
+    totalProducts: number;
+    newOrders: number;
+    ordersToPrepare: number;
+    readyOrders: number;
+    completedOrders: number;
+    grossPaidProductSalesThisMonthPaise: number;
+  };
+  recentOrders: SellerOrder[];
+  unavailableMetrics: string[];
+}
+
 export interface Locality {
   name: string;
   postalCodes: string[];
@@ -167,4 +195,128 @@ export interface Dashboard {
   pendingPayments: number;
   lowStockItems: number;
   recentOrders: Order[];
+}
+
+export interface SuperAdminOverview {
+  generatedAt: string;
+  days: number;
+  metrics: {
+    activeCustomers: number;
+    activeDeliveryPartners: number;
+    activeProducts: number;
+    totalOrders: number;
+    orderValuePaise: number;
+    pendingPayments: number;
+    ordersNeedingAction: number;
+    unassignedDeliveryOrders: number;
+    lowStockItems: number;
+  };
+  ordersByFulfilmentStatus: Array<{ status: string; count: number }>;
+  ordersOverTime: Array<{ day: string; count: number }>;
+  recentOrders: Array<{
+    _id: string;
+    customerId?: string;
+    orderReference: string;
+    customerName: string;
+    address?: { city: string };
+    items: Array<{ productName: string }>;
+    fulfilmentStatus: string;
+    paymentStatus: string;
+    paymentMethod: string;
+    totalPaise: number;
+    createdAt: string;
+    deliveryPartner?: { userId?: string; name: string };
+  }>;
+  unavailableModules: string[];
+}
+
+export interface SuperAdminOrder {
+  _id: string;
+  customerId?: string;
+  orderReference: string;
+  customerName: string;
+  address?: { city: string };
+  items: Array<{ productName: string }>;
+  fulfilmentStatus: string;
+  paymentStatus: string;
+  paymentMethod: string;
+  totalPaise: number;
+  createdAt: string;
+  deliveryPartner?: { userId?: string; name: string };
+}
+
+export interface SuperAdminCitySummary {
+  city: string;
+  state?: string;
+  configured: boolean;
+  cityAdminName: string | null;
+  cityAdminCount: number;
+  sellerCount: number;
+  deliveryPartnerCount: number;
+  orderCount: number;
+  serviceZoneCount: number;
+}
+
+export interface SuperAdminCity extends Omit<SuperAdminCitySummary, 'cityAdminName' | 'cityAdminCount' | 'sellerCount' | 'deliveryPartnerCount' | 'orderCount' | 'serviceZoneCount'> {
+  serviceableLocalities: Locality[];
+  cityAdmins: User[];
+  sellers: User[];
+  deliveryPartners: User[];
+  metrics: {
+    cityAdmins: number;
+    sellers: number;
+    deliveryPartners: number;
+    orders: number;
+    serviceZones: number;
+  };
+  recentOrders: SuperAdminOrder[];
+}
+
+export interface AuditLogEntry {
+  _id: string;
+  actorId?: Pick<User, 'id' | '_id' | 'name' | 'role' | 'phoneE164'> | null;
+  actorType: 'user' | 'system';
+  action: string;
+  resourceType: string;
+  resourceId: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface CityAdminDashboard {
+  city: string;
+  generatedAt: string;
+  metrics: {
+    todayOrders: number;
+    awaitingAssignment: number;
+    outForDelivery: number;
+    deliveredToday: number;
+    ordersNeedingAction: number;
+    paymentsToReview: number;
+  };
+  ordersByStatus: Array<{ status: string; count: number }>;
+  ordersOverTime: Array<{ day: string; count: number }>;
+  recentOrders: CityAdminOrder[];
+  assignmentExceptions: Array<{
+    _id: string;
+    orderReference: string;
+    address?: { locality: string };
+    fulfilmentStatus: string;
+    createdAt: string;
+  }>;
+  unavailableMetrics: string[];
+}
+
+export interface CityAdminOrder {
+  _id: string;
+  orderReference: string;
+  customerName: string;
+  items: Array<{ productName: string }>;
+  totalPaise: number;
+  paymentMethod: 'upi' | 'cash';
+  paymentStatus: 'pending_verification' | 'confirmed' | 'rejected';
+  fulfilmentStatus: string;
+  deliveryPartner?: { name: string };
+  address?: { locality: string };
+  createdAt: string;
 }

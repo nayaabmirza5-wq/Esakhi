@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent, FormEvent, ReactNode } from 'react';
-import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ApiError, api, refreshSession, resolveProductImageUrl, setAccessToken } from './api';
-import type { Address, Order, Product, Settings, User } from './types';
+import type { Address, AuditLogEntry, CityAdminOrder, Order, Product, SellerOrder, Settings, SuperAdminCity, SuperAdminCitySummary, SuperAdminOrder, User } from './types';
 import { disableOrderPushNotifications, enableOrderPushNotifications, pushNotificationsConfigured } from './pushNotifications';
 
 type AuthContextValue = {
@@ -127,6 +127,7 @@ function useRefreshOnFocus(reload: (showLoading?: boolean) => Promise<void>): vo
 }
 
 function App(): ReactNode {
+  const location = useLocation();
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const [theme, setTheme] = useState(() => localStorage.getItem('esakhi-theme') || 'system');
@@ -252,26 +253,60 @@ function App(): ReactNode {
     () => ({ lines, add, setQuantity, remove, clear, syncProduct }),
     [lines, add, setQuantity, remove, clear, syncProduct]
   );
+  const isDeliveryPortal = location.pathname.startsWith('/delivery-partner');
+  const isSellerPortal = location.pathname.startsWith('/seller');
 
   // Keep the rest of your original App() code here, unchanged.
   return (
     <AuthContext.Provider value={authValue}>
       <CartContext.Provider value={cartValue}>
         <div className="app-shell">
-          <Header theme={theme} setTheme={setTheme} />
+          {!location.pathname.startsWith('/super-admin') && !location.pathname.startsWith('/city-admin') && !isDeliveryPortal && !isSellerPortal && <Header theme={theme} setTheme={setTheme} />}
           <main id="main-content">
             <Routes>
               <Route path="/" element={<HomePage />} />
               <Route path="/shop" element={<ShopPage />} />
               <Route path="/products/:slug" element={<ProductPage />} />
               <Route path="/our-story" element={<StoryPage />} />
-              <Route path="/signin" element={<SignInPage />} />
+              <Route path="/service-area" element={<ServiceAreaPage />} />
+              <Route path="/help" element={<HelpPage />} />
+              <Route path="/sign-in" element={<SignInPage />} />
+              <Route path="/signin" element={<Navigate to="/sign-in" replace />} />
               <Route path="/cart" element={<CartPage />} />
               <Route path="/checkout" element={<CheckoutPage />} />
               <Route path="/account" element={<AccountPage />} />
+              <Route path="/account/profile" element={<AccountProfilePage />} />
               <Route path="/orders" element={<OrdersPage />} />
               <Route path="/orders/:id" element={<CustomerOrderPage />} />
               <Route path="/delivery-partner" element={<DeliveryPartnerGate><DeliveryPartnerPage /></DeliveryPartnerGate>} />
+              <Route path="/seller" element={<SellerGate><SellerPortalPage /></SellerGate>} />
+              <Route path="/super-admin" element={<SuperAdminGate><SuperAdminOverviewPage /></SuperAdminGate>} />
+              <Route path="/super-admin/cities" element={<SuperAdminGate><SuperAdminCitiesPage /></SuperAdminGate>} />
+              <Route path="/super-admin/cities/:city" element={<SuperAdminGate><SuperAdminCityDetailPage /></SuperAdminGate>} />
+              <Route path="/super-admin/city-administrators" element={<SuperAdminGate><SuperAdminCityAdministratorsPage /></SuperAdminGate>} />
+              <Route path="/super-admin/city-administrators/:id" element={<SuperAdminGate><SuperAdminCityAdminDetailPage /></SuperAdminGate>} />
+              <Route path="/super-admin/sellers" element={<SuperAdminGate><SuperAdminSellersPage /></SuperAdminGate>} />
+              <Route path="/super-admin/sellers/:id" element={<SuperAdminGate><SuperAdminSellerDetailPage /></SuperAdminGate>} />
+              <Route path="/super-admin/products" element={<SuperAdminGate><SuperAdminProductsPage /></SuperAdminGate>} />
+              <Route path="/super-admin/products/:id" element={<SuperAdminGate><SuperAdminProductDetailPage /></SuperAdminGate>} />
+              <Route path="/super-admin/orders" element={<SuperAdminGate><SuperAdminOrdersPage /></SuperAdminGate>} />
+              <Route path="/super-admin/orders/:id" element={<SuperAdminGate><SuperAdminOrderDetailPage /></SuperAdminGate>} />
+              <Route path="/super-admin/delivery-partners" element={<SuperAdminGate><SuperAdminDeliveryPartnersPage /></SuperAdminGate>} />
+              <Route path="/super-admin/delivery-partners/:id" element={<SuperAdminGate><SuperAdminDeliveryPartnerDetailPage /></SuperAdminGate>} />
+              <Route path="/super-admin/external-delivery-providers" element={<SuperAdminGate><SuperAdminExternalDeliveryProvidersPage /></SuperAdminGate>} />
+              <Route path="/super-admin/customers" element={<SuperAdminGate><SuperAdminCustomersPage /></SuperAdminGate>} />
+              <Route path="/super-admin/customers/:id" element={<SuperAdminGate><SuperAdminCustomerDetailPage /></SuperAdminGate>} />
+              <Route path="/super-admin/support" element={<SuperAdminGate><SuperAdminSupportPage /></SuperAdminGate>} />
+              <Route path="/super-admin/payments" element={<SuperAdminGate><SuperAdminPaymentsPage /></SuperAdminGate>} />
+              <Route path="/super-admin/refunds" element={<SuperAdminGate><SuperAdminRefundsPage /></SuperAdminGate>} />
+              <Route path="/super-admin/settlements" element={<SuperAdminGate><SuperAdminSettlementsPage /></SuperAdminGate>} />
+              <Route path="/super-admin/payouts" element={<SuperAdminGate><SuperAdminPayoutsPage /></SuperAdminGate>} />
+              <Route path="/super-admin/reports" element={<SuperAdminGate><SuperAdminReportsPage /></SuperAdminGate>} />
+              <Route path="/super-admin/settings" element={<SuperAdminGate><SuperAdminSettingsPage /></SuperAdminGate>} />
+              <Route path="/super-admin/roles" element={<SuperAdminGate><SuperAdminRolesPage /></SuperAdminGate>} />
+              <Route path="/super-admin/security" element={<SuperAdminGate><SuperAdminSecurityPage /></SuperAdminGate>} />
+              <Route path="/city-admin" element={<CityAdminGate><CityAdminDashboardPage /></CityAdminGate>} />
+              <Route path="/city-admin/orders" element={<CityAdminGate><CityAdminOrdersPage /></CityAdminGate>} />
               <Route path="/admin" element={<AdminGate><AdminDashboardPage /></AdminGate>} />
               <Route path="/admin/products" element={<AdminGate><AdminProductsPage /></AdminGate>} />
               <Route path="/admin/inventory" element={<AdminGate adminOnly><AdminInventoryPage /></AdminGate>} />
@@ -286,7 +321,7 @@ function App(): ReactNode {
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </main>
-          <Footer />
+          {!location.pathname.startsWith('/super-admin') && !isDeliveryPortal && !isSellerPortal && <Footer />}
         </div>
       </CartContext.Provider>
     </AuthContext.Provider>
@@ -309,7 +344,9 @@ function Header({ theme, setTheme }: { theme: string; setTheme: (value: string) 
           <NavLink to="/shop">Shop</NavLink>
           <NavLink to="/our-story">Our story</NavLink>
           {user && <NavLink to="/orders">My orders</NavLink>}
+          {user?.role === 'city_admin' && <NavLink to="/city-admin">City Admin</NavLink>}
           {user && (user.role === 'admin' || user.role === 'staff') && <NavLink to="/admin">Workspace</NavLink>}
+          {user?.role === 'super_admin' && <NavLink to="/super-admin">Super Admin</NavLink>}
           {user?.role === 'delivery_partner' && <NavLink to="/delivery-partner">Delivery portal</NavLink>}
         </nav>
         <div className="header-actions">
@@ -325,7 +362,7 @@ function Header({ theme, setTheme }: { theme: string; setTheme: (value: string) 
               <Link className="account-link" to="/account">{user.name || user.phone || 'Account'}</Link>
               <button className="text-button" onClick={() => void signOut().then(() => navigate('/'))}>Sign out</button>
             </div>
-          ) : <Link className="button button-small button-outline" to="/signin" state={{ from: location.pathname }}>Sign in</Link>}
+          ) : <Link className="button button-small button-outline" to="/sign-in" state={{ from: location.pathname }}>Sign in</Link>}
         </div>
       </div>
     </header>
@@ -338,8 +375,8 @@ function Footer(): ReactNode {
     <footer className="site-footer">
       <div className="footer-main">
         <Link to="/" className="footer-brand"><img src="/images/esakhi-emblem.png" alt="" /><span>Handmade with love.<br />Empowered by you.</span></Link>
-        <div><strong>Explore</strong><Link to="/shop">Shop handmade</Link><Link to="/our-story">Our story</Link><Link to="/cart">Your bag</Link></div>
-        <div><strong>Your account</strong><Link to="/account">Profile</Link><Link to="/orders">Order history</Link><Link to="/signin">Sign in</Link></div>
+        <div><strong>Explore</strong><Link to="/shop">Shop handmade</Link><Link to="/our-story">Our story</Link><Link to="/service-area">Service area</Link><Link to="/help">Help & policies</Link><Link to="/cart">Your bag</Link></div>
+        <div><strong>Your account</strong><Link to="/account">Profile</Link><Link to="/orders">Order history</Link><Link to="/sign-in">Sign in</Link></div>
       </div>
       <div className="footer-bottom"><span>eSakhi · Made together, with care.</span><span className={`api-status ${loading ? '' : data ? 'online' : 'offline'}`}><i />{loading ? 'Checking store connection' : data ? 'Store API online' : 'Store connection issue'}</span></div>
     </footer>
@@ -583,6 +620,91 @@ function StoryPage(): ReactNode {
   );
 }
 
+function ServiceAreaPage(): ReactNode {
+  const service = useLoad(() => api.serviceArea());
+  const data = service.data;
+
+  return (
+    <div className="page-container">
+      <PageIntro eyebrow="Local fulfilment" title="Service area" description="Coverage and delivery options shown here come from eSakhi store settings." />
+      {service.loading ? <Loading label="Loading service-area settings…" /> : service.error ? (
+        <><Notice tone="error">{service.error}</Notice><button className="button button-outline" onClick={() => void service.reload()}>Retry</button></>
+      ) : data ? (
+        <>
+          {!data.configured && <Notice>Service-area settings are not configured yet. Ordering options will appear here when the store is ready.</Notice>}
+          <div className="service-info-grid">
+            <section className="panel">
+              <h2>{data.city && data.state ? `${data.city}, ${data.state}` : 'Coverage'}</h2>
+              <p>{data.deliveryEnabled ? 'Delivery is enabled for the localities listed below.' : 'Delivery is not currently enabled.'}</p>
+              {data.pickupEnabled && <p>Pickup is enabled.{data.pickupInstructions ? ` ${data.pickupInstructions}` : ''}</p>}
+              {(data.serviceableLocalities ?? []).length > 0 ? (
+                <ul className="service-area-list">
+                  {data.serviceableLocalities?.map((locality) => (
+                    <li key={locality.name}>
+                      <strong>{locality.name}</strong>
+                      <span>PIN {locality.postalCodes.join(', ')}</span>
+                      {locality.deliveryFeePaise !== undefined && <span>Delivery fee: {formatMoney(locality.deliveryFeePaise)}</span>}
+                    </li>
+                  ))}
+                </ul>
+              ) : <p>No delivery localities are currently published.</p>}
+            </section>
+            <section className="panel">
+              <h2>Payment options</h2>
+              {data.paymentMethods?.upi || data.paymentMethods?.cash ? (
+                <ul className="service-area-list">
+                  {data.paymentMethods.upi && <li><strong>UPI</strong>{data.paymentMethods.upi.instructions && <span>{data.paymentMethods.upi.instructions}</span>}</li>}
+                  {data.paymentMethods.cash && <li><strong>Cash</strong>{data.paymentMethods.cash.instructions && <span>{data.paymentMethods.cash.instructions}</span>}</li>}
+                </ul>
+              ) : <p>No payment methods are currently available.</p>}
+            </section>
+          </div>
+          <p className="service-area-footnote">Availability is confirmed again by the server during checkout.</p>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function HelpPage(): ReactNode {
+  const service = useLoad(() => api.serviceArea());
+  const data = service.data;
+  const policies = Object.entries(data?.policies ?? {}).filter(([, content]) => content.trim());
+
+  return (
+    <div className="page-container">
+      <PageIntro eyebrow="We're here to help" title="Help & policies" description="Contact details and store policies are shown only when configured by an administrator." />
+      {service.loading ? <Loading label="Loading help information…" /> : service.error ? (
+        <><Notice tone="error">{service.error}</Notice><button className="button button-outline" onClick={() => void service.reload()}>Retry</button></>
+      ) : data ? (
+        <div className="help-content">
+          <section className="panel">
+            <h2>Contact</h2>
+            {data.phone && <p><strong>Phone:</strong> {data.phone}</p>}
+            {data.whatsapp && <p><strong>WhatsApp:</strong> {data.whatsapp}</p>}
+            {data.address && <p><strong>Address:</strong> {data.address}</p>}
+            {!data.phone && !data.whatsapp && !data.address && <p>Contact information has not been configured yet.</p>}
+          </section>
+          <section className="panel">
+            <h2>Store policies</h2>
+            {policies.length ? (
+              <div className="policy-list">
+                {policies.map(([name, content]) => (
+                  <article key={name}>
+                    <h3>{name.replace(/[_-]/g, ' ')}</h3>
+                    <p>{content}</p>
+                  </article>
+                ))}
+              </div>
+            ) : <p>Store policies have not been published yet.</p>}
+          </section>
+        </div>
+      ) : null}
+      <p className="service-area-footnote"><Link className="quiet-link" to="/service-area">View current service-area settings</Link></p>
+    </div>
+  );
+}
+
 function SignInPage(): ReactNode {
   const { setSession, user, reloadUser } = useAuth();
   const navigate = useNavigate();
@@ -593,7 +715,7 @@ function SignInPage(): ReactNode {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const signInState = location.state as { from?: string; checkoutState?: unknown } | null;
-  if (user) return <div className="page-container narrow"><Notice tone="success">You are signed in as {user.name || user.phone}.</Notice><Link to={user.role === 'admin' || user.role === 'staff' ? '/admin' : '/account'} className="button">Continue</Link></div>;
+  if (user) return <div className="page-container narrow"><Notice tone="success">You are signed in as {user.name || user.phone}.</Notice><Link to={user.role === 'city_admin' ? '/city-admin' : user.role === 'admin' || user.role === 'staff' ? '/admin' : '/account'} className="button">Continue</Link></div>;
   const submitPhone = async (event: FormEvent) => {
     event.preventDefault(); setLoading(true); setError('');
     try { await api.requestOtp(phone); setRequested(true); }
@@ -606,7 +728,7 @@ function SignInPage(): ReactNode {
       const session = await api.verifyOtp(phone, code);
       setSession(session.user, session.accessToken);
       await reloadUser();
-      navigate(signInState?.from || (session.user.role === 'admin' || session.user.role === 'staff' ? '/admin' : session.user.role === 'delivery_partner' ? '/delivery-partner' : '/account'), { replace: true, state: signInState?.checkoutState });
+      navigate(signInState?.from || (session.user.role === 'super_admin' ? '/super-admin' : session.user.role === 'city_admin' ? '/city-admin' : session.user.role === 'admin' || session.user.role === 'staff' ? '/admin' : session.user.role === 'delivery_partner' ? '/delivery-partner' : session.user.role === 'seller' ? '/seller' : '/account'), { replace: true, state: signInState?.checkoutState });
     } catch (cause) { setError(displayError(cause)); }
     finally { setLoading(false); }
   };
@@ -651,7 +773,7 @@ function CheckoutPage(): ReactNode {
     if (availablePayments?.upi) setPayment('upi');
     else if (availablePayments?.cash) setPayment('cash');
   }, [availablePayments]);
-  if (!user) return <div className="page-container narrow"><PageIntro title="Sign in to continue" description="Orders are linked to your verified phone number." /><Link to="/signin" state={{ from: '/checkout', checkoutState: location.state }} className="button">Sign in</Link></div>;
+  if (!user) return <div className="page-container narrow"><PageIntro title="Sign in to continue" description="Orders are linked to your verified phone number." /><Link to="/sign-in" state={{ from: '/checkout', checkoutState: location.state }} className="button">Sign in</Link></div>;
   if (!checkoutLines.length) return <div className="page-container"><EmptyState title="Your bag is empty"><Link to="/shop" className="button">Find something handmade</Link></EmptyState></div>;
   const set = (key: keyof typeof values, value: string) => setValues((current) => ({ ...current, [key]: value }));
   const submit = async (event: FormEvent) => {
@@ -681,6 +803,82 @@ function CheckoutPage(): ReactNode {
 }
 
 function AccountPage(): ReactNode {
+  const { user } = useAuth();
+  if (!user) return <SignInPrompt />;
+  if (user.role === 'customer') return <CustomerDashboardPage />;
+  return <AccountProfilePage />;
+}
+
+function CustomerDashboardPage(): ReactNode {
+  const { user } = useAuth();
+  const { lines } = useCart();
+  const orders = useLoad(() => api.myOrders(1, 3), [user?.id]);
+  useRefreshOnFocus(orders.reload);
+  if (!user) return <SignInPrompt />;
+  const recentOrders = orders.data?.data ?? [];
+  const itemCount = lines.reduce((total, line) => total + line.quantity, 0);
+
+  return (
+    <div className="page-container customer-dashboard">
+      <section className="customer-dashboard-welcome">
+        <div>
+          <span className="customer-dashboard-kicker">Your eSakhi account</span>
+          <h1>Welcome back{user.name ? `, ${user.name}` : ''}</h1>
+          <p>Your orders, saved details, and handmade finds, all in one place.</p>
+        </div>
+        <Link to="/shop" className="customer-dashboard-shop-link">Explore handmade <span aria-hidden="true">→</span></Link>
+        <span className="customer-dashboard-flower" aria-hidden="true">✿</span>
+      </section>
+
+      <div className="customer-dashboard-shortcuts" aria-label="Account overview">
+        <Link to="/orders" className="customer-dashboard-stat">
+          <span className="customer-dashboard-stat-icon" aria-hidden="true">↗</span>
+          <span><small>Your orders</small><strong>{orders.loading ? '…' : (orders.data?.pagination.total ?? 0).toLocaleString('en-IN')}</strong><small>View order history</small></span>
+        </Link>
+        <Link to="/account/profile#saved-address" className="customer-dashboard-stat">
+          <span className="customer-dashboard-stat-icon" aria-hidden="true">⌖</span>
+          <span><small>Saved addresses</small><strong>{(user.savedAddresses?.length ?? 0).toLocaleString('en-IN')}</strong><small>Manage delivery details</small></span>
+        </Link>
+        <Link to="/cart" className="customer-dashboard-stat">
+          <span className="customer-dashboard-stat-icon" aria-hidden="true">♡</span>
+          <span><small>Your bag</small><strong>{itemCount.toLocaleString('en-IN')}</strong><small>{itemCount === 1 ? 'piece' : 'pieces'} ready to view</small></span>
+        </Link>
+      </div>
+
+      <div className="customer-dashboard-content">
+        <section className="customer-dashboard-panel customer-dashboard-recent">
+          <div className="customer-dashboard-panel-heading">
+            <div><span className="customer-dashboard-kicker">Your purchases</span><h2>Recent orders</h2></div>
+            <Link to="/orders">All orders <span aria-hidden="true">→</span></Link>
+          </div>
+          {orders.loading ? <Loading label="Loading your orders…" /> : orders.error ? <div className="customer-dashboard-panel-state"><Notice tone="error">{orders.error}</Notice><button className="button button-outline" onClick={() => void orders.reload()}>Try again</button></div> : recentOrders.length ? (
+            <div className="customer-dashboard-order-list">
+              {recentOrders.map((order) => <OrderCard key={order._id} order={order} to={`/orders/${encodeURIComponent(order._id)}`} />)}
+            </div>
+          ) : <div className="customer-dashboard-empty"><span aria-hidden="true">✿</span><h3>Your next favorite is waiting</h3><p>Your orders will appear here after you find something made with care.</p><Link to="/shop" className="button">Discover handmade</Link></div>}
+        </section>
+
+        <aside className="customer-dashboard-side">
+          <section className="customer-dashboard-panel customer-dashboard-profile">
+            <div className="customer-dashboard-panel-heading"><div><span className="customer-dashboard-kicker">A little about you</span><h2>Account details</h2></div><Link to="/account/profile">Edit</Link></div>
+            <div className="customer-dashboard-profile-detail"><span className="customer-dashboard-profile-avatar" aria-hidden="true">{(user.name?.trim().charAt(0) || 'S').toLocaleUpperCase('en-IN')}</span><span><strong>{user.name || 'Add your name'}</strong><small>{user.phone || 'Verified phone account'}</small></span></div>
+            <div className="customer-dashboard-address">
+              <span className="customer-dashboard-kicker">Delivery address</span>
+              {user.savedAddresses?.[0] ? <p>{user.savedAddresses[0].addressLine1}, {user.savedAddresses[0].locality}, {user.savedAddresses[0].city}</p> : <p>No saved address yet. Add one to make checkout easier.</p>}
+              <Link to="/account/profile#saved-address">{user.savedAddresses?.length ? 'Manage saved address' : 'Add an address'} <span aria-hidden="true">→</span></Link>
+            </div>
+          </section>
+          <section className="customer-dashboard-community">
+            <span className="customer-dashboard-community-mark" aria-hidden="true">✿</span>
+            <div><span className="customer-dashboard-kicker">Made together</span><h2>Every order supports a maker.</h2><p>Discover thoughtful pieces from women-led local businesses.</p><Link to="/shop">Meet your next handmade find <span aria-hidden="true">→</span></Link></div>
+          </section>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+function AccountProfilePage(): ReactNode {
   const { user, reloadUser } = useAuth();
   const [name, setName] = useState(user?.name ?? '');
   const [error, setError] = useState('');
@@ -712,7 +910,7 @@ function AccountPage(): ReactNode {
       setError(displayError(cause));
     }
   };
-  return <div className="page-container narrow"><PageIntro eyebrow="Your account" title={`Hello${user.name ? `, ${user.name}` : ''}`} description="Manage your profile and find your past orders." /><div className="account-role"><span className="status-dot" /> Signed in as {user.role}</div>{error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}<form className="stack-form panel" onSubmit={(event) => void submit(event)}><label className="field"><span>Your name</span><input maxLength={120} value={name} onChange={(event) => setName(event.target.value)} /></label><label className="field"><span>Verified phone</span><input value={user.phone ?? ''} disabled /></label><button className="button">Save profile</button></form>{user.role === 'customer' && <section className="panel push-notification-settings"><h2>Order notifications</h2><p>Get a browser notification when your order status changes. Notifications are optional and require browser permission.</p>{pushNotificationsConfigured ? <button className="button button-outline" onClick={() => void togglePush()}>{pushEnabled ? 'Disable on this device' : 'Enable order notifications'}</button> : <Notice>Push notifications are not configured for this app yet.</Notice>}</section>}<div className="account-links"><Link to="/orders" className="button button-outline">View order history</Link>{user.role === 'delivery_partner' && <Link to="/delivery-partner" className="button button-outline">Open delivery portal</Link>}{(user.role === 'admin' || user.role === 'staff') && <Link to="/admin" className="button button-outline">Open workspace</Link>}</div><AddressEditor onSaved={reloadUser} /></div>;
+  return <div className="page-container narrow"><PageIntro eyebrow="Your account" title={`Hello${user.name ? `, ${user.name}` : ''}`} description="Manage your profile and find your past orders." />{user.role === 'customer' && <p><Link className="quiet-link" to="/account">← Back to your dashboard</Link></p>}<div className="account-role"><span className="status-dot" /> Signed in as {user.role}</div>{error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}<form className="stack-form panel" onSubmit={(event) => void submit(event)}><label className="field"><span>Your name</span><input maxLength={120} value={name} onChange={(event) => setName(event.target.value)} /></label><label className="field"><span>Verified phone</span><input value={user.phone ?? ''} disabled /></label><button className="button">Save profile</button></form>{user.role === 'customer' && <section className="panel push-notification-settings"><h2>Order notifications</h2><p>Get a browser notification when your order status changes. Notifications are optional and require browser permission.</p>{pushNotificationsConfigured ? <button className="button button-outline" onClick={() => void togglePush()}>{pushEnabled ? 'Disable on this device' : 'Enable order notifications'}</button> : <Notice>Push notifications are not configured for this app yet.</Notice>}</section>}<div className="account-links"><Link to="/orders" className="button button-outline">View order history</Link>{user.role === 'delivery_partner' && <Link to="/delivery-partner" className="button button-outline">Open delivery portal</Link>}{user.role === 'city_admin' && <Link to="/city-admin" className="button button-outline">Open City Admin dashboard</Link>}{(user.role === 'admin' || user.role === 'staff') && <Link to="/admin" className="button button-outline">Open workspace</Link>}</div><div id="saved-address"><AddressEditor onSaved={reloadUser} /></div></div>;
 }
 
 function AddressEditor({ onSaved }: { onSaved: () => Promise<void> }): ReactNode {
@@ -782,7 +980,7 @@ function AddressEditor({ onSaved }: { onSaved: () => Promise<void> }): ReactNode
 }
 
 function SignInPrompt(): ReactNode {
-  return <div className="page-container narrow"><PageIntro title="Sign in to see your account" description="Your details and orders are available after phone verification." /><Link to="/signin" className="button">Sign in</Link></div>;
+  return <div className="page-container narrow"><PageIntro title="Sign in to see your account" description="Your details and orders are available after phone verification." /><Link to="/sign-in" className="button">Sign in</Link></div>;
 }
 
 function OrdersPage(): ReactNode {
@@ -887,11 +1085,1382 @@ function CustomerOrderPage(): ReactNode {
   );
 }
 
+const superAdminNavGroups = [
+  {
+    label: 'Main',
+    items: [{ label: 'Overview', icon: 'overview', path: '/super-admin' }],
+  },
+  {
+    label: 'Operations',
+    items: [
+      { label: 'Cities & Service Zones', icon: 'cities', path: '/super-admin/cities' },
+      { label: 'City Administrators', icon: 'administrators', path: '/super-admin/city-administrators' },
+      { label: 'Sellers & SHGs', icon: 'sellers', path: '/super-admin/sellers' },
+      { label: 'Products & Inventory', icon: 'products', path: '/super-admin/products' },
+      { label: 'Orders & Assignments', icon: 'orders', path: '/super-admin/orders' },
+      { label: 'Delivery Partners', icon: 'delivery', path: '/super-admin/delivery-partners' },
+      { label: 'External Delivery Providers', icon: 'providers', path: '/super-admin/external-delivery-providers' },
+      { label: 'Customers', icon: 'customers', path: '/super-admin/customers' },
+      { label: 'Support & Disputes', icon: 'support', path: '/super-admin/support' },
+    ],
+  },
+  {
+    label: 'Finance',
+    items: [
+      { label: 'Payments & Reconciliation', icon: 'payments', path: '/super-admin/payments' },
+      { label: 'Refunds', icon: 'refunds', path: '/super-admin/refunds' },
+      { label: 'Seller Settlements', icon: 'settlements', path: '/super-admin/settlements' },
+      { label: 'Delivery Partner Payouts', icon: 'payouts', path: '/super-admin/payouts' },
+      { label: 'City Admin Compensation', icon: 'compensation', path: '/super-admin/reports' },
+    ],
+  },
+  {
+    label: 'Management',
+    items: [
+      { label: 'Reports & Analytics', icon: 'reports', path: '/super-admin/reports' },
+      { label: 'Platform Settings', icon: 'settings', path: '/super-admin/settings' },
+      { label: 'Roles & Permissions', icon: 'roles', path: '/super-admin/roles' },
+      { label: 'Security & Audit Logs', icon: 'security', path: '/super-admin/security' },
+    ],
+  },
+];
+
+function SuperAdminGate({ children }: { children: ReactNode }): ReactNode {
+  const { user, ready } = useAuth();
+  const location = useLocation();
+
+  if (!ready) return <div className="page-container"><Loading label="Checking your session…" /></div>;
+  if (!user) {
+    return (
+      <div className="page-container narrow">
+        <PageIntro eyebrow="Protected workspace" title="Super Admin sign-in required" description="Continue with the account provisioned for platform administration." />
+        <Link to="/sign-in" state={{ from: location.pathname }} className="button">Sign in</Link>
+      </div>
+    );
+  }
+  if (user.role !== 'super_admin') {
+    return (
+      <div className="page-container narrow">
+        <Notice tone="error">This workspace requires an explicitly provisioned Super Admin account.</Notice>
+        <Link to="/" className="button button-outline">Return to the store</Link>
+      </div>
+    );
+  }
+  return <SuperAdminLayout>{children}</SuperAdminLayout>;
+}
+
+function SuperAdminLayout({ children }: { children: ReactNode }): ReactNode {
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [signOutError, setSignOutError] = useState('');
+  const pageTitle = {
+    '/super-admin': 'Overview',
+    '/super-admin/cities': 'Cities & Service Zones',
+    '/super-admin/city-administrators': 'City Administrators',
+    '/super-admin/sellers': 'Sellers & SHGs',
+    '/super-admin/products': 'Products & Inventory',
+    '/super-admin/orders': 'Orders & Assignments',
+    '/super-admin/delivery-partners': 'Delivery Partners',
+    '/super-admin/external-delivery-providers': 'External Delivery Providers',
+    '/super-admin/customers': 'Customers',
+    '/super-admin/support': 'Support & Disputes',
+    '/super-admin/payments': 'Payments & Reconciliation',
+    '/super-admin/refunds': 'Refunds',
+    '/super-admin/settlements': 'Seller Settlements',
+    '/super-admin/payouts': 'Delivery Partner Payouts',
+    '/super-admin/reports': 'Reports & Analytics',
+    '/super-admin/settings': 'Platform Settings',
+    '/super-admin/roles': 'Roles & Permissions',
+    '/super-admin/security': 'Security & Audit Logs',
+  }[pathname] ?? (
+    pathname.startsWith('/super-admin/cities/') ? 'City details'
+      : pathname.startsWith('/super-admin/city-administrators/') ? 'City Admin details'
+        : pathname.startsWith('/super-admin/sellers/') ? 'Seller details'
+          : pathname.startsWith('/super-admin/products/') ? 'Product details'
+          : pathname.startsWith('/super-admin/orders/') ? 'Order details'
+            : pathname.startsWith('/super-admin/delivery-partners/') ? 'Delivery partner details'
+              : pathname.startsWith('/super-admin/customers/') ? 'Customer details'
+                : 'Overview'
+  );
+
+  async function handleSignOut(): Promise<void> {
+    setSignOutError('');
+    try {
+      await signOut();
+      navigate('/');
+    } catch (error) {
+      setSignOutError(error instanceof Error ? error.message : 'Unable to sign out. Please try again.');
+    }
+  }
+
+  return (
+    <div className={`super-admin-shell${collapsed ? ' is-collapsed' : ''}`}>
+      {mobileOpen && <button className="super-admin-backdrop" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
+      <aside className={`super-admin-sidebar${mobileOpen ? ' is-open' : ''}`}>
+        <Link to="/super-admin" className="super-admin-brand">
+          <img src="/images/esakhi-emblem.png" alt="" />
+          <span>eSakhi<small>Super Admin Portal</small></span>
+        </Link>
+        <nav className="super-admin-nav" aria-label="Super Admin navigation">
+          {superAdminNavGroups.map((group) => (
+            <div className="super-admin-nav-group" key={group.label}>
+              <span className="super-admin-nav-label">{group.label}</span>
+              {group.items.map((item) => item.path ? (
+                <NavLink
+                  to={item.path}
+                  end={item.path === '/super-admin'}
+                  key={item.label}
+                  title={collapsed ? item.label : undefined}
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <SuperAdminIcon name={item.icon} />
+                  <span>{item.label}</span>
+                </NavLink>
+              ) : (
+                <span className="super-admin-nav-disabled" key={item.label} title={collapsed ? `${item.label} — unavailable` : undefined} aria-disabled="true">
+                  <SuperAdminIcon name={item.icon} />
+                  <span>{item.label}</span>
+                  <small>Planned</small>
+                </span>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <div className="sidebar-user">
+          <span className="avatar">{(user?.name || 'S').slice(0, 1).toUpperCase()}</span>
+          <span><strong>{user?.name || user?.phone}</strong><small>Super Admin</small></span>
+          <button className="super-admin-signout" onClick={() => void handleSignOut()} title="Sign out" aria-label="Sign out">↗</button>
+        </div>
+      </aside>
+      <section className="super-admin-content">
+        <div className="super-admin-topbar">
+          <div className="super-admin-breadcrumb">
+            <button
+              className="super-admin-menu-toggle"
+              onClick={() => {
+                if (window.matchMedia('(max-width: 850px)').matches) setMobileOpen((open) => !open);
+                else setCollapsed((value) => !value);
+              }}
+              aria-label={mobileOpen ? 'Close navigation' : collapsed ? 'Expand navigation' : 'Collapse navigation'}
+              title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+            >☰</button>
+            <span>Platform</span><b>/</b><strong>{pageTitle}</strong>
+          </div>
+          <div className="super-admin-topbar-actions">
+            <span className="super-admin-date">{new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</span>
+            <span className="super-admin-profile"><span className="avatar">{(user?.name || 'S').slice(0, 1).toUpperCase()}</span><span>{user?.name || 'Super Admin'}<small>Super Admin</small></span></span>
+            <button className="super-admin-mobile-signout" onClick={() => void handleSignOut()}>Sign out</button>
+          </div>
+        </div>
+        {signOutError && <div className="super-admin-signout-error" role="alert">{signOutError}</div>}
+        {children}
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminModulePage({
+  eyebrow,
+  title,
+  description,
+  metrics,
+  note,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  metrics: Array<{ label: string; value: string | number; detail?: string; icon?: string }>;
+  note?: string;
+}): ReactNode {
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading">
+        <div>
+          <p className="super-admin-eyebrow">{eyebrow}</p>
+          <h1>{title}</h1>
+          <p>{description}</p>
+        </div>
+      </div>
+      <div className="super-admin-metrics">
+        {metrics.map((metric) => (
+          <SuperAdminMetric
+            key={metric.label}
+            label={metric.label}
+            value="—"
+            icon={metric.icon ?? 'overview'}
+            detail="No live record is tracked by the current backend."
+          />
+        ))}
+      </div>
+      <section className="super-admin-panel super-admin-unavailable-panel">
+        <div className="super-admin-panel-heading"><div><h2>Live data unavailable</h2><p>This section has no corresponding records or workflow endpoint in the current eSakhi backend.</p></div></div>
+        <p>{note || 'No information is shown here until the relevant backend workflow is implemented.'}</p>
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminCitiesPage(): ReactNode {
+  const settingsResult = useLoad(() => api.settings(), []);
+  const citiesResult = useLoad(() => api.superAdminCities(), []);
+  const [city, setCity] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    if (settingsResult.data?.city) setCity(settingsResult.data.city);
+  }, [settingsResult.data]);
+
+  const saveCity = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!settingsResult.data) return;
+    setSaving(true); setError(''); setMessage('');
+    try {
+      await api.saveSettings({ ...settingsResult.data, city: city.trim() });
+      setMessage('Platform city updated successfully.');
+      await settingsResult.reload(false);
+      await citiesResult.reload(false);
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading">
+        <div><p className="super-admin-eyebrow">Operations</p><h1>Cities & Service Zones</h1><p>Configure the active city and assign the current City Admin coverage for it.</p></div>
+      </div>
+      {error && <Notice tone="error">{error}</Notice>}
+      {message && <Notice tone="success">{message}</Notice>}
+      <div className="super-admin-metrics">
+        <SuperAdminMetric label="Configured city" value={settingsResult.data?.city ?? city} icon="cities" detail="Current business city" />
+        <SuperAdminMetric label="Cities in records" value={citiesResult.data?.length ?? '—'} icon="overview" detail="Observed in settings, users, and orders" />
+        <SuperAdminMetric label="Orders" value={citiesResult.data?.reduce((total, record) => total + record.orderCount, 0) ?? '—'} icon="orders" detail="Across listed cities" />
+        <SuperAdminMetric label="Service zones" value={settingsResult.data?.serviceableLocalities?.length ?? 0} icon="reports" detail="Configured localities" />
+      </div>
+      <div className="super-admin-lower-grid">
+        <section className="super-admin-panel super-admin-recent-orders">
+          <div className="super-admin-panel-heading"><div><h2>City configuration</h2><p>Update the active platform city.</p></div></div>
+          <form className="stack-form" onSubmit={(event) => void saveCity(event)}>
+            <label className="field"><span>City name</span><input aria-label="City name" value={city} onChange={(event) => setCity(event.target.value)} /></label>
+            <button className="button" type="submit" disabled={saving || !settingsResult.data}>{saving ? 'Saving…' : 'Save city'}</button>
+          </form>
+        </section>
+      </div>
+      <section className="super-admin-panel super-admin-order-directory">
+        <div className="super-admin-panel-heading"><div><h2>City directory</h2><p>City records are derived from configured settings, user assignments, and customer delivery addresses.</p></div></div>
+        {citiesResult.error && <div className="super-admin-error" role="alert">{citiesResult.error}<button onClick={() => void citiesResult.reload()}>Retry</button></div>}
+        {citiesResult.loading ? <Loading label="Loading cities…" /> : citiesResult.data?.length ? (
+          <div className="super-admin-table-wrap"><table className="super-admin-table">
+            <thead><tr><th>City</th><th>State</th><th>City Admin</th><th>Sellers</th><th>Partners</th><th>Zones</th><th>Orders</th><th>Configured</th></tr></thead>
+            <tbody>{citiesResult.data.map((record) => (
+              <tr key={record.city}>
+                <td><Link to={`/super-admin/cities/${encodeURIComponent(record.city)}`}>{record.city}</Link></td>
+                <td>{record.state || '—'}</td>
+                <td>{record.cityAdminName || 'Unassigned'} <small>{record.cityAdminCount} account(s)</small></td>
+                <td>{record.sellerCount}</td><td>{record.deliveryPartnerCount}</td><td>{record.serviceZoneCount}</td><td>{record.orderCount}</td>
+                <td><StatusBadge value={record.configured ? 'active' : 'observed'} /></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        ) : <div className="super-admin-empty">No city records exist yet. Configure a platform city or add city-scoped users and orders to populate this directory.</div>}
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminCityDetailPage(): ReactNode {
+  const { city = '' } = useParams();
+  const result = useLoad(() => api.superAdminCity(city), [city]);
+  const record = result.data;
+  if (result.loading) return <div className="super-admin-page"><Loading label="Loading city details…" /></div>;
+  if (!record) return <div className="super-admin-page"><Notice tone="error">{result.error || 'City not found.'}</Notice><Link className="super-admin-text-link" to="/super-admin/cities">← Back to cities</Link></div>;
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading">
+        <div><p className="super-admin-eyebrow"><Link to="/super-admin/cities">Cities & Service Zones</Link> / City profile</p><h1>{record.city}</h1><p>{record.state || 'State not configured'} · {record.configured ? 'Configured platform city' : 'Observed from live records'}</p></div>
+      </div>
+      <div className="super-admin-metrics">
+        <SuperAdminMetric label="City Admins" value={record.metrics.cityAdmins} icon="administrators" />
+        <SuperAdminMetric label="Sellers & SHGs" value={record.metrics.sellers} icon="sellers" />
+        <SuperAdminMetric label="Delivery partners" value={record.metrics.deliveryPartners} icon="delivery" detail="Associated through city orders" />
+        <SuperAdminMetric label="Orders" value={record.metrics.orders} icon="orders" />
+      </div>
+      {record.configured ? (
+        <section className="super-admin-panel">
+          <div className="super-admin-panel-heading"><div><h2>Service zones</h2><p>Configured localities and postal codes for this platform city.</p></div></div>
+          {record.serviceableLocalities.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Locality</th><th>Postal codes</th><th>Delivery fee</th></tr></thead><tbody>{record.serviceableLocalities.map((zone) => <tr key={zone.name}><td>{zone.name}</td><td>{zone.postalCodes.join(', ') || '—'}</td><td>{zone.deliveryFeePaise === undefined ? '—' : formatMoney(zone.deliveryFeePaise)}</td></tr>)}</tbody></table></div> : <div className="super-admin-empty">No serviceable localities are configured for this city.</div>}
+        </section>
+      ) : <p className="super-admin-data-note">The current settings schema stores one configured platform city and its service zones. This city is visible because it appears in live user or order records.</p>}
+      <div className="super-admin-detail-grid">
+        <SuperAdminRecordTable title="City administrators" description="Administrators assigned to this city." empty="No City Admin is assigned." headers={['Name', 'Phone', 'Status']} rows={record.cityAdmins.map((admin) => [
+          <Link key="name" to={`/super-admin/city-administrators/${getId(admin)}`}>{admin.name || 'City Admin'}</Link>,
+          admin.phoneE164 || '—',
+          <StatusBadge key="status" value={admin.status || 'active'} />,
+        ])} />
+        <SuperAdminRecordTable title="Sellers & SHGs" description="Seller accounts assigned to this city." empty="No seller accounts are assigned." headers={['Name', 'Phone', 'Status']} rows={record.sellers.map((seller) => [
+          <Link key="name" to={`/super-admin/sellers/${getId(seller)}`}>{seller.name || 'Seller'}</Link>,
+          seller.phoneE164 || '—',
+          <StatusBadge key="status" value={seller.status || 'active'} />,
+        ])} />
+        <SuperAdminRecordTable title="Delivery partners" description="Partners associated through current or historical deliveries in this city." empty="No delivery partner is associated with a city order." headers={['Name', 'Phone', 'Status']} rows={record.deliveryPartners.map((partner) => [
+          <Link key="name" to={`/super-admin/delivery-partners/${getId(partner)}`}>{partner.name || 'Delivery Partner'}</Link>,
+          partner.phoneE164 || '—',
+          <StatusBadge key="status" value={partner.status || 'active'} />,
+        ])} />
+      </div>
+      <section className="super-admin-panel super-admin-order-directory">
+        <div className="super-admin-panel-heading"><div><h2>Recent city orders</h2><p>Latest orders delivered or placed in {record.city}.</p></div></div>
+        {record.recentOrders.length ? <SuperAdminOrderTable orders={record.recentOrders} /> : <div className="super-admin-empty">No orders are recorded for this city.</div>}
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminCityAdministratorsPage(): ReactNode {
+  const [page, setPage] = useState(1);
+  const [form, setForm] = useState({ phone: '', name: '', email: '', city: '' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const result = useLoad(() => api.superAdminCityAdmins(page, 20), [page]);
+  const settingsResult = useLoad(() => api.settings(), []);
+  const citiesResult = useLoad(() => api.superAdminCities(), []);
+
+  useEffect(() => {
+    if (settingsResult.data?.city) setForm((current) => current.city ? current : { ...current, city: settingsResult.data?.city ?? '' });
+  }, [settingsResult.data]);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true); setError(''); setMessage('');
+    try {
+      await api.createCityAdmin({
+        phone: form.phone,
+        name: form.name.trim() || undefined,
+        email: form.email.trim() || undefined,
+        city: form.city.trim() || undefined,
+      });
+      setForm({ phone: '', name: '', email: '', city: form.city });
+      setMessage('City administrator created successfully.');
+      await result.reload(false);
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleStatus = async (admin: User) => {
+    const id = admin._id ?? admin.id;
+    if (!id) return;
+    const nextStatus = admin.status === 'disabled' ? 'active' : 'disabled';
+    setError(''); setMessage('');
+    try {
+      await api.updateCityAdmin(id, { city: admin.assignedCity, status: nextStatus, name: admin.name, email: admin.email });
+      setMessage(`City admin ${nextStatus === 'active' ? 'activated' : 'disabled'} successfully.`);
+      await result.reload(false);
+    } catch (cause) {
+      setError(displayError(cause));
+    }
+  };
+
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading">
+        <div><p className="super-admin-eyebrow">Operations</p><h1>City Administrators</h1><p>Add an approved City Admin account and assign them to a city from the existing database.</p></div>
+      </div>
+      {error && <Notice tone="error">{error}</Notice>}
+      {message && <Notice tone="success">{message}</Notice>}
+      <div className="super-admin-lower-grid">
+        <section className="super-admin-panel super-admin-recent-orders">
+          <div className="super-admin-panel-heading"><div><h2>Add city admin</h2><p>Provision a user with the City Admin role.</p></div></div>
+          <form className="stack-form" onSubmit={(event) => void submit(event)}>
+            <label className="field"><span>Phone number</span><input aria-label="City admin phone" value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} placeholder="+91xxxxxxxxxx" /></label>
+            <label className="field"><span>Name</span><input aria-label="City admin name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label>
+            <label className="field"><span>Email</span><input aria-label="City admin email" type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} /></label>
+            <label className="field"><span>Assigned city</span><input aria-label="Assigned city" list="super-admin-city-options" value={form.city} onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))} required /></label>
+            <datalist id="super-admin-city-options">{citiesResult.data?.map((record) => <option key={record.city} value={record.city} />)}</datalist>
+            <button className="button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Create city admin'}</button>
+          </form>
+        </section>
+        <section className="super-admin-panel super-admin-attention-panel">
+          <div className="super-admin-panel-heading"><div><h2>City admin directory</h2><p>All City Admin accounts in the system.</p></div></div>
+          {result.error && <div className="super-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+          {result.loading ? <Loading label="Loading city administrators…" /> : result.data?.data.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Name</th><th>Phone</th><th>City</th><th>Status</th><th>Actions</th></tr></thead><tbody>{result.data.data.map((admin) => <tr key={getId(admin)}><td><Link to={`/super-admin/city-administrators/${getId(admin)}`}>{admin.name || 'City Admin'}</Link></td><td>{admin.phoneE164 || admin.phone || '—'}</td><td>{admin.assignedCity ? <Link to={`/super-admin/cities/${encodeURIComponent(admin.assignedCity)}`}>{admin.assignedCity}</Link> : '—'}</td><td><StatusBadge value={admin.status ?? 'active'} /></td><td><button className="text-button" onClick={() => void toggleStatus(admin)}>{admin.status === 'disabled' ? 'Activate' : 'Disable'}</button></td></tr>)}</tbody></table></div> : <div className="super-admin-empty">No city administrators have been created yet.</div>}
+          {result.data && result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function SuperAdminCityAdminDetailPage(): ReactNode {
+  const { id = '' } = useParams();
+  const result = useLoad(() => api.superAdminCityAdmin(id), [id]);
+  const admin = result.data;
+  if (result.loading) return <div className="super-admin-page"><Loading label="Loading City Admin profile…" /></div>;
+  if (!admin) return <div className="super-admin-page"><Notice tone="error">{result.error || 'City Admin not found.'}</Notice><Link className="super-admin-text-link" to="/super-admin/city-administrators">← Back to City Admins</Link></div>;
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading"><div><p className="super-admin-eyebrow"><Link to="/super-admin/city-administrators">City Administrators</Link> / Profile</p><h1>{admin.name || 'City Administrator'}</h1><p>City-scoped administrator account details.</p></div></div>
+      <div className="super-admin-metrics">
+        <SuperAdminMetric label="Role" value="City Admin" icon="administrators" />
+        <SuperAdminMetric label="Assigned city" value={admin.assignedCity || 'Unassigned'} icon="cities" />
+        <SuperAdminMetric label="Account status" value={admin.status || 'active'} icon="security" />
+        <SuperAdminMetric label="Registered" value={admin.createdAt ? new Date(admin.createdAt).toLocaleDateString('en-IN') : '—'} icon="overview" />
+      </div>
+      <section className="super-admin-panel super-admin-profile-panel">
+        <div className="super-admin-panel-heading"><div><h2>Administrator profile</h2><p>Identity and scope recorded on the account.</p></div></div>
+        <dl className="super-admin-definition-list">
+          <div><dt>Phone</dt><dd>{admin.phoneE164 || admin.phone || '—'}</dd></div>
+          <div><dt>Email</dt><dd>{admin.email || '—'}</dd></div>
+          <div><dt>City scope</dt><dd>{admin.assignedCity ? <Link to={`/super-admin/cities/${encodeURIComponent(admin.assignedCity)}`}>{admin.assignedCity}</Link> : 'Not assigned'}</dd></div>
+          <div><dt>Account ID</dt><dd><code>{getId(admin)}</code></dd></div>
+        </dl>
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminSellersPage(): ReactNode {
+  const [page, setPage] = useState(1);
+  const result = useLoad(() => api.superAdminSellers(page, 20), [page]);
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading">
+        <div><p className="super-admin-eyebrow">Operations</p><h1>Sellers & SHGs</h1><p>View all seller records and their city assignment and status.</p></div>
+      </div>
+      <div className="super-admin-metrics">
+        <SuperAdminMetric label="Sellers" value={result.data?.pagination.total ?? 0} icon="sellers" detail="Registered seller users" />
+        <SuperAdminMetric label="Active" value={result.data?.data.filter((seller) => seller.status !== 'disabled').length ?? 0} icon="overview" detail="Approved and active sellers" />
+        <SuperAdminMetric label="Disabled" value={result.data?.data.filter((seller) => seller.status === 'disabled').length ?? 0} icon="security" detail="Restricted sellers" />
+        <SuperAdminMetric label="Cities" value={new Set(result.data?.data.map((seller) => seller.assignedCity).filter(Boolean)).size ?? 0} icon="cities" detail="Assigned city distribution" />
+      </div>
+      <section className="super-admin-panel super-admin-recent-orders">
+        <div className="super-admin-panel-heading"><div><h2>Seller directory</h2><p>All sellers and SHGs currently stored in the platform.</p></div></div>
+        {result.error && <div className="super-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+        {result.loading ? <Loading label="Loading sellers…" /> : result.data?.data.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Name</th><th>Phone</th><th>City</th><th>Email</th><th>Status</th></tr></thead><tbody>{result.data.data.map((seller) => <tr key={getId(seller)}><td><Link to={`/super-admin/sellers/${getId(seller)}`}>{seller.name || 'Seller'}</Link></td><td>{seller.phoneE164 || seller.phone || '—'}</td><td>{seller.assignedCity ? <Link to={`/super-admin/cities/${encodeURIComponent(seller.assignedCity)}`}>{seller.assignedCity}</Link> : '—'}</td><td>{seller.email || '—'}</td><td><StatusBadge value={seller.status ?? 'active'} /></td></tr>)}</tbody></table></div> : <div className="super-admin-empty">No sellers are registered in the database yet.</div>}
+        {result.data && result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminSellerDetailPage(): ReactNode {
+  const { id = '' } = useParams();
+  const [page, setPage] = useState(1);
+  const sellerResult = useLoad(() => api.superAdminSeller(id), [id]);
+  const productsResult = useLoad(() => api.adminProducts(new URLSearchParams({ sellerId: id, page: String(page), limit: '20', archived: 'false' })), [id, page]);
+  const seller = sellerResult.data;
+  if (sellerResult.loading) return <div className="super-admin-page"><Loading label="Loading seller profile…" /></div>;
+  if (!seller) return <div className="super-admin-page"><Notice tone="error">{sellerResult.error || 'Seller not found.'}</Notice><Link className="super-admin-text-link" to="/super-admin/sellers">← Back to Sellers</Link></div>;
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading"><div><p className="super-admin-eyebrow"><Link to="/super-admin/sellers">Sellers & SHGs</Link> / Profile</p><h1>{seller.name || 'Seller'}</h1><p>Seller account and linked product catalogue.</p></div></div>
+      <div className="super-admin-metrics">
+        <SuperAdminMetric label="Products" value={productsResult.data?.pagination.total ?? '—'} icon="products" />
+        <SuperAdminMetric label="Active products" value={productsResult.data?.data.filter((product) => product.isActive).length ?? '—'} icon="overview" detail="On the loaded page" />
+        <SuperAdminMetric label="Assigned city" value={seller.assignedCity || 'Unassigned'} icon="cities" />
+        <SuperAdminMetric label="Account status" value={seller.status || 'active'} icon="security" />
+      </div>
+      <section className="super-admin-panel super-admin-profile-panel">
+        <div className="super-admin-panel-heading"><div><h2>Seller profile</h2><p>Account details stored in eSakhi.</p></div></div>
+        <dl className="super-admin-definition-list">
+          <div><dt>Phone</dt><dd>{seller.phoneE164 || seller.phone || '—'}</dd></div>
+          <div><dt>Email</dt><dd>{seller.email || '—'}</dd></div>
+          <div><dt>City</dt><dd>{seller.assignedCity ? <Link to={`/super-admin/cities/${encodeURIComponent(seller.assignedCity)}`}>{seller.assignedCity}</Link> : 'Not assigned'}</dd></div>
+          <div><dt>Account ID</dt><dd><code>{getId(seller)}</code></dd></div>
+        </dl>
+      </section>
+      <section className="super-admin-panel super-admin-order-directory">
+        <div className="super-admin-panel-heading"><div><h2>Seller products</h2><p>Inventory records linked to this seller.</p></div></div>
+        {productsResult.error && <div className="super-admin-error" role="alert">{productsResult.error}<button onClick={() => void productsResult.reload()}>Retry</button></div>}
+        {productsResult.loading ? <Loading label="Loading seller products…" /> : productsResult.data?.data.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th></tr></thead><tbody>{productsResult.data.data.map((product) => <tr key={product._id}><td>{product.name}</td><td>{product.category}</td><td>{formatMoney(product.pricePaise)}</td><td>{product.variants?.length ? product.variants.reduce((total, variant) => total + variant.stock, 0) : product.stock}</td><td><StatusBadge value={product.isActive ? 'active' : product.isArchived ? 'archived' : 'inactive'} /></td></tr>)}</tbody></table></div> : <div className="super-admin-empty">No products are linked to this seller.</div>}
+        {productsResult.data && productsResult.data.pagination.totalPages > 1 && <Pagination page={page} pages={productsResult.data.pagination.totalPages} onChange={setPage} />}
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminProductsPage(): ReactNode {
+  const [page, setPage] = useState(1);
+  const result = useLoad(() => api.adminProducts(new URLSearchParams({ page: String(page), limit: '20', archived: 'false' })), [page]);
+
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading">
+        <div><p className="super-admin-eyebrow">Operations</p><h1>Products & Inventory</h1><p>Review published products and stock data across all sellers.</p></div>
+      </div>
+      <div className="super-admin-metrics">
+        <SuperAdminMetric label="Products" value={result.data?.pagination.total ?? 0} icon="products" detail="Live catalog entries" />
+        <SuperAdminMetric label="Active" value={result.data?.data.filter((product) => product.isActive).length ?? 0} icon="overview" detail="Published products" />
+        <SuperAdminMetric label="Low stock" value={result.data?.data.filter((product) => product.variants?.length ? product.variants.some((variant) => variant.stock <= product.lowStockThreshold) : product.stock <= product.lowStockThreshold).length ?? 0} icon="products" detail="At or below threshold" />
+        <SuperAdminMetric label="Archived" value={result.data?.data.filter((product) => product.isArchived).length ?? 0} icon="security" detail="Hidden from catalogue" />
+      </div>
+      <section className="super-admin-panel super-admin-recent-orders">
+        <div className="super-admin-panel-heading"><div><h2>Product inventory</h2><p>Product metadata and stock visibility for the marketplace.</p></div></div>
+        {result.loading ? <Loading label="Loading products…" /> : result.data?.data.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Product</th><th>Seller</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th></tr></thead><tbody>{result.data.data.map((product) => <tr key={product._id}><td><Link to={`/super-admin/products/${product._id}`}>{product.name}</Link></td><td>{product.sellerId ? <Link to={`/super-admin/sellers/${product.sellerId}`}>{product.sellerId.slice(-6)}</Link> : 'Unassigned'}</td><td>{product.category}</td><td>{formatMoney(product.pricePaise)}</td><td>{product.variants?.length ? product.variants.reduce((sum, variant) => sum + variant.stock, 0) : product.stock}</td><td><StatusBadge value={product.isActive ? 'active' : product.isArchived ? 'archived' : 'inactive'} /></td></tr>)}</tbody></table></div> : <div className="super-admin-empty">No products have been added to the catalog yet.</div>}
+        {result.data && result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminProductDetailPage(): ReactNode {
+  const { id = '' } = useParams();
+  const result = useLoad(() => api.adminProduct(id), [id]);
+  const product = result.data;
+  if (result.loading) return <div className="super-admin-page"><Loading label="Loading product details…" /></div>;
+  if (!product) return <div className="super-admin-page"><Notice tone="error">{result.error || 'Product not found.'}</Notice><Link className="super-admin-text-link" to="/super-admin/products">← Back to products</Link></div>;
+  const stock = product.variants?.length ? product.variants.reduce((total, variant) => total + variant.stock, 0) : product.stock;
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading"><div><p className="super-admin-eyebrow"><Link to="/super-admin/products">Products & Inventory</Link> / Product</p><h1>{product.name}</h1><p>{product.category} · product ID {product._id}</p></div></div>
+      <div className="super-admin-metrics">
+        <SuperAdminMetric label="Price" value={formatMoney(product.pricePaise)} icon="payments" />
+        <SuperAdminMetric label="Stock" value={stock} icon="products" detail={`Low-stock threshold: ${product.lowStockThreshold}`} />
+        <SuperAdminMetric label="Publication" value={product.isActive ? 'Published' : 'Not published'} icon="overview" />
+        <SuperAdminMetric label="Archive status" value={product.isArchived ? 'Archived' : 'Available'} icon="security" />
+      </div>
+      <section className="super-admin-panel super-admin-profile-panel">
+        <div className="super-admin-panel-heading"><div><h2>Product details</h2><p>Catalog data and seller ownership.</p></div></div>
+        <dl className="super-admin-definition-list">
+          <div><dt>Seller</dt><dd>{product.sellerId ? <Link to={`/super-admin/sellers/${product.sellerId}`}>{product.sellerId}</Link> : 'Not assigned'}</dd></div>
+          <div><dt>Product ID</dt><dd><code>{product._id}</code></dd></div>
+          <div><dt>Slug</dt><dd>{product.slug}</dd></div>
+          <div><dt>Category</dt><dd>{product.category}</dd></div>
+          <div><dt>Description</dt><dd>{product.description}</dd></div>
+        </dl>
+      </section>
+      {product.variants.length > 0 && <section className="super-admin-panel super-admin-order-directory"><div className="super-admin-panel-heading"><div><h2>Variants & inventory</h2><p>Stock records by product variant.</p></div></div><div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>SKU</th><th>Attributes</th><th>Stock</th></tr></thead><tbody>{product.variants.map((variant) => <tr key={variant._id}><td>{variant.sku || '—'}</td><td>{Object.entries(variant.attributes).map(([name, value]) => `${name}: ${value}`).join(', ') || '—'}</td><td>{variant.stock}</td></tr>)}</tbody></table></div></section>}
+    </div>
+  );
+}
+
+function SuperAdminDeliveryPartnersPage(): ReactNode {
+  const [page, setPage] = useState(1);
+  const result = useLoad(() => api.deliveryPartners(page, 20), [page]);
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading"><div><p className="super-admin-eyebrow">Operations</p><h1>Delivery Partners</h1><p>Review partner accounts and their active assignment workload.</p></div></div>
+      <div className="super-admin-metrics">
+        <SuperAdminMetric label="Partner accounts" value={result.data?.pagination.total ?? '—'} icon="delivery" />
+        <SuperAdminMetric label="Active on this page" value={result.data?.data.filter((partner) => partner.status === 'active').length ?? '—'} icon="overview" detail="Current page records" />
+        <SuperAdminMetric label="Assigned orders" value={result.data?.data.reduce((total, partner) => total + partner.assignedCount, 0) ?? '—'} icon="orders" detail="Current page workload" />
+        <SuperAdminMetric label="Disabled on this page" value={result.data?.data.filter((partner) => partner.status === 'disabled').length ?? '—'} icon="security" detail="Current page records" />
+      </div>
+      <section className="super-admin-panel super-admin-order-directory">
+        <div className="super-admin-panel-heading"><div><h2>Partner directory</h2><p>Internal eSakhi delivery partner accounts.</p></div></div>
+        {result.error && <div className="super-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+        {result.loading ? <Loading label="Loading delivery partners…" /> : result.data?.data.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Partner</th><th>Phone</th><th>Email</th><th>Open assignments</th><th>Status</th></tr></thead><tbody>{result.data.data.map((partner) => <tr key={getId(partner)}><td><Link to={`/super-admin/delivery-partners/${getId(partner)}`}>{partner.name || 'Delivery Partner'}</Link></td><td>{partner.phoneE164 || '—'}</td><td>{partner.email || '—'}</td><td>{partner.assignedCount}</td><td><StatusBadge value={partner.status || 'active'} /></td></tr>)}</tbody></table></div> : <div className="super-admin-empty">No internal delivery partners are registered.</div>}
+        {result.data && result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminDeliveryPartnerDetailPage(): ReactNode {
+  const { id = '' } = useParams();
+  const [page, setPage] = useState(1);
+  const result = useLoad(() => api.deliveryPartner(id, page, 20), [id, page]);
+  const details = result.data;
+  const partner = details?.partner;
+  if (result.loading) return <div className="super-admin-page"><Loading label="Loading delivery partner…" /></div>;
+  if (!details || !partner) return <div className="super-admin-page"><Notice tone="error">{result.error || 'Delivery partner not found.'}</Notice><Link className="super-admin-text-link" to="/super-admin/delivery-partners">← Back to delivery partners</Link></div>;
+  const cities = [...new Set(details.orders.data.map((order) => order.address?.city).filter((value): value is string => Boolean(value)))];
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading"><div><p className="super-admin-eyebrow"><Link to="/super-admin/delivery-partners">Delivery Partners</Link> / Profile</p><h1>{partner.name || 'Delivery Partner'}</h1><p>Partner account and linked order assignments.</p></div></div>
+      <div className="super-admin-metrics">
+        <SuperAdminMetric label="Status" value={partner.status || 'active'} icon="security" />
+        <SuperAdminMetric label="Active assignments" value={partner.assignedCount} icon="orders" />
+        <SuperAdminMetric label="Orders on this page" value={details.orders.data.length} icon="delivery" />
+        <SuperAdminMetric label="Cities on this page" value={cities.length} icon="cities" />
+      </div>
+      <section className="super-admin-panel super-admin-profile-panel">
+        <div className="super-admin-panel-heading"><div><h2>Partner profile</h2><p>Account details and observed delivery locations.</p></div></div>
+        <dl className="super-admin-definition-list">
+          <div><dt>Phone</dt><dd>{partner.phoneE164 || partner.phone || '—'}</dd></div>
+          <div><dt>Email</dt><dd>{partner.email || '—'}</dd></div>
+          <div><dt>Account ID</dt><dd><code>{getId(partner)}</code></dd></div>
+          <div><dt>Observed cities</dt><dd>{cities.length ? cities.map((city) => <Link key={city} to={`/super-admin/cities/${encodeURIComponent(city)}`}>{city}</Link>).reduce((prev, item) => <>{prev}, {item}</>, null as ReactNode) : 'No city on loaded orders'}</dd></div>
+        </dl>
+      </section>
+      <section className="super-admin-panel super-admin-order-directory">
+        <div className="super-admin-panel-heading"><div><h2>Partner orders</h2><p>Order records currently associated with this partner.</p></div></div>
+        {details.orders.data.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Order</th><th>Customer</th><th>City</th><th>Amount</th><th>Payment</th><th>Delivery status</th></tr></thead><tbody>{details.orders.data.map((order) => <tr key={order._id}><td><Link to={`/super-admin/orders/${order._id}`}>{order.orderReference}</Link></td><td>{order.customerId ? <Link to={`/super-admin/customers/${order.customerId}`}>{order.customerName}</Link> : order.customerName}</td><td>{order.address?.city ? <Link to={`/super-admin/cities/${encodeURIComponent(order.address.city)}`}>{order.address.city}</Link> : 'Pickup'}</td><td>{formatMoney(order.totalPaise)}</td><td>{order.paymentMethod.toUpperCase()} · {order.paymentStatus.replaceAll('_', ' ')}</td><td><StatusBadge value={order.fulfilmentStatus} /></td></tr>)}</tbody></table></div> : <div className="super-admin-empty">No orders are associated with this partner.</div>}
+        {details.orders.pagination.totalPages > 1 && <Pagination page={page} pages={details.orders.pagination.totalPages} onChange={setPage} />}
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminExternalDeliveryProvidersPage(): ReactNode {
+  return (
+    <SuperAdminModulePage
+      eyebrow="Operations"
+      title="External Delivery Providers"
+      description="Manage provider configurations, integration health, service coverage, and operational status."
+      metrics={[
+        { label: 'Configured Providers', value: '0', detail: 'Approved integrations', icon: 'providers' },
+        { label: 'Active Providers', value: '0', detail: 'Operationally enabled', icon: 'overview' },
+        { label: 'Needs Attention', value: '0', detail: 'Health or configuration issues', icon: 'support' },
+        { label: 'Updated Today', value: '0', detail: 'Recently changed provider records', icon: 'reports' },
+      ]}
+      note="Integration state and operational status are tracked separately to avoid assuming a connected provider is active or serviceable."
+    />
+  );
+}
+
+function SuperAdminCustomersPage(): ReactNode {
+  const [page, setPage] = useState(1);
+  const result = useLoad(() => api.customers(page, 20), [page]);
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading"><div><p className="super-admin-eyebrow">Operations</p><h1>Customers</h1><p>Customer accounts and real order history from the marketplace.</p></div></div>
+      <div className="super-admin-metrics">
+        <SuperAdminMetric label="Customer accounts" value={result.data?.pagination.total ?? '—'} icon="customers" />
+        <SuperAdminMetric label="Active on this page" value={result.data?.data.filter((customer) => customer.status === 'active').length ?? '—'} icon="overview" detail="Current page records" />
+        <SuperAdminMetric label="Disabled on this page" value={result.data?.data.filter((customer) => customer.status === 'disabled').length ?? '—'} icon="security" detail="Current page records" />
+        <SuperAdminMetric label="Page" value={result.data?.pagination.page ?? '—'} icon="reports" />
+      </div>
+      <section className="super-admin-panel super-admin-order-directory">
+        <div className="super-admin-panel-heading"><div><h2>Customer directory</h2><p>Select a customer to review their account and order activity.</p></div></div>
+        {result.error && <div className="super-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+        {result.loading ? <Loading label="Loading customers…" /> : result.data?.data.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Customer</th><th>Phone</th><th>Account status</th><th>Joined</th><th>Details</th></tr></thead><tbody>{result.data.data.map((customer) => <tr key={getId(customer)}><td><Link to={`/super-admin/customers/${getId(customer)}`}>{customer.name || 'Customer'}</Link></td><td>{customer.phoneE164 || customer.phone || '—'}</td><td><StatusBadge value={customer.status || 'active'} /></td><td>{customer.createdAt ? new Date(customer.createdAt).toLocaleDateString('en-IN') : '—'}</td><td><Link to={`/super-admin/customers/${getId(customer)}`}>View activity →</Link></td></tr>)}</tbody></table></div> : <div className="super-admin-empty">No customer accounts are registered yet.</div>}
+        {result.data && result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminCustomerDetailPage(): ReactNode {
+  const { id = '' } = useParams();
+  const [page, setPage] = useState(1);
+  const customerResult = useLoad(() => api.customer(id), [id]);
+  const ordersResult = useLoad(() => api.customerOrders(id, page, 20), [id, page]);
+  const customer = customerResult.data;
+  if (customerResult.loading) return <div className="super-admin-page"><Loading label="Loading customer profile…" /></div>;
+  if (!customer) return <div className="super-admin-page"><Notice tone="error">{customerResult.error || 'Customer not found.'}</Notice><Link className="super-admin-text-link" to="/super-admin/customers">← Back to customers</Link></div>;
+  const visibleOrderValue = ordersResult.data?.data.filter((order) => order.fulfilmentStatus !== 'cancelled').reduce((total, order) => total + order.totalPaise, 0) ?? 0;
+  const lastOrder = ordersResult.data?.data[0];
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading"><div><p className="super-admin-eyebrow"><Link to="/super-admin/customers">Customers</Link> / Profile</p><h1>{customer.name || 'Customer'}</h1><p>{customer.phoneE164 || customer.phone || 'No phone on record'} · customer account activity</p></div></div>
+      <div className="super-admin-metrics">
+        <SuperAdminMetric label="Total orders" value={customer.orderCount} icon="orders" />
+        <SuperAdminMetric label="Order value on this page" value={formatMoney(visibleOrderValue)} icon="payments" detail="Non-cancelled order totals · current page" />
+        <SuperAdminMetric label="Last order" value={lastOrder?.createdAt ? new Date(lastOrder.createdAt).toLocaleDateString('en-IN') : '—'} icon="overview" />
+        <SuperAdminMetric label="Account status" value={customer.status || 'active'} icon="security" />
+      </div>
+      <section className="super-admin-panel super-admin-profile-panel">
+        <div className="super-admin-panel-heading"><div><h2>Customer profile</h2><p>Account identity and registration details.</p></div></div>
+        <dl className="super-admin-definition-list">
+          <div><dt>Phone</dt><dd>{customer.phoneE164 || customer.phone || '—'}</dd></div>
+          <div><dt>Account ID</dt><dd><code>{getId(customer)}</code></dd></div>
+          <div><dt>Joined</dt><dd>{customer.createdAt ? new Date(customer.createdAt).toLocaleString('en-IN') : '—'}</dd></div>
+          <div><dt>Status</dt><dd><StatusBadge value={customer.status || 'active'} /></dd></div>
+        </dl>
+      </section>
+      <section className="super-admin-panel super-admin-order-directory">
+        <div className="super-admin-panel-heading"><div><h2>Order activity</h2><p>Orders, payment state, fulfilment state, and recorded status history.</p></div></div>
+        {ordersResult.error && <div className="super-admin-error" role="alert">{ordersResult.error}<button onClick={() => void ordersResult.reload()}>Retry</button></div>}
+        {ordersResult.loading ? <Loading label="Loading customer orders…" /> : ordersResult.data?.data.length ? (
+          <div className="super-admin-activity-list">{ordersResult.data.data.map((order) => (
+            <article className="super-admin-activity-card" key={order._id}>
+              <div className="super-admin-activity-heading">
+                <div><Link to={`/super-admin/orders/${order._id}`}>{order.orderReference}</Link><small>{order.createdAt ? new Date(order.createdAt).toLocaleString('en-IN') : 'Date unavailable'}</small></div>
+                <strong>{formatMoney(order.totalPaise)}</strong>
+              </div>
+              <p>{order.items.map((item) => `${item.productName} × ${item.quantity}`).join(', ') || 'No item details'} · {order.paymentMethod.toUpperCase()} · {order.paymentStatus.replaceAll('_', ' ')}</p>
+              <div className="super-admin-activity-heading"><span><StatusBadge value={order.fulfilmentStatus} /> {order.address?.city && <Link to={`/super-admin/cities/${encodeURIComponent(order.address.city)}`}>{order.address.city}</Link>}</span></div>
+              {order.statusHistory?.length ? <details><summary>Order status history ({order.statusHistory.length})</summary><ol>{order.statusHistory.map((event, index) => <li key={`${event.status}-${event.changedAt}-${index}`}><strong>{orderStatusLabel(event.status)}</strong><small>{new Date(event.changedAt).toLocaleString('en-IN')}{event.note ? ` · ${event.note}` : ''}</small></li>)}</ol></details> : <small>No status changes recorded.</small>}
+            </article>
+          ))}</div>
+        ) : <div className="super-admin-empty">No orders are recorded for this customer.</div>}
+        {ordersResult.data && ordersResult.data.pagination.totalPages > 1 && <Pagination page={page} pages={ordersResult.data.pagination.totalPages} onChange={setPage} />}
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminSupportPage(): ReactNode {
+  return (
+    <SuperAdminModulePage
+      eyebrow="Operations"
+      title="Support & Disputes"
+      description="Track active support cases, dispute workflow, and service issues across the marketplace."
+      metrics={[
+        { label: 'Open Cases', value: '0', detail: 'Awaiting triage', icon: 'support' },
+        { label: 'Priority', value: '0', detail: 'High-priority cases', icon: 'orders' },
+        { label: 'Assignments', value: '0', detail: 'Cases assigned to staff', icon: 'administrators' },
+        { label: 'Resolved Today', value: '0', detail: 'Closed in the current day', icon: 'overview' },
+      ]}
+      note="Support records should tie back to the original order, customer, seller, or partner without exposing private notes to unintended roles."
+    />
+  );
+}
+
+function SuperAdminPaymentsPage(): ReactNode {
+  const [page, setPage] = useState(1);
+  const [paymentStatus, setPaymentStatus] = useState('');
+  const query = new URLSearchParams({ page: String(page), limit: '20' });
+  if (paymentStatus) query.set('paymentStatus', paymentStatus);
+  const result = useLoad(() => api.superAdminOrders(query), [page, paymentStatus]);
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading"><div><p className="super-admin-eyebrow">Finance</p><h1>Payments & Reconciliation</h1><p>Review payment method and verification state recorded on each order.</p></div></div>
+      <section className="super-admin-panel super-admin-order-directory">
+        <div className="super-admin-order-tools">
+          <label className="super-admin-search"><span aria-hidden="true">⌕</span><span>Filter payment status</span></label>
+          <select aria-label="Filter by payment status" value={paymentStatus} onChange={(event) => { setPage(1); setPaymentStatus(event.target.value); }}>
+            <option value="">All payment states</option><option value="pending_verification">Awaiting verification</option><option value="confirmed">Confirmed</option><option value="rejected">Rejected</option>
+          </select>
+        </div>
+        {result.error && <div className="super-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+        {result.loading ? <Loading label="Loading payment records…" /> : result.data?.data.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Order</th><th>Customer</th><th>Method</th><th>Amount</th><th>Payment status</th><th>Order status</th><th>City</th></tr></thead><tbody>{result.data.data.map((order) => <tr key={order._id}><td><Link to={`/super-admin/orders/${order._id}`}>{order.orderReference}</Link></td><td>{order.customerId ? <Link to={`/super-admin/customers/${order.customerId}`}>{order.customerName}</Link> : order.customerName}</td><td>{order.paymentMethod.toUpperCase()}</td><td>{formatMoney(order.totalPaise)}</td><td><StatusBadge value={order.paymentStatus} /></td><td><StatusBadge value={order.fulfilmentStatus} /></td><td>{order.address?.city ? <Link to={`/super-admin/cities/${encodeURIComponent(order.address.city)}`}>{order.address.city}</Link> : 'Pickup'}</td></tr>)}</tbody></table></div> : <div className="super-admin-empty">No order payment records match this filter. Refunds, deposits, and COD reconciliation are not stored separately.</div>}
+        {result.data && result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminRefundsPage(): ReactNode {
+  return (
+    <SuperAdminModulePage
+      eyebrow="Finance"
+      title="Refunds"
+      description="Track refund requests, decision status, and payment-backout processing for approved order cases."
+      metrics={[
+        { label: 'Refund Requests', value: '0', detail: 'Open cases', icon: 'refunds' },
+        { label: 'Approved', value: '0', detail: 'Approved in the current cycle', icon: 'overview' },
+        { label: 'Processing', value: '0', detail: 'In progress', icon: 'payments' },
+        { label: 'Rejected', value: '0', detail: 'Needs reasoned closure', icon: 'security' },
+      ]}
+      note="Refund workflows remain independent from general payment status and should respect approved business policy before execution."
+    />
+  );
+}
+
+function SuperAdminSettlementsPage(): ReactNode {
+  return (
+    <SuperAdminModulePage
+      eyebrow="Finance"
+      title="Seller Settlements"
+      description="Review shop earnings, withheld balances, and settlement liabilities by seller or SHG."
+      metrics={[
+        { label: 'Seller Liabilities', value: '₹0', detail: 'Outstanding settlement amount', icon: 'settlements' },
+        { label: 'Settled This Period', value: '₹0', detail: 'Paid to sellers', icon: 'payments' },
+        { label: 'Pending Review', value: '0', detail: 'Requires admin check', icon: 'support' },
+        { label: 'Approved SHGs', value: '0', detail: 'Eligible seller accounts', icon: 'sellers' },
+      ]}
+      note="Seller settlements should reflect approved business rules and may be withheld until verification or required compliance steps are completed."
+    />
+  );
+}
+
+function SuperAdminPayoutsPage(): ReactNode {
+  return (
+    <SuperAdminModulePage
+      eyebrow="Finance"
+      title="Delivery Partner Payouts"
+      description="Track partner earnings, payout readiness, and awaiting-disbursement records for delivery work."
+      metrics={[
+        { label: 'Due Payouts', value: '₹0', detail: 'Pending partner disbursements', icon: 'payouts' },
+        { label: 'Approved', value: '₹0', detail: 'Ready for payout', icon: 'overview' },
+        { label: 'Processing', value: '0', detail: 'In disbursement queue', icon: 'payments' },
+        { label: 'Exceptions', value: '0', detail: 'Manual review required', icon: 'support' },
+      ]}
+      note="Payout liability must be tracked separately from order totals and should exclude amounts not yet approved or verified."
+    />
+  );
+}
+
+function SuperAdminReportsPage(): ReactNode {
+  const overviewResult = useLoad(() => api.superAdminOverview(30), []);
+  const citiesResult = useLoad(() => api.superAdminCities(), []);
+  const overview = overviewResult.data;
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading"><div><p className="super-admin-eyebrow">Management</p><h1>Reports & Analytics</h1><p>Platform-level order activity from the current reporting API.</p></div></div>
+      {overviewResult.error && <div className="super-admin-error" role="alert">{overviewResult.error}<button onClick={() => void overviewResult.reload()}>Retry</button></div>}
+      {overviewResult.loading ? <Loading label="Loading platform reports…" /> : overview && (
+        <>
+          <div className="super-admin-metrics">
+            <SuperAdminMetric label="Total orders" value={overview.metrics.totalOrders} icon="orders" />
+            <SuperAdminMetric label="Order value" value={formatMoney(overview.metrics.orderValuePaise)} icon="payments" detail="Non-cancelled order totals, not revenue" />
+            <SuperAdminMetric label="Active customers" value={overview.metrics.activeCustomers} icon="customers" />
+            <SuperAdminMetric label="Cities in records" value={citiesResult.data?.length ?? '—'} icon="cities" />
+          </div>
+          <div className="super-admin-overview-grid">
+            <section className="super-admin-panel super-admin-performance"><div className="super-admin-panel-heading"><div><h2>Order activity</h2><p>Orders created over the last 30 days.</p></div></div><SuperAdminOrdersChart data={overview.ordersOverTime} /></section>
+            <section className="super-admin-panel super-admin-status-panel"><div className="super-admin-panel-heading"><div><h2>Fulfilment breakdown</h2><p>Current order states.</p></div></div><SuperAdminStatusBreakdown statuses={overview.ordersByFulfilmentStatus} /></section>
+          </div>
+          <p className="super-admin-data-note">Financial ledgers, refunds, settlements, provider performance, and support case reporting are not available in the current backend.</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SuperAdminSettingsPage(): ReactNode {
+  return <AdminSettingsPage />;
+}
+
+function SuperAdminRolesPage(): ReactNode {
+  const rows: ReactNode[][] = [
+    ['Super Admin', 'Platform-wide', 'Global operations and platform configuration', <Link key="access" to="/super-admin">Open workspace</Link>],
+    ['Admin', 'Marketplace-wide', 'Admin APIs for orders, customers, catalogue, and settings', <Link key="access" to="/admin">Admin workspace</Link>],
+    ['City Admin', 'Assigned city', 'City-scoped order operations; cannot grant broader roles', <Link key="access" to="/super-admin/city-administrators">City Admin directory</Link>],
+    ['Seller', 'Own account', 'Own products and seller order items', <Link key="access" to="/super-admin/sellers">Seller directory</Link>],
+    ['Delivery Partner', 'Own assignments', 'Assigned delivery updates and history', <Link key="access" to="/super-admin/delivery-partners">Partner directory</Link>],
+    ['Customer', 'Own account', 'Own profile, addresses, and orders', <Link key="access" to="/super-admin/customers">Customer directory</Link>],
+    ['Staff', 'Admin workspace', 'Limited by staff-enabled setting and route-level policy', <Link key="access" to="/super-admin/settings">Platform settings</Link>],
+  ];
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading"><div><p className="super-admin-eyebrow">Management</p><h1>Roles & Permissions</h1><p>Current application roles and their backend-enforced scope. Permissions are not editable from this screen.</p></div></div>
+      <section className="super-admin-panel super-admin-order-directory">
+        <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Role</th><th>Scope</th><th>Current access summary</th><th>Related page</th></tr></thead><tbody>{rows.map((row, index) => <tr key={`${String(row[0])}-${index}`}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div>
+      </section>
+      <p className="super-admin-data-note">The role labels summarize existing route authorization. They are not a configurable permission matrix; server middleware remains authoritative.</p>
+    </div>
+  );
+}
+
+function SuperAdminSecurityPage(): ReactNode {
+  const [page, setPage] = useState(1);
+  const result = useLoad(() => api.superAdminAuditLogs(page, 20), [page]);
+  const affectedRecordLink = (entry: AuditLogEntry): string | null => {
+    if (entry.resourceType === 'order') return `/super-admin/orders/${encodeURIComponent(entry.resourceId)}`;
+    if (entry.resourceType === 'user' && (entry.action.includes('city_admin') || entry.metadata?.role === 'city_admin')) return `/super-admin/city-administrators/${encodeURIComponent(entry.resourceId)}`;
+    if (entry.resourceType === 'user' && entry.metadata?.role === 'seller') return `/super-admin/sellers/${encodeURIComponent(entry.resourceId)}`;
+    return null;
+  };
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading"><div><p className="super-admin-eyebrow">Management</p><h1>Security & Audit Logs</h1><p>Recent recorded actions, actor identities, and affected database records.</p></div></div>
+      <div className="super-admin-metrics"><SuperAdminMetric label="Audit entries" value={result.data?.pagination.total ?? '—'} icon="security" detail="Persisted audit log records" /></div>
+      <section className="super-admin-panel super-admin-order-directory">
+        {result.error && <div className="super-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+        {result.loading ? <Loading label="Loading audit logs…" /> : result.data?.data.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Timestamp</th><th>Actor</th><th>Role</th><th>Action</th><th>Affected record</th></tr></thead><tbody>{result.data.data.map((entry) => {
+          const target = affectedRecordLink(entry);
+          const actor = entry.actorId;
+          return <tr key={entry._id}>
+            <td>{new Date(entry.createdAt).toLocaleString('en-IN')}</td>
+            <td>{actor?.name || actor?.phoneE164 || (entry.actorType === 'system' ? 'System' : 'Unknown')}</td>
+            <td>{actor?.role || entry.actorType}</td>
+            <td>{entry.action.replaceAll('.', ' ')}</td>
+            <td>{target ? <Link to={target}>{entry.resourceType} · {entry.resourceId}</Link> : <span>{entry.resourceType} · {entry.resourceId}</span>}</td>
+          </tr>;
+        })}</tbody></table></div> : <div className="super-admin-empty">No audit records are available.</div>}
+        {result.data && result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}
+      </section>
+      <p className="super-admin-data-note">The current audit schema does not record IP addresses or a standardized success/result field, so those values are not displayed.</p>
+    </div>
+  );
+}
+
+function SuperAdminOverviewPage(): ReactNode {
+  const [days, setDays] = useState(30);
+  const result = useLoad(() => api.superAdminOverview(days), [days]);
+  const overview = result.data;
+  const metrics = overview?.metrics;
+
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading">
+        <div><p className="super-admin-eyebrow">Dashboard</p><h1>Platform Overview</h1><p>Monitor eSakhi operations and platform activity.</p></div>
+        <Link className="super-admin-primary-action" to="/super-admin/cities">＋ Manage Cities</Link>
+      </div>
+      {result.error && <div className="super-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+      {result.loading ? <Loading label="Loading global overview…" /> : overview && metrics ? (
+        <>
+          <div className="super-admin-live-caption"><span className="super-admin-live-dot" /> Live database data <span>Updated {new Date(overview.generatedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span></div>
+          <div className="super-admin-metrics">
+            <SuperAdminMetric label="Total Orders" value={metrics.totalOrders} icon="orders" />
+            <SuperAdminMetric label="Order Value" value={formatMoney(metrics.orderValuePaise)} icon="payments" detail="Non-cancelled order totals · not revenue" />
+            <SuperAdminMetric label="Active Customers" value={metrics.activeCustomers} icon="customers" />
+            <SuperAdminMetric label="Delivery Partners" value={metrics.activeDeliveryPartners} icon="delivery" />
+            <SuperAdminMetric label="Orders Needing Action" value={metrics.ordersNeedingAction} icon="support" />
+            <SuperAdminMetric label="Payments to Review" value={metrics.pendingPayments} icon="payments" />
+            <SuperAdminMetric label="Unassigned Deliveries" value={metrics.unassignedDeliveryOrders} icon="providers" />
+            <SuperAdminMetric label="Low-Stock Items" value={metrics.lowStockItems} icon="products" />
+          </div>
+          <div className="super-admin-insight-grid">
+            <section className="super-admin-panel super-admin-performance">
+              <div className="super-admin-panel-heading">
+                <div><h2>Order Activity</h2><p>Orders created over time</p></div>
+                <select aria-label="Order activity date range" value={days} onChange={(event) => setDays(Number(event.target.value))}>
+                  <option value={7}>Last 7 days</option><option value={30}>Last 30 days</option>
+                </select>
+              </div>
+              <SuperAdminOrdersChart data={overview.ordersOverTime} />
+            </section>
+            <section className="super-admin-panel super-admin-status-panel">
+              <div className="super-admin-panel-heading"><div><h2>Order Status</h2><p>Current fulfilment breakdown</p></div></div>
+              <SuperAdminStatusBreakdown statuses={overview.ordersByFulfilmentStatus} />
+            </section>
+          </div>
+          <div className="super-admin-lower-grid">
+            <section className="super-admin-panel super-admin-recent-orders">
+              <div className="super-admin-panel-heading"><div><h2>Recent Orders</h2><p>Latest orders recorded on the platform</p></div><Link to="/super-admin/orders" className="super-admin-text-link">View all <span aria-hidden="true">→</span></Link></div>
+              {overview.recentOrders.length ? <SuperAdminOrderTable orders={overview.recentOrders} /> : <div className="super-admin-empty">No orders have been recorded yet.</div>}
+            </section>
+            <section className="super-admin-panel super-admin-attention-panel">
+              <div className="super-admin-panel-heading"><div><h2>Needs Attention</h2><p>Live work queues and inventory alerts</p></div></div>
+              <div className="super-admin-attention-list">
+                <Link to="/super-admin/orders?paymentStatus=pending_verification" className="super-admin-attention-row"><span className="super-admin-attention-icon is-amber">₨</span><span><strong>Payments to review</strong><small>Awaiting verification</small></span><b>{metrics.pendingPayments}</b></Link>
+                <Link to="/super-admin/orders" className="super-admin-attention-row"><span className="super-admin-attention-icon is-purple">↗</span><span><strong>Orders needing action</strong><small>Open fulfilment work</small></span><b>{metrics.ordersNeedingAction}</b></Link>
+                <Link to="/super-admin/orders" className="super-admin-attention-row"><span className="super-admin-attention-icon is-blue">⇄</span><span><strong>Unassigned deliveries</strong><small>Delivery orders without a partner</small></span><b>{metrics.unassignedDeliveryOrders}</b></Link>
+                <div className="super-admin-attention-row is-unavailable"><span className="super-admin-attention-icon is-red">!</span><span><strong>Low-stock items</strong><small>Inventory detail page is not available</small></span><b>{metrics.lowStockItems}</b></div>
+              </div>
+            </section>
+          </div>
+          <p className="super-admin-data-note">Order value is a sum of non-cancelled order totals; it is not platform revenue, verified collections, or a settlement balance. Cities, seller records, refunds, payouts, and support cases are not yet available in the backend.</p>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function SuperAdminOrdersPage(): ReactNode {
+  const [searchParams] = useSearchParams();
+  const [page, setPage] = useState(1);
+  const [queryText, setQueryText] = useState('');
+  const [paymentStatus, setPaymentStatus] = useState(() => searchParams.get('paymentStatus') ?? '');
+  const query = new URLSearchParams({ page: String(page), limit: '20' });
+  if (queryText.trim()) query.set('q', queryText.trim());
+  if (paymentStatus) query.set('paymentStatus', paymentStatus);
+  const result = useLoad(() => api.superAdminOrders(query), [page, queryText, paymentStatus]);
+
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading">
+        <div><p className="super-admin-eyebrow">Operations</p><h1>Orders & Assignments</h1><p>Read-only order records and current payment and fulfilment states.</p></div>
+      </div>
+      {result.error && <div className="super-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+      <section className="super-admin-panel super-admin-order-directory">
+        <div className="super-admin-order-tools">
+          <label className="super-admin-search"><span aria-hidden="true">⌕</span><input aria-label="Search order reference or customer" placeholder="Search order or customer" value={queryText} onChange={(event) => { setPage(1); setQueryText(event.target.value); }} /></label>
+          <select aria-label="Filter by payment status" value={paymentStatus} onChange={(event) => { setPage(1); setPaymentStatus(event.target.value); }}>
+            <option value="">All payment states</option><option value="pending_verification">Awaiting review</option><option value="confirmed">Confirmed</option><option value="rejected">Rejected</option>
+          </select>
+        </div>
+        {result.loading ? <Loading label="Loading orders…" /> : result.data?.data.length ? <SuperAdminOrderTable orders={result.data.data} /> : <div className="super-admin-empty">No orders match these filters.</div>}
+        {result.data && result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminOrderDetailPage(): ReactNode {
+  const { id = '' } = useParams();
+  const result = useLoad(() => api.adminOrder(id), [id]);
+  const order = result.data;
+  if (result.loading) return <div className="super-admin-page"><Loading label="Loading order details…" /></div>;
+  if (!order) return <div className="super-admin-page"><Notice tone="error">{result.error || 'Order not found.'}</Notice><Link className="super-admin-text-link" to="/super-admin/orders">← Back to orders</Link></div>;
+  return (
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading"><div><p className="super-admin-eyebrow"><Link to="/super-admin/orders">Orders & Assignments</Link> / Order</p><h1>{order.orderReference}</h1><p>{order.createdAt ? new Date(order.createdAt).toLocaleString('en-IN') : 'Date unavailable'} · {order.items.length} line item(s)</p></div></div>
+      <div className="super-admin-metrics">
+        <SuperAdminMetric label="Total" value={formatMoney(order.totalPaise)} icon="payments" />
+        <SuperAdminMetric label="Payment" value={order.paymentStatus.replaceAll('_', ' ')} icon="payments" detail={order.paymentMethod.toUpperCase()} />
+        <SuperAdminMetric label="Fulfilment" value={orderStatusLabel(order.fulfilmentStatus)} icon="orders" />
+        <SuperAdminMetric label="Delivery" value={order.deliveryPartner?.name || 'Unassigned'} icon="delivery" />
+      </div>
+      <div className="super-admin-detail-grid">
+        <section className="super-admin-panel super-admin-profile-panel">
+          <div className="super-admin-panel-heading"><div><h2>Customer & destination</h2><p>Order-linked customer and delivery details.</p></div></div>
+          <dl className="super-admin-definition-list">
+            <div><dt>Customer</dt><dd>{order.customerId ? <Link to={`/super-admin/customers/${order.customerId}`}>{order.customerName}</Link> : order.customerName}</dd></div>
+            <div><dt>Phone</dt><dd>{order.customerPhoneE164 || order.customerPhone || '—'}</dd></div>
+            <div><dt>City</dt><dd>{order.address?.city ? <Link to={`/super-admin/cities/${encodeURIComponent(order.address.city)}`}>{order.address.city}</Link> : 'Pickup'}</dd></div>
+            <div><dt>Locality</dt><dd>{order.address?.locality || '—'}</dd></div>
+            <div><dt>Delivery partner</dt><dd>{order.deliveryPartner?.userId ? <Link to={`/super-admin/delivery-partners/${order.deliveryPartner.userId}`}>{order.deliveryPartner.name}</Link> : order.deliveryPartner?.name || 'Not assigned'}</dd></div>
+          </dl>
+        </section>
+        <section className="super-admin-panel super-admin-profile-panel">
+          <div className="super-admin-panel-heading"><div><h2>Payment and fulfilment</h2><p>Current states recorded on the order.</p></div></div>
+          <dl className="super-admin-definition-list">
+            <div><dt>Payment method</dt><dd>{order.paymentMethod.toUpperCase()}</dd></div>
+            <div><dt>Payment status</dt><dd><StatusBadge value={order.paymentStatus} /></dd></div>
+            <div><dt>Fulfilment method</dt><dd>{order.fulfilmentMethod}</dd></div>
+            <div><dt>Fulfilment status</dt><dd><StatusBadge value={order.fulfilmentStatus} /></dd></div>
+            <div><dt>Subtotal</dt><dd>{formatMoney(order.subtotalPaise)}</dd></div>
+            <div><dt>Delivery fee</dt><dd>{formatMoney(order.deliveryFeePaise)}</dd></div>
+          </dl>
+        </section>
+      </div>
+      <section className="super-admin-panel">
+        <div className="super-admin-panel-heading"><div><h2>Items</h2><p>Product snapshots recorded when the order was placed.</p></div></div>
+        <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Product</th><th>Quantity</th><th>Unit price</th><th>Line total</th></tr></thead><tbody>{order.items.map((item, index) => <tr key={`${item.productId}-${index}`}><td>{item.productName}</td><td>{item.quantity}</td><td>{formatMoney(item.unitPricePaise)}</td><td>{formatMoney(item.lineTotalPaise)}</td></tr>)}</tbody></table></div>
+      </section>
+      <section className="super-admin-panel">
+        <div className="super-admin-panel-heading"><div><h2>Order activity</h2><p>Recorded fulfilment and payment events.</p></div></div>
+        <div className="super-admin-timeline">
+          {order.statusHistory?.map((event, index) => <div className="super-admin-timeline-item" key={`${event.status}-${event.changedAt}-${index}`}><span className="super-admin-timeline-dot" /><div><strong>{orderStatusLabel(event.status)}</strong><small>{new Date(event.changedAt).toLocaleString('en-IN')}{event.note ? ` · ${event.note}` : ''}</small></div></div>)}
+          {order.paymentEvents?.map((event, index) => <div className="super-admin-timeline-item" key={`payment-${event.createdAt}-${index}`}><span className="super-admin-timeline-dot is-payment" /><div><strong>Payment {event.status.replaceAll('_', ' ')}</strong><small>{new Date(event.createdAt).toLocaleString('en-IN')} · {event.note}</small></div></div>)}
+          {!order.statusHistory?.length && !order.paymentEvents?.length && <div className="super-admin-empty">No activity events are recorded on this order.</div>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SuperAdminIcon({ name }: { name: string }): ReactNode {
+  const paths: Record<string, string> = {
+    overview: 'M3 3h7v7H3z M14 3h7v4h-7z M14 11h7v10h-7z M3 14h7v7H3z',
+    cities: 'M3 21h18 M5 21V7l7-4 7 4v14 M9 9h1 M14 9h1 M9 13h1 M14 13h1 M11 21v-4h2v4',
+    administrators: 'M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M20 8v6 M17 11h6',
+    sellers: 'M3 10h18 M5 10l1-6h12l1 6 M5 10v10h14V10 M9 20v-6h6v6',
+    products: 'M4 5h16l1 4H3l1-4z M5 9v11h14V9 M9 13h6 M9 17h6',
+    orders: 'M4 4h16v16H4z M8 8h8 M8 12h8 M8 16h5',
+    delivery: 'M3 6h11v11H3z M14 10h4l3 3v4h-7z M7 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4 M18 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4',
+    providers: 'M12 3v18 M3 12h18 M5.6 5.6l12.8 12.8 M18.4 5.6 5.6 18.4',
+    customers: 'M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M20 8v6',
+    support: 'M12 18h.01 M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3 M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z',
+    payments: 'M3 6h18v12H3z M3 10h18 M7 15h4',
+    refunds: 'M3 12a9 9 0 1 0 3-6.7L3 8 M3 3v5h5',
+    settlements: 'M4 5h16v14H4z M8 9h8 M8 13h5',
+    payouts: 'M12 3v13 M7 11l5 5 5-5 M4 21h16',
+    compensation: 'M12 2v20 M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
+    reports: 'M4 19V5 M4 19h17 M8 15l4-4 3 2 5-7',
+    settings: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.6 2.8-.2-.1a1.7 1.7 0 0 0-1.9.3l-.1.1h-3.2l-.1-.2a1.7 1.7 0 0 0-1.7-1l-.2.1-2.8-1.6.1-.2a1.7 1.7 0 0 0-.3-1.9l-.1-.1v-3.2l.2-.1a1.7 1.7 0 0 0 1-1.7l-.1-.2 1.6-2.8.2.1a1.7 1.7 0 0 0 1.9-.3l.1-.1h3.2l.1.2a1.7 1.7 0 0 0 1.7 1l.2-.1 2.8 1.6-.1.2a1.7 1.7 0 0 0 .3 1.9l.1.1v3.2z',
+    roles: 'M12 15l-3 1.6.6-3.4-2.5-2.4 3.4-.5L12 7l1.5 3.3 3.4.5-2.5 2.4.6 3.4z M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z',
+    security: 'M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11z M9 12l2 2 4-4',
+  };
+  return <svg className="super-admin-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name] ?? paths.overview} /></svg>;
+}
+
+function SuperAdminMetric({ label, value, icon, detail }: { label: string; value: string | number; icon: string; detail?: string }): ReactNode {
+  return <article className="super-admin-metric"><div className="super-admin-metric-top"><span>{label}</span><SuperAdminIcon name={icon} /></div><strong>{typeof value === 'number' ? value.toLocaleString('en-IN') : value}</strong><small>{detail ?? 'Live database count'}</small></article>;
+}
+
+function SuperAdminRecordTable({
+  title,
+  description,
+  empty,
+  headers,
+  rows,
+}: {
+  title: string;
+  description: string;
+  empty: string;
+  headers: string[];
+  rows: ReactNode[][];
+}): ReactNode {
+  return (
+    <section className="super-admin-panel super-admin-order-directory">
+      <div className="super-admin-panel-heading"><div><h2>{title}</h2><p>{description}</p></div></div>
+      {rows.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div> : <div className="super-admin-empty">{empty}</div>}
+    </section>
+  );
+}
+
+function SuperAdminOrdersChart({ data }: { data: Array<{ day: string; count: number }> }): ReactNode {
+  if (!data.length) return <div className="super-admin-empty">No order activity is available for this period.</div>;
+  const max = Math.max(...data.map(({ count }) => count), 1);
+  const points = data.map(({ count }, index) => {
+    const x = data.length === 1 ? 300 : 34 + (index / (data.length - 1)) * 532;
+    const y = 174 - (count / max) * 142;
+    return { x, y, day: data[index].day, count };
+  });
+  const line = points.map(({ x, y }, index) => `${index ? 'L' : 'M'} ${x} ${y}`).join(' ');
+  const area = `${line} L ${points[points.length - 1].x} 182 L ${points[0].x} 182 Z`;
+  const labelIndexes = data.length <= 7
+    ? data.map((_, index) => index)
+    : [...new Set([0, Math.floor((data.length - 1) / 2), data.length - 1])];
+  return (
+    <div className="super-admin-chart">
+      <svg viewBox="0 0 600 220" role="img" aria-label={`Orders per day over the last ${data.length} days`}>
+        {[40, 85, 130, 175].map((y, index) => <g key={y}><line x1="34" y1={y} x2="566" y2={y} className="super-admin-chart-grid" /><text x="27" y={y + 3} textAnchor="end">{Math.round(max * (3 - index) / 3)}</text></g>)}
+        <path d={area} className="super-admin-chart-area" />
+        <path d={line} className="super-admin-chart-line" />
+        {points.map(({ x, y, day, count }) => <circle key={day} cx={x} cy={y} r={data.length > 10 ? 2.5 : 4} className="super-admin-chart-point"><title>{`${day}: ${count} orders`}</title></circle>)}
+        {labelIndexes.map((index) => <text key={index} x={points[index].x} y="210" textAnchor={index === 0 ? 'start' : index === points.length - 1 ? 'end' : 'middle'}>{new Date(`${points[index].day}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })}</text>)}
+      </svg>
+    </div>
+  );
+}
+
+function SuperAdminStatusBreakdown({ statuses }: { statuses: Array<{ status: string; count: number }> }): ReactNode {
+  const total = statuses.reduce((sum, item) => sum + item.count, 0);
+  const colors: Record<string, string> = {
+    placed: '#d99116', accepted: '#7351a6', preparing: '#ce6d3d', ready_for_pickup: '#3e81ae',
+    out_for_delivery: '#a43d83', delivered: '#21865b', completed: '#597e70', cancelled: '#c4c6ce', delivery_failed: '#d94b4b',
+  };
+  let offset = 0;
+  const segments = statuses.filter(({ count }) => count > 0).map(({ status, count }) => {
+    const start = offset;
+    offset += total ? (count / total) * 100 : 0;
+    return `${colors[status] ?? '#9ca3af'} ${start}% ${offset}%`;
+  });
+  return (
+    <div className="super-admin-status-content">
+      {total ? <div className="super-admin-donut" style={{ background: `conic-gradient(${segments.join(', ')})` }} role="img" aria-label={`Fulfilment status breakdown for ${total} orders`}><span><strong>{total.toLocaleString('en-IN')}</strong><small>Orders</small></span></div> : <div className="super-admin-donut is-empty"><span><strong>0</strong><small>Orders</small></span></div>}
+      <div className="super-admin-status-legend">
+        {statuses.length ? statuses.map(({ status, count }) => <div key={status}><span><i style={{ backgroundColor: colors[status] ?? '#9ca3af' }} />{orderStatusLabel(status)}</span><strong>{count.toLocaleString('en-IN')}</strong></div>) : <p>No fulfilment records yet.</p>}
+      </div>
+    </div>
+  );
+}
+
+function SuperAdminOrderTable({ orders }: { orders: SuperAdminOrder[] }): ReactNode {
+  return (
+    <div className="super-admin-table-wrap">
+      <table className="super-admin-table">
+        <thead><tr><th>Order</th><th>Customer</th><th>City</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Assigned partner</th></tr></thead>
+        <tbody>{orders.map((order) => (
+          <tr key={order._id}>
+            <td><Link to={`/super-admin/orders/${order._id}`}>{order.orderReference}</Link><small>{new Date(order.createdAt).toLocaleDateString('en-IN')}</small></td>
+            <td>{order.customerId ? <Link to={`/super-admin/customers/${order.customerId}`}>{order.customerName}</Link> : order.customerName}</td>
+            <td>{order.address?.city ? <Link to={`/super-admin/cities/${encodeURIComponent(order.address.city)}`}>{order.address.city}</Link> : 'Pickup'}</td>
+            <td className="super-admin-order-items">{order.items.map((item) => item.productName).slice(0, 2).join(', ')}{order.items.length > 2 ? ` +${order.items.length - 2}` : ''}</td>
+            <td>{formatMoney(order.totalPaise)}</td>
+            <td><span className="super-admin-payment">{order.paymentMethod.toUpperCase()}</span><small>{order.paymentStatus.replaceAll('_', ' ')}</small></td>
+            <td><span className={`super-admin-status-badge status-${order.fulfilmentStatus}`}>{orderStatusLabel(order.fulfilmentStatus)}</span></td>
+            <td>{order.deliveryPartner?.userId ? <Link to={`/super-admin/delivery-partners/${order.deliveryPartner.userId}`}>{order.deliveryPartner.name}</Link> : order.deliveryPartner?.name || '—'}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function CityAdminGate({ children }: { children: ReactNode }): ReactNode {
+  const { user, ready } = useAuth();
+  const location = useLocation();
+
+  if (!ready) return <div className="page-container"><Loading label="Checking your session…" /></div>;
+  if (!user) {
+    return <div className="page-container narrow"><PageIntro eyebrow="Protected workspace" title="City Admin sign-in required" description="Sign in with the account assigned to this city." /><Link to="/sign-in" state={{ from: location.pathname }} className="button">Sign in</Link></div>;
+  }
+  if (user.role !== 'city_admin') {
+    return <div className="page-container narrow"><Notice tone="error">This workspace requires a City Admin account. Other role permissions cannot access this city dashboard.</Notice><Link to="/" className="button button-outline">Return to the store</Link></div>;
+  }
+  if (!user.assignedCity) {
+    return <div className="page-container narrow"><Notice tone="error">This account has no assigned city. Contact a Super Admin to configure its city scope.</Notice></div>;
+  }
+  return <CityAdminLayout>{children}</CityAdminLayout>;
+}
+
+const cityAdminNavGroups = [
+  { label: 'Main', items: [{ label: 'Overview', icon: 'overview', path: '/city-admin' }] },
+  {
+    label: 'Local Operations',
+    items: [
+      { label: 'My Service Zones', icon: 'cities' },
+      { label: 'Sellers & SHGs', icon: 'sellers' },
+      { label: 'Products & Inventory', icon: 'products' },
+      { label: 'Orders & Assignments', icon: 'orders', path: '/city-admin/orders' },
+      { label: 'Delivery Partners', icon: 'delivery' },
+      { label: 'Customers', icon: 'customers' },
+      { label: 'Support & Disputes', icon: 'support' },
+    ],
+  },
+  { label: 'Finance', items: [{ label: 'Payment Issues', icon: 'payments' }, { label: 'Refund Requests', icon: 'refunds' }] },
+  { label: 'Reporting', items: [{ label: 'City Reports & Analytics', icon: 'reports' }] },
+  { label: 'Account', items: [{ label: 'My Profile', icon: 'roles' }, { label: 'Notifications', icon: 'support' }] },
+];
+
+function CityAdminLayout({ children }: { children: ReactNode }): ReactNode {
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+  const [search, setSearch] = useState('');
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const displayName = user?.name || 'City Administrator';
+
+  async function handleSignOut(): Promise<void> {
+    await signOut();
+    navigate('/');
+  }
+
+  function submitSearch(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    const query = new URLSearchParams();
+    if (search.trim()) query.set('q', search.trim());
+    navigate(`/city-admin/orders${query.size ? `?${query}` : ''}`);
+  }
+
+  return (
+    <div className="city-admin-shell">
+      {mobileOpen && <button className="city-admin-backdrop" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
+      <aside className={`city-admin-sidebar${mobileOpen ? ' is-open' : ''}`}>
+        <Link to="/city-admin" className="city-admin-brand"><img src="/images/esakhi-emblem.png" alt="" /><span>eSakhi<small>CITY ADMIN</small></span></Link>
+        <div className="city-admin-assigned-city"><span>ASSIGNED CITY</span><strong>{user?.assignedCity}</strong><small>City Admin scope</small></div>
+        <nav className="city-admin-nav" aria-label="City Admin navigation">
+          {cityAdminNavGroups.map((group) => (
+            <div className="city-admin-nav-group" key={group.label}>
+              <span className="city-admin-nav-label">{group.label}</span>
+              {group.items.map((item) => item.path ? (
+                <NavLink to={item.path} end={item.path === '/city-admin'} key={item.label} onClick={() => setMobileOpen(false)}>
+                  <SuperAdminIcon name={item.icon} /><span>{item.label}</span>
+                </NavLink>
+              ) : (
+                <span className="city-admin-nav-disabled" key={item.label} aria-disabled="true" title={`${item.label} is not available yet`}>
+                  <SuperAdminIcon name={item.icon} /><span>{item.label}</span><small>Planned</small>
+                </span>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <div className="city-admin-user">
+          <span className="city-admin-avatar">{displayName.slice(0, 1).toUpperCase()}</span>
+          <span><strong>{displayName}</strong><small>City Administrator</small></span>
+          <button onClick={() => void handleSignOut()} aria-label="Sign out" title="Sign out">↗</button>
+        </div>
+      </aside>
+      <main className="city-admin-main">
+        <header className="city-admin-topbar">
+          <div className="city-admin-topbar-leading">
+            <button className="city-admin-menu-toggle" onClick={() => setMobileOpen((open) => !open)} aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'}>☰</button>
+            <form className="city-admin-search" onSubmit={submitSearch}><span aria-hidden="true">⌕</span><input aria-label="Search orders" placeholder="Search orders, customers…" value={search} onChange={(event) => setSearch(event.target.value)} /><kbd>⌘ K</kbd></form>
+          </div>
+          <div className="city-admin-topbar-actions"><span className="city-admin-live-label"><i /> Live operations</span><button className="city-admin-notifications" type="button" disabled title="Notification center is not available yet" aria-label="Notifications are not available yet"><SuperAdminIcon name="support" /></button><Link to="/help" className="city-admin-help" aria-label="Help">?</Link><button className="city-admin-mobile-signout" onClick={() => void handleSignOut()}>Sign out</button></div>
+        </header>
+        {children}
+      </main>
+    </div>
+  );
+}
+
+function CityAdminDashboardPage(): ReactNode {
+  const result = useLoad(() => api.cityAdminDashboard());
+  useRefreshOnFocus(result.reload);
+  const dashboard = result.data;
+  const metrics = dashboard?.metrics;
+
+  return (
+    <div className="city-admin-page">
+      <div className="city-admin-page-heading">
+        <div><p className="city-admin-eyebrow">{dashboard?.city ?? 'City'} CITY OPERATIONS</p><h1>City Operations Overview</h1><p>Monitor city-scoped orders and delivery activity for your assigned city.</p></div>
+        <div className="city-admin-page-actions"><button className="city-admin-secondary-button" type="button" disabled title="City reports are not available yet">Export report</button><Link className="city-admin-primary-button" to="/city-admin/orders">View all orders <span aria-hidden="true">›</span></Link></div>
+      </div>
+      {result.error && <div className="city-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+      {result.loading ? <Loading label="Loading city operations…" /> : dashboard && metrics ? (
+        <>
+          <div className="city-admin-metrics">
+            <CityAdminMetric label="Today’s Orders" value={metrics.todayOrders} icon="orders" />
+            <CityAdminMetric label="Awaiting Assignment" value={metrics.awaitingAssignment} icon="delivery" alert />
+            <CityAdminMetric label="Out for Delivery" value={metrics.outForDelivery} icon="providers" />
+            <CityAdminMetric label="Delivered Today" value={metrics.deliveredToday} icon="overview" />
+            <CityAdminMetric label="Active Partners" value="Unavailable" icon="delivery" unavailable />
+            <CityAdminMetric label="Partner Applications" value="Unavailable" icon="administrators" unavailable />
+            <CityAdminMetric label="Sellers Awaiting Review" value="Unavailable" icon="sellers" unavailable />
+            <CityAdminMetric label="Open Support Tickets" value="Unavailable" icon="support" unavailable />
+          </div>
+          <div className="city-admin-insight-grid">
+            <section className="city-admin-panel">
+              <div className="city-admin-panel-heading"><div><h2>Daily order trend</h2><p>Orders received over the last 7 days</p></div><span className="city-admin-period">Last 7 days</span></div>
+              <SuperAdminOrdersChart data={dashboard.ordersOverTime} />
+            </section>
+            <section className="city-admin-panel">
+              <div className="city-admin-panel-heading"><div><h2>Order status</h2><p>Today’s {metrics.todayOrders.toLocaleString('en-IN')} city orders</p></div></div>
+              <SuperAdminStatusBreakdown statuses={dashboard.ordersByStatus} />
+            </section>
+          </div>
+          <div className="city-admin-lower-grid">
+            <section className="city-admin-panel city-admin-recent">
+              <div className="city-admin-panel-heading"><div><h2>Recent orders</h2><p>Latest marketplace orders in {dashboard.city}</p></div><Link to="/city-admin/orders">View all <span aria-hidden="true">→</span></Link></div>
+              {dashboard.recentOrders.length ? <CityAdminOrderTable orders={dashboard.recentOrders} /> : <div className="city-admin-empty">No orders have been recorded for this city yet.</div>}
+            </section>
+            <section className="city-admin-panel">
+              <div className="city-admin-panel-heading"><div><h2>Assignment exceptions</h2><p>Orders needing manual attention</p></div><Link to="/city-admin/orders?unassignedOnly=true">View queue</Link></div>
+              {dashboard.assignmentExceptions.length ? <div className="city-admin-exceptions">{dashboard.assignmentExceptions.map((exception) => (
+                <div className="city-admin-exception" key={exception._id}>
+                  <span className="city-admin-exception-mark">!</span>
+                  <span><strong>#{exception.orderReference} · Awaiting assignment</strong><small>{exception.address?.locality ?? 'Locality not recorded'} · Created {formatElapsed(exception.createdAt)} ago</small></span>
+                </div>
+              ))}</div> : <div className="city-admin-empty">No unassigned delivery orders need attention.</div>}
+              <div className="city-admin-queue-summary">
+                <Link to="/city-admin/orders?paymentStatus=pending_verification"><span>Payments awaiting review</span><strong>{metrics.paymentsToReview}</strong></Link>
+                <Link to="/city-admin/orders"><span>Orders needing fulfilment action</span><strong>{metrics.ordersNeedingAction}</strong></Link>
+              </div>
+            </section>
+          </div>
+          <p className="city-admin-data-note">Counts use the assigned city recorded for your account and the city on each delivery address. Partner availability, seller reviews, support tickets, city inventory, and report exports are not available in the current backend.</p>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function CityAdminOrdersPage(): ReactNode {
+  const [searchParams] = useSearchParams();
+  const [page, setPage] = useState(1);
+  const [queryText, setQueryText] = useState(() => searchParams.get('q') ?? '');
+  const [status, setStatus] = useState(() => searchParams.get('fulfilmentStatus') ?? '');
+  const [paymentStatus, setPaymentStatus] = useState(() => searchParams.get('paymentStatus') ?? '');
+  const unassignedOnly = searchParams.get('unassignedOnly') === 'true';
+  const query = new URLSearchParams({ page: String(page), limit: '20' });
+  if (queryText.trim()) query.set('q', queryText.trim());
+  if (status) query.set('fulfilmentStatus', status);
+  if (paymentStatus) query.set('paymentStatus', paymentStatus);
+  if (unassignedOnly) query.set('unassignedOnly', 'true');
+  const result = useLoad(() => api.cityAdminOrders(query), [page, queryText, status, paymentStatus, unassignedOnly]);
+
+  return (
+    <div className="city-admin-page">
+      <div className="city-admin-page-heading"><div><p className="city-admin-eyebrow">Local operations</p><h1>Orders & Assignments</h1><p>Read-only orders placed for your assigned city. Other cities are excluded by the backend.</p></div></div>
+      {result.error && <div className="city-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+      <section className="city-admin-panel city-admin-order-directory">
+        {unassignedOnly && <div className="city-admin-filter-note">Showing delivery orders awaiting a partner. <Link to="/city-admin/orders">Clear filter</Link></div>}
+        <div className="city-admin-order-tools">
+          <label className="city-admin-search-field"><span aria-hidden="true">⌕</span><input aria-label="Search order reference or customer" placeholder="Search order or customer" value={queryText} onChange={(event) => { setPage(1); setQueryText(event.target.value); }} /></label>
+          <select aria-label="Filter by fulfilment status" value={status} onChange={(event) => { setPage(1); setStatus(event.target.value); }}>
+            <option value="">All fulfilment states</option><option value="placed">Placed</option><option value="accepted">Accepted</option><option value="preparing">Preparing</option><option value="ready_for_pickup">Ready for pickup</option><option value="out_for_delivery">Out for delivery</option><option value="delivered">Delivered</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option><option value="delivery_failed">Delivery failed</option>
+          </select>
+          <select aria-label="Filter by payment status" value={paymentStatus} onChange={(event) => { setPage(1); setPaymentStatus(event.target.value); }}>
+            <option value="">All payment states</option><option value="pending_verification">Awaiting review</option><option value="confirmed">Confirmed</option><option value="rejected">Rejected</option>
+          </select>
+        </div>
+        {result.loading ? <Loading label="Loading city orders…" /> : result.data?.data.length ? <CityAdminOrderTable orders={result.data.data} /> : <div className="city-admin-empty">No city orders match these filters.</div>}
+        {result.data && result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}
+      </section>
+    </div>
+  );
+}
+
+function CityAdminMetric({ label, value, icon, alert = false, unavailable = false }: { label: string; value: number | string; icon: string; alert?: boolean; unavailable?: boolean }): ReactNode {
+  return <article className={`city-admin-metric${alert ? ' is-alert' : ''}${unavailable ? ' is-unavailable' : ''}`}><div><span>{label}</span><SuperAdminIcon name={icon} /></div><strong>{typeof value === 'number' ? value.toLocaleString('en-IN') : value}</strong><small>{unavailable ? 'Not tracked by city scope' : alert ? 'Needs attention' : 'Live city-scoped data'}</small></article>;
+}
+
+function CityAdminOrderTable({ orders }: { orders: CityAdminOrder[] }): ReactNode {
+  return (
+    <div className="city-admin-table-wrap"><table className="city-admin-table">
+      <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Partner</th><th>Created</th></tr></thead>
+      <tbody>{orders.map((order) => <tr key={order._id}>
+        <td><strong>#{order.orderReference}</strong><small>{order.address?.locality ?? 'Pickup order'}</small></td>
+        <td>{order.customerName}</td>
+        <td className="city-admin-items">{order.items.map((item) => item.productName).slice(0, 2).join(', ')}{order.items.length > 2 ? ` +${order.items.length - 2}` : ''}</td>
+        <td>{formatMoney(order.totalPaise)}</td>
+        <td><span className={`city-admin-payment ${order.paymentStatus}`}>{order.paymentMethod === 'cash' ? 'COD' : 'UPI'}</span><small>{order.paymentStatus.replaceAll('_', ' ')}</small></td>
+        <td><span className={`super-admin-status-badge status-${order.fulfilmentStatus}`}>{orderStatusLabel(order.fulfilmentStatus)}</span></td>
+        <td>{order.deliveryPartner?.name ?? 'Unassigned'}</td>
+        <td>{new Date(order.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</td>
+      </tr>)}</tbody>
+    </table></div>
+  );
+}
+
+function formatElapsed(timestamp: string): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(timestamp).getTime()) / 60_000));
+  return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
 function AdminGate({ children, adminOnly = false }: { children: ReactNode; adminOnly?: boolean }): ReactNode {
   const { user, ready } = useAuth();
   const location = useLocation();
   if (!ready) return <div className="page-container"><Loading label="Checking your session…" /></div>;
-  if (!user) return <div className="page-container narrow"><PageIntro eyebrow="Protected workspace" title="Please sign in" description="Use your authorized eSakhi account to continue." /><Link to="/signin" state={{ from: location.pathname }} className="button">Sign in</Link></div>;
+  if (!user) return <div className="page-container narrow"><PageIntro eyebrow="Protected workspace" title="Please sign in" description="Use your authorized eSakhi account to continue." /><Link to="/sign-in" state={{ from: location.pathname }} className="button">Sign in</Link></div>;
   if (adminOnly && user.role !== 'admin') return <div className="page-container narrow"><Notice tone="error">This workspace action requires an administrator account.</Notice><Link to="/admin" className="button button-outline">Back to workspace</Link></div>;
   if (!adminOnly && user.role !== 'admin' && user.role !== 'staff') return <div className="page-container narrow"><Notice tone="error">Your account does not have workspace access.</Notice></div>;
   return <AdminLayout>{children}</AdminLayout>;
@@ -1305,47 +2874,224 @@ function AdminDeliveryPartnerPage(): ReactNode {
   </div>;
 }
 
+function SellerGate({ children }: { children: ReactNode }): ReactNode {
+  const { user, ready } = useAuth();
+  const location = useLocation();
+  if (!ready) return <div className="page-container"><Loading label="Checking your session…" /></div>;
+  if (!user) return <div className="page-container narrow"><PageIntro eyebrow="Seller workspace" title="Please sign in" description="Sign in with an approved seller account to view your store." /><Link to="/sign-in" state={{ from: location.pathname }} className="button">Sign in</Link></div>;
+  if (user.role !== 'seller') return <div className="page-container narrow"><Notice tone="error">This workspace is available only to approved seller accounts.</Notice></div>;
+  return children;
+}
+
+function SellerPortalPage(): ReactNode {
+  const { user, signOut } = useAuth();
+  const [view, setView] = useState<'overview' | 'products' | 'orders' | 'profile'>('overview');
+  const dashboard = useLoad(() => api.sellerDashboard(), [user?.id]);
+  const products = useLoad(() => api.sellerProducts(1, 100), [user?.id]);
+  const orders = useLoad(() => api.sellerOrders(1, 100), [user?.id]);
+  useRefreshOnFocus(dashboard.reload);
+  useRefreshOnFocus(products.reload);
+  useRefreshOnFocus(orders.reload);
+  const data = dashboard.data;
+  const metrics = data?.metrics;
+
+  const sidebar = (
+    <>
+      <button className={view === 'overview' ? 'active' : ''} onClick={() => setView('overview')}><span>⌂</span>Overview</button>
+      <button className={view === 'profile' ? 'active' : ''} onClick={() => setView('profile')}><span>◯</span>My Store Profile</button>
+      <button className={view === 'products' ? 'active' : ''} onClick={() => setView('products')}><span>◇</span>Products</button>
+      <button className="is-unavailable" disabled title="Seller inventory updates are not available yet"><span>▦</span>Inventory <small>Read only</small></button>
+      <button className={view === 'orders' ? 'active' : ''} onClick={() => setView('orders')}><span>▤</span>Orders</button>
+      <button className="is-unavailable" disabled title="Seller order preparation actions are not available yet"><span>◷</span>Processing <small>Read only</small></button>
+      <button className="is-unavailable" disabled title="Settlements are not tracked yet"><span>₹</span>Earnings & Settlements <small>Unavailable</small></button>
+      <button className="is-unavailable" disabled title="Seller reviews are not available yet"><span>☆</span>Reviews & Feedback <small>Unavailable</small></button>
+    </>
+  );
+  const title = view === 'products' ? 'Products' : view === 'orders' ? 'Orders' : view === 'profile' ? 'My store profile' : 'Seller overview';
+  const orderRows = (rows: SellerOrder[]) => rows.length ? (
+    <div className="seller-order-list">{rows.map((order) => <article className="seller-order-row" key={order._id}>
+      <div><span className="seller-kicker">{order.orderReference}</span><strong>{order.items.map((item) => `${item.productName} × ${item.quantity}`).join(', ')}</strong><small>{new Date(order.createdAt).toLocaleString('en-IN')} · {order.fulfilmentMethod}</small></div>
+      <div><StatusBadge value={order.fulfilmentStatus} fulfilmentMethod={order.fulfilmentMethod} /><strong>{formatMoney(order.subtotalPaise)}</strong><small>Seller item subtotal</small></div>
+    </article>)}</div>
+  ) : <div className="seller-empty"><span aria-hidden="true">✿</span><strong>No orders to show</strong><small>Orders containing your products will appear here.</small></div>;
+
+  return <div className="seller-portal">
+    <aside className="seller-sidebar">
+      <Link to="/" className="seller-brand"><span className="seller-brand-mark">ई</span><span><strong>E Sakhi</strong><small>SELLER</small></span></Link>
+      <div className="seller-account-summary"><span>{(user?.name?.trim().charAt(0) || 'S').toLocaleUpperCase('en-IN')}</span><div><strong>{user?.name || 'Seller account'}</strong><small>Seller workspace</small></div></div>
+      <span className="seller-nav-heading">MY BUSINESS</span>
+      <nav>{sidebar}</nav>
+      <div className="seller-support-note"><strong>Need help?</strong><small>For seller assistance, contact the eSakhi support team.</small><Link to="/help">Help & support →</Link></div>
+    </aside>
+    <main className="seller-main">
+      <header className="seller-topbar"><Link to="/" className="seller-topbar-brand">E Sakhi</Link><div><span>{user?.name || 'Seller'}</span><Link to="/account/profile">Profile</Link><button onClick={() => void signOut()}>Sign out</button></div></header>
+      <div className="seller-page">
+        <div className="seller-page-heading"><div><span className="seller-kicker">✓ SELLER ACCOUNT</span><h1>{view === 'overview' ? `Namaste${user?.name ? `, ${user.name}` : ''}!` : title}</h1><p>{view === 'overview' ? 'Here is an overview of your products and orders.' : 'Seller workspace data is scoped to your account.'}</p></div>
+          {view === 'products' && <button className="seller-secondary-action" disabled title="Product creation is not available in the seller API">＋ Add product · unavailable</button>}
+        </div>
+        {(dashboard.error || products.error || orders.error) && <Notice tone="error">{dashboard.error || products.error || orders.error}</Notice>}
+        {view === 'overview' && <>
+          <section className="seller-metrics">
+            <SellerMetric label="New orders" value={metrics?.newOrders} icon="▤" unavailable={!metrics} />
+            <SellerMetric label="Orders to prepare" value={metrics?.ordersToPrepare} icon="◷" unavailable={!metrics} />
+            <SellerMetric label="Active products" value={metrics?.activeProducts} icon="◇" unavailable={!metrics} />
+            <SellerMetric label="Low stock" value={metrics?.lowStockProducts} icon="!" alert />
+            <SellerMetric label="Gross paid product sales · this month" value={metrics ? formatMoney(metrics.grossPaidProductSalesThisMonthPaise) : undefined} icon="↗" unavailable={!metrics} />
+            <SellerMetric label="Settlement balance" value="Unavailable" icon="₹" unavailable />
+          </section>
+          <div className="seller-content-grid">
+            <section className="seller-panel seller-sales-panel"><div className="seller-panel-heading"><div><h2>Sales overview</h2><p>Confirmed paid item totals for this month, before any settlement adjustments.</p></div></div><div className="seller-sales-value">{metrics ? formatMoney(metrics.grossPaidProductSalesThisMonthPaise) : <Loading label="Loading sales…" />}</div><Notice>Sales history, commission deductions, pending settlements, and payouts are not currently available.</Notice></section>
+            <section className="seller-panel"><div className="seller-panel-heading"><div><h2>Store progress</h2><p>Manage your catalogue and profile.</p></div></div><div className="seller-progress-list"><button onClick={() => setView('profile')}>Review account profile <span>→</span></button><button onClick={() => setView('products')}>View your products <span>{products.data?.pagination.total ?? '…'}</span></button><button disabled title="Product creation is unavailable">Add product <span>Unavailable</span></button></div></section>
+          </div>
+          <section className="seller-panel seller-recent-orders"><div className="seller-panel-heading"><div><h2>Recent orders</h2><p>Orders that include your products.</p></div><button onClick={() => setView('orders')}>View orders →</button></div>{orders.loading ? <Loading label="Loading seller orders…" /> : orders.error ? null : orderRows(data?.recentOrders ?? [])}</section>
+          <p className="seller-data-note">Product and order information is restricted to this seller account. Order totals show only your own items. Order acceptance/preparation actions and settlement calculations are not yet available.</p>
+        </>}
+        {view === 'products' && <section className="seller-panel"><div className="seller-panel-heading"><div><h2>Your products</h2><p>Read-only catalogue view for products assigned to your seller account.</p></div></div>{products.loading ? <Loading label="Loading products…" /> : products.data?.data.length ? <div className="seller-product-list">{products.data.data.map((product) => <article className="seller-product-row" key={product._id}><span className="seller-product-image">{product.imageUrls[0] ? <img src={resolveProductImageUrl(product.imageUrls[0])} alt="" /> : '✿'}</span><span><strong>{product.name}</strong><small>{product.category} · {product.isActive ? 'Active' : 'Inactive'}</small></span><span><strong>{formatMoney(product.pricePaise)}</strong><small>{product.variants.length ? `${product.variants.reduce((sum, variant) => sum + variant.stock, 0)} variant units` : `${product.stock} in stock`}</small></span></article>)}</div> : <div className="seller-empty"><span>◇</span><strong>No products are assigned to your account</strong><small>Products must be assigned through an approved seller workflow.</small></div>}</section>}
+        {view === 'orders' && <section className="seller-panel"><div className="seller-panel-heading"><div><h2>Your orders</h2><p>Only items associated with your seller account are shown.</p></div></div>{orders.loading ? <Loading label="Loading seller orders…" /> : orders.error ? null : orderRows(orders.data?.data ?? [])}</section>}
+        {view === 'profile' && <section className="seller-panel seller-profile-panel"><div className="seller-panel-heading"><div><h2>Seller account</h2><p>Account identity currently available to this workspace.</p></div></div><dl><div><dt>Account name</dt><dd>{user?.name || 'Not provided'}</dd></div><div><dt>Phone</dt><dd>{user?.phone || 'Not available'}</dd></div><div><dt>Email</dt><dd>{user?.email || 'Not provided'}</dd></div><div><dt>Seller verification</dt><dd>Application verification status is not stored in the current backend</dd></div></dl><Link className="seller-profile-link" to="/account/profile">Edit account name →</Link></section>}
+      </div>
+      <nav className="seller-mobile-nav" aria-label="Seller navigation"><button className={view === 'overview' ? 'active' : ''} onClick={() => setView('overview')}>⌂<small>Overview</small></button><button className={view === 'products' ? 'active' : ''} onClick={() => setView('products')}>◇<small>Products</small></button><button className={view === 'orders' ? 'active' : ''} onClick={() => setView('orders')}>▤<small>Orders</small></button><button className={view === 'profile' ? 'active' : ''} onClick={() => setView('profile')}>◯<small>Profile</small></button></nav>
+    </main>
+  </div>;
+}
+
+function SellerMetric({ label, value, icon, unavailable = false, alert = false }: { label: string; value?: string | number; icon: string; unavailable?: boolean; alert?: boolean }): ReactNode {
+  return <article className={`seller-metric${unavailable ? ' is-unavailable' : ''}${alert ? ' is-alert' : ''}`}><span className="seller-metric-icon">{icon}</span><span><small>{label}</small><strong>{value === undefined ? '…' : typeof value === 'number' ? value.toLocaleString('en-IN') : value}</strong><small>{unavailable ? 'Not available in seller data' : alert ? 'Needs attention' : 'Seller-scoped data'}</small></span></article>;
+}
+
 function DeliveryPartnerGate({ children }: { children: ReactNode }): ReactNode {
   const { user, ready } = useAuth();
   const location = useLocation();
   if (!ready) return <div className="page-container"><Loading label="Checking your session…" /></div>;
-  if (!user) return <div className="page-container narrow"><PageIntro eyebrow="Delivery portal" title="Please sign in" description="Sign in with your delivery partner account to view assigned orders." /><Link to="/signin" state={{ from: location.pathname }} className="button">Sign in</Link></div>;
+  if (!user) return <div className="page-container narrow"><PageIntro eyebrow="Delivery portal" title="Please sign in" description="Sign in with your delivery partner account to view assigned orders." /><Link to="/sign-in" state={{ from: location.pathname }} className="button">Sign in</Link></div>;
   if (user.role !== 'delivery_partner') return <div className="page-container narrow"><Notice tone="error">This portal is available only to delivery partners.</Notice></div>;
   return children;
 }
 
 function DeliveryPartnerPage(): ReactNode {
-  const { user } = useAuth();
-  const orders = useLoad(() => api.partnerOrders(), []);
+  const { user, signOut } = useAuth();
+  const [view, setView] = useState<'overview' | 'deliveries' | 'history' | 'profile'>('overview');
+  const orders = useLoad(() => api.partnerOrders(), [user?.id]);
+  const history = useLoad(() => api.partnerOrderHistory(), [user?.id]);
   useRefreshOnFocus(orders.reload);
+  useRefreshOnFocus(history.reload);
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const updateStatus = async (id: string, status: 'out_for_delivery' | 'delivered' | 'delivery_failed') => {
+  const updateStatus = async (id: string, status: 'out_for_delivery' | 'delivered' | 'delivery_failed', orderReference: string) => {
+    const confirmation = status === 'out_for_delivery'
+      ? `Start delivery for ${orderReference}?`
+      : status === 'delivered'
+        ? `Confirm ${orderReference} was delivered to the customer?`
+        : `Report delivery failed for ${orderReference}?`;
+    if (!window.confirm(confirmation)) return;
     setError('');
     setMessage('');
     try {
       await api.updatePartnerOrderStatus(id, status, note.trim() || undefined);
       setNote('');
       setMessage('Delivery status updated.');
-      await orders.reload(false);
+      await Promise.all([orders.reload(false), history.reload(false)]);
     } catch (cause) {
       setError(displayError(cause));
     }
   };
-  return <div className="page-container">
-    <PageIntro eyebrow="Delivery partner portal" title={`Hello${user?.name ? `, ${user.name}` : ''}`} description={`${user?.email ? `${user.email} · ` : ''}${user?.phone ?? ''} · Showing only orders assigned to this account.`} />
-    {error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}
-    <label className="field"><span>Delivery update note (optional)</span><textarea rows={2} maxLength={500} value={note} onChange={(event) => setNote(event.target.value)} /></label>
-    {orders.loading ? <Loading /> : orders.data?.length ? <div className="order-list">{orders.data.map((order) => <article className="panel delivery-partner-card" key={order._id}>
-      <div className="panel-heading"><div><span className="eyebrow">{order.orderReference}</span><h2>{order.customerName}</h2></div><StatusBadge value={order.fulfilmentStatus} fulfilmentMethod={order.fulfilmentMethod} /></div>
-      <a href={`tel:${order.customerPhoneE164}`}>Call customer {order.customerPhoneE164}</a>
-      {order.address && <address>{order.address.addressLine1}{order.address.addressLine2 ? `, ${order.address.addressLine2}` : ''}, {order.address.locality}, {order.address.city}, {order.address.state} {order.address.postalCode}</address>}
-      {order.items.map((item, index) => <span key={`${item.productId}-${index}`}>{item.productName} × {item.quantity}</span>)}
-      <small>Assigned {order.deliveryPartner?.assignedAt ? new Date(order.deliveryPartner.assignedAt).toLocaleString('en-IN') : ''}</small>
-      {['preparing', 'ready_for_pickup'].includes(order.fulfilmentStatus) && <button className="button" onClick={() => void updateStatus(order._id, 'out_for_delivery')}>Mark out for delivery</button>}
-      {order.fulfilmentStatus === 'out_for_delivery' && <div className="button-row"><button className="button" onClick={() => void updateStatus(order._id, 'delivered')}>Mark delivered</button><button className="button button-outline" onClick={() => void updateStatus(order._id, 'delivery_failed')}>Report delivery failed</button></div>}
-    </article>)}</div> : !orders.error && <EmptyState title="No orders assigned yet">Assigned delivery orders will appear here.</EmptyState>}
+  const activeOrders = orders.data ?? [];
+  const deliveryHistory = history.data ?? [];
+  const activeDelivery = activeOrders.find((order) => order.fulfilmentStatus === 'out_for_delivery');
+  const completedToday = deliveryHistory.filter((order) => {
+    if (!['delivered', 'completed'].includes(order.fulfilmentStatus)) return false;
+    const completedAt = [...(order.statusHistory ?? [])].reverse().find((event) => ['delivered', 'completed'].includes(event.status))?.changedAt;
+    return completedAt ? new Date(completedAt).toDateString() === new Date().toDateString() : false;
+  }).length;
+  const title = view === 'history' ? 'Delivery history' : view === 'deliveries' ? 'My deliveries' : view === 'profile' ? 'Partner profile' : 'Ready to deliver?';
+  const selectView = (next: typeof view) => setView(next);
+  const renderOrders = (items: Order[], isHistory = false) => items.length ? (
+    <div className="delivery-order-list">{items.map((order) => {
+      const onRoute = order.fulfilmentStatus === 'out_for_delivery';
+      const destination = order.address;
+      const mapQuery = destination
+        ? encodeURIComponent([destination.addressLine1, destination.locality, destination.city, destination.postalCode].filter(Boolean).join(', '))
+        : '';
+      return <article className="delivery-order-card" key={order._id}>
+        <div className="delivery-order-heading">
+          <div><span className="delivery-section-kicker">ORDER {order.orderReference}</span><h3>{onRoute ? order.customerName : 'Customer details after pickup'}</h3></div>
+          <StatusBadge value={order.fulfilmentStatus} fulfilmentMethod={order.fulfilmentMethod} />
+        </div>
+        <div className="delivery-route">
+          <span className="delivery-route-point pickup"><i />Pickup</span>
+          <span className="delivery-route-line" />
+          <span className="delivery-route-point"><i />{onRoute && destination ? `${destination.locality}, ${destination.city}` : 'Destination shown after dispatch'}</span>
+        </div>
+        {onRoute && destination && <address>{destination.addressLine1}{destination.addressLine2 ? `, ${destination.addressLine2}` : ''}, {destination.locality}, {destination.city}, {destination.state} {destination.postalCode}</address>}
+        <div className="delivery-order-items">{order.items.map((item, index) => <span key={`${item.productId}-${index}`}>{item.productName} × {item.quantity}</span>)}</div>
+        <div className="delivery-order-meta"><span>Assigned {order.deliveryPartner?.assignedAt ? new Date(order.deliveryPartner.assignedAt).toLocaleString('en-IN') : '—'}</span>{onRoute && order.customerPhoneE164 && <a href={`tel:${order.customerPhoneE164}`}>Call customer</a>}</div>
+        {onRoute && mapQuery && <a className="delivery-map-link" href={`https://www.google.com/maps/search/?api=1&query=${mapQuery}`} target="_blank" rel="noreferrer">Open destination in Maps <span aria-hidden="true">↗</span></a>}
+        {!isHistory && <div className="delivery-order-actions">
+          {['preparing', 'ready_for_pickup'].includes(order.fulfilmentStatus) && <button className="delivery-primary-action" onClick={() => void updateStatus(order._id, 'out_for_delivery', order.orderReference)}>Start delivery</button>}
+          {onRoute && <><button className="delivery-primary-action" onClick={() => void updateStatus(order._id, 'delivered', order.orderReference)}>Confirm delivered</button><button className="delivery-secondary-action" onClick={() => void updateStatus(order._id, 'delivery_failed', order.orderReference)}>Report a problem</button></>}
+        </div>}
+      </article>;
+    })}</div>
+  ) : <div className="delivery-empty"><span aria-hidden="true">✿</span><h3>{isHistory ? 'No completed deliveries yet' : 'No active deliveries right now'}</h3><p>{isHistory ? 'Completed delivery records will appear here.' : 'Orders assigned to your account will appear here when available.'}</p></div>;
+
+  const nav = (
+    <>
+      <button className={view === 'overview' ? 'active' : ''} onClick={() => selectView('overview')}><span aria-hidden="true">⌂</span>Overview</button>
+      <button className="is-unavailable" disabled title="Delivery offer acceptance is not available yet"><span aria-hidden="true">＋</span>Requests <small>Unavailable</small></button>
+      <button className={view === 'deliveries' ? 'active' : ''} onClick={() => selectView('deliveries')}><span aria-hidden="true">▣</span>My deliveries</button>
+      <button className={view === 'history' ? 'active' : ''} onClick={() => selectView('history')}><span aria-hidden="true">◷</span>Delivery history</button>
+      <button className="is-unavailable" disabled title="Earnings and payout data are not tracked yet"><span aria-hidden="true">₹</span>Earnings & payouts<small>Unavailable</small></button>
+      <button className={view === 'profile' ? 'active' : ''} onClick={() => selectView('profile')}><span aria-hidden="true">○</span>Profile</button>
+    </>
+  );
+  return <div className="delivery-portal">
+    <header className="delivery-portal-header">
+      <Link to="/" className="delivery-portal-brand"><img src="/images/esakhi-emblem.png" alt="" /><span><strong>eSakhi</strong><small>DELIVERY PARTNER</small></span></Link>
+      <div className="delivery-header-user"><span>{user?.name || 'Delivery partner'}</span><button onClick={() => void signOut()} className="delivery-signout">Sign out</button></div>
+    </header>
+    <div className="delivery-portal-layout">
+      <aside className="delivery-sidebar"><span className="delivery-sidebar-label">WORKSPACE</span><nav>{nav}</nav><div className="delivery-sidebar-note"><strong>Assigned deliveries</strong><span>Only orders assigned to your account are shown here.</span></div></aside>
+      <main className="delivery-main">
+        <div className="delivery-page-heading"><div><span className="delivery-section-kicker">E SAKHI · DELIVERY PARTNER</span><h1>{title}</h1><p>{view === 'overview' ? 'Your assigned work and delivery activity.' : view === 'profile' ? 'Your account details and portal availability.' : 'Orders and records connected to your partner account.'}</p></div><button className="delivery-refresh" onClick={() => void Promise.all([orders.reload(), history.reload()])}>Refresh</button></div>
+        {error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}
+        {view === 'overview' && <>
+          <section className="delivery-welcome">
+            <div><span className="delivery-section-kicker">GOOD DAY{user?.name ? `, ${user.name.split(' ')[0].toLocaleUpperCase('en-IN')}` : ''}</span><h2>Your delivery workspace</h2><p>Here are the orders currently assigned to your account.</p></div>
+            <div className="delivery-availability"><span className="delivery-status-dot" /><span><strong>Assigned orders only</strong><small>Availability controls are not enabled</small></span></div>
+          </section>
+          <section className="delivery-metrics" aria-label="Delivery summary">
+            <article><span className="delivery-metric-icon">▣</span><small>Active deliveries</small><strong>{orders.loading ? '…' : activeOrders.length}</strong><span>Assigned to you</span></article>
+            <article><span className="delivery-metric-icon">✓</span><small>Completed today</small><strong>{history.loading ? '…' : completedToday}</strong><span>From delivery history</span></article>
+            <article className="unavailable"><span className="delivery-metric-icon">＋</span><small>Available requests</small><strong>Unavailable</strong><span>Offer system not connected</span></article>
+            <article className="unavailable"><span className="delivery-metric-icon">₹</span><small>Today's earnings</small><strong>Unavailable</strong><span>Payout data not tracked</span></article>
+          </section>
+          <div className="delivery-content-grid">
+            <section className="delivery-panel">
+              <div className="delivery-panel-heading"><div><span className="delivery-section-kicker">{activeDelivery ? 'ACTIVE DELIVERY' : 'YOUR ASSIGNMENTS'}</span><h2>{activeDelivery ? 'Continue delivery' : 'Assigned deliveries'}</h2></div><button onClick={() => selectView('deliveries')}>View all <span aria-hidden="true">→</span></button></div>
+              {orders.loading ? <Loading label="Loading assigned deliveries…" /> : orders.error ? <div className="delivery-panel-state"><Notice tone="error">{orders.error}</Notice><button className="delivery-secondary-action" onClick={() => void orders.reload()}>Try again</button></div> : renderOrders(activeDelivery ? [activeDelivery] : activeOrders.slice(0, 2))}
+            </section>
+            <aside className="delivery-panel delivery-earnings-panel">
+              <div className="delivery-panel-heading"><div><span className="delivery-section-kicker">EARNINGS</span><h2>Earnings & payouts</h2></div></div>
+              <div className="delivery-unavailable-block"><span aria-hidden="true">₹</span><strong>Not available yet</strong><p>Earnings and payout records are not currently connected to this portal. No estimate is shown.</p></div>
+              <div className="delivery-unavailable-footnote">Offer acceptance, availability settings, zones, and payout history are not yet supported.</div>
+            </aside>
+          </div>
+          <section className="delivery-panel delivery-recent-history"><div className="delivery-panel-heading"><div><span className="delivery-section-kicker">RECENT ACTIVITY</span><h2>Delivery history</h2></div><button onClick={() => selectView('history')}>View history <span aria-hidden="true">→</span></button></div>{history.loading ? <Loading label="Loading delivery history…" /> : history.error ? <Notice tone="error">{history.error}</Notice> : renderOrders(deliveryHistory.slice(0, 2), true)}</section>
+        </>}
+        {view === 'deliveries' && <section className="delivery-panel"><div className="delivery-panel-heading"><div><span className="delivery-section-kicker">ACTIVE WORK</span><h2>My assigned deliveries</h2></div></div>{orders.loading ? <Loading label="Loading assigned deliveries…" /> : orders.error ? <div className="delivery-panel-state"><Notice tone="error">{orders.error}</Notice><button className="delivery-secondary-action" onClick={() => void orders.reload()}>Try again</button></div> : renderOrders(activeOrders)}</section>}
+        {view === 'history' && <section className="delivery-panel"><div className="delivery-panel-heading"><div><span className="delivery-section-kicker">COMPLETED & CLOSED</span><h2>Delivery history</h2></div></div>{history.loading ? <Loading label="Loading delivery history…" /> : history.error ? <Notice tone="error">{history.error}</Notice> : renderOrders(deliveryHistory, true)}</section>}
+        {view === 'profile' && <section className="delivery-panel delivery-profile-panel"><div className="delivery-panel-heading"><div><span className="delivery-section-kicker">YOUR ACCOUNT</span><h2>Partner profile</h2></div><Link to="/account/profile">Edit profile <span aria-hidden="true">→</span></Link></div><dl><div><dt>Name</dt><dd>{user?.name || 'Not provided'}</dd></div><div><dt>Phone</dt><dd>{user?.phone || 'Not available'}</dd></div><div><dt>Account</dt><dd>Delivery partner</dd></div><div><dt>Service zones</dt><dd>Not tracked in the current system</dd></div><div><dt>Availability</dt><dd>Portal availability toggle is not connected</dd></div></dl></section>}
+        <p className="delivery-data-note">Delivery status changes are saved to the order record. Customer address and phone are shown only after a delivery is out for delivery. This portal does not yet support offer acceptance, partner availability, service zones, or payout calculations.</p>
+      </main>
+      <nav className="delivery-mobile-nav" aria-label="Delivery portal navigation">
+        <button className={view === 'overview' ? 'active' : ''} onClick={() => selectView('overview')}><span>⌂</span>Home</button>
+        <button disabled title="Delivery offers unavailable"><span>＋</span>Requests</button>
+        <button className={view === 'deliveries' ? 'active' : ''} onClick={() => selectView('deliveries')}><span>▣</span>Deliveries</button>
+        <button className={view === 'history' ? 'active' : ''} onClick={() => selectView('history')}><span>◷</span>History</button>
+        <button className={view === 'profile' ? 'active' : ''} onClick={() => selectView('profile')}><span>○</span>Profile</button>
+      </nav>
+    </div>
   </div>;
 }
 
@@ -1383,7 +3129,18 @@ function AdminCustomerPage(): ReactNode {
       setError(displayError(cause));
     }
   };
-  return <div className="admin-page"><div className="breadcrumbs"><Link to="/admin/customers">Customers</Link><span>/</span>Customer profile</div><PageIntro eyebrow="Customer profile" title={record.name || 'Customer'} description={`${record.phone ?? record.phoneE164} · ${record.orderCount} orders`} /><div className="panel user-actions"><div><span>Account status</span><StatusBadge value={record.status ?? 'active'} /></div><div className="button-row"><button className="button button-outline" onClick={() => void change(() => api.updateUserStatus(id, record.status === 'disabled' ? 'active' : 'disabled'), `${record.status === 'disabled' ? 'Enable' : 'Disable'} account`)}>{record.status === 'disabled' ? 'Enable account' : 'Disable account'}</button><button className="button button-outline" onClick={() => void change(() => api.updateRole(id, 'staff'), 'Grant staff access')}>Grant staff access</button><button className="button button-outline" onClick={() => void promoteToPartner()}>Grant delivery partner access</button><button className="button button-outline" onClick={() => void change(() => api.updateRole(id, 'customer'), 'Set role to customer')}>Set as customer</button></div></div>{error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}<section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">Customer history</span><h2>Orders</h2></div></div>{orders.error && <Notice tone="error">{orders.error}</Notice>}{orders.loading ? <Loading /> : orders.data?.data.length ? <><div className="order-list">{orders.data.data.map((order) => <OrderCard key={order._id} order={order} to={`/admin/orders/${order._id}`} />)}</div>{orders.data.pagination.totalPages > 1 && <Pagination page={page} pages={orders.data.pagination.totalPages} onChange={setPage} />}</> : <EmptyState title="No orders recorded for this customer" />}</section></div>;
+  const promoteToSeller = async () => {
+    if (!window.confirm('Confirm that this seller application has completed the required review and approval before granting seller access. Continue?')) return;
+    setError('');
+    setMessage('');
+    try {
+      await api.updateRole(id, 'seller');
+      navigate('/admin/customers', { replace: true });
+    } catch (cause) {
+      setError(displayError(cause));
+    }
+  };
+  return <div className="admin-page"><div className="breadcrumbs"><Link to="/admin/customers">Customers</Link><span>/</span>Customer profile</div><PageIntro eyebrow="Customer profile" title={record.name || 'Customer'} description={`${record.phone ?? record.phoneE164} · ${record.orderCount} orders`} /><div className="panel user-actions"><div><span>Account status</span><StatusBadge value={record.status ?? 'active'} /></div><div className="button-row"><button className="button button-outline" onClick={() => void change(() => api.updateUserStatus(id, record.status === 'disabled' ? 'active' : 'disabled'), `${record.status === 'disabled' ? 'Enable' : 'Disable'} account`)}>{record.status === 'disabled' ? 'Enable account' : 'Disable account'}</button><button className="button button-outline" onClick={() => void change(() => api.updateRole(id, 'staff'), 'Grant staff access')}>Grant staff access</button><button className="button button-outline" onClick={() => void promoteToSeller()}>Approve and grant seller access</button><button className="button button-outline" onClick={() => void promoteToPartner()}>Grant delivery partner access</button><button className="button button-outline" onClick={() => void change(() => api.updateRole(id, 'customer'), 'Set role to customer')}>Set as customer</button></div></div>{error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}<section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">Customer history</span><h2>Orders</h2></div></div>{orders.error && <Notice tone="error">{orders.error}</Notice>}{orders.loading ? <Loading /> : orders.data?.data.length ? <><div className="order-list">{orders.data.data.map((order) => <OrderCard key={order._id} order={order} to={`/admin/orders/${order._id}`} />)}</div>{orders.data.pagination.totalPages > 1 && <Pagination page={page} pages={orders.data.pagination.totalPages} onChange={setPage} />}</> : <EmptyState title="No orders recorded for this customer" />}</section></div>;
 }
 
 const blankSettings: Settings = {

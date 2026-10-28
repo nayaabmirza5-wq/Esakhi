@@ -6,6 +6,7 @@ import {
   listBestSellingProducts,
   categoriesController,
   createProduct,
+  getAdminProduct,
   getProductBySlug,
   listAllProductsForAdmin,
   listProducts,
@@ -21,9 +22,10 @@ productRoutes.get('/categories', categoriesController);
 productRoutes.get('/bestsellers', listBestSellingProducts);
 productRoutes.get('/:slug', getProductBySlug);
 
-adminProductRoutes.use(requireAuth, requireRole('admin', 'staff'));
+adminProductRoutes.use(requireAuth, requireRole('admin', 'staff', 'super_admin'));
 adminProductRoutes.get('/', listAllProductsForAdmin);
-adminProductRoutes.post('/images', requireRole('admin'), receiveProductImage, saveProductImage);
-adminProductRoutes.post('/', requireRole('admin'), createProduct);
-adminProductRoutes.patch('/:id', requireRole('admin'), updateProduct);
-adminProductRoutes.delete('/:id', requireRole('admin'), archiveProduct);
+adminProductRoutes.get('/:id', getAdminProduct);
+adminProductRoutes.post('/images', requireRole('admin', 'super_admin'), receiveProductImage, saveProductImage);
+adminProductRoutes.post('/', requireRole('admin', 'super_admin'), createProduct);
+adminProductRoutes.patch('/:id', requireRole('admin', 'super_admin'), updateProduct);
+adminProductRoutes.delete('/:id', requireRole('admin', 'super_admin'), archiveProduct);

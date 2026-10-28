@@ -54,7 +54,7 @@ export const logoutController: RequestHandler = async (req, res) => {
 };
 
 export const meController: RequestHandler = async (req, res) => {
-  const user = await User.findById(req.user?.id).select('phoneE164 name email role status savedAddresses createdAt').lean();
+  const user = await User.findById(req.user?.id).select('phoneE164 name email role status assignedCity savedAddresses createdAt').lean();
   if (!user) {
     res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found.' } });
     return;
@@ -66,6 +66,7 @@ export const meController: RequestHandler = async (req, res) => {
     email: user.email,
     role: user.role,
     status: user.status,
+    ...(user.assignedCity ? { assignedCity: user.assignedCity } : {}),
     savedAddresses: user.savedAddresses.map((address) => ({
       id: address._id.toString(),
       label: address.label,
@@ -87,7 +88,7 @@ export const updateProfileController: RequestHandler = async (req, res) => {
     authenticatedUserId(req),
     { $set: { name } },
     { new: true, runValidators: true },
-  ).select('phoneE164 name email role status savedAddresses');
+  ).select('phoneE164 name email role status assignedCity savedAddresses');
   if (!user) {
     res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found.' } });
     return;
@@ -99,6 +100,7 @@ export const updateProfileController: RequestHandler = async (req, res) => {
     email: user.email,
     role: user.role,
     status: user.status,
+    ...(user.assignedCity ? { assignedCity: user.assignedCity } : {}),
     savedAddresses: user.savedAddresses.map((address) => ({
       id: address._id.toString(),
       label: address.label,

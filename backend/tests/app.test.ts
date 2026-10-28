@@ -50,6 +50,13 @@ const protectedRoutes = [
   ['PUT', '/api/v1/admin/settings'],
   ['POST', '/api/v1/admin/inventory/64a1b2c3d4e5f6a7b8c9d0e1/adjustments'],
   ['GET', '/api/v1/admin/dashboard'],
+  ['GET', '/api/v1/super-admin/overview'],
+  ['GET', '/api/v1/super-admin/orders'],
+  ['GET', '/api/v1/city-admin/dashboard'],
+  ['GET', '/api/v1/city-admin/orders'],
+  ['GET', '/api/v1/seller/dashboard'],
+  ['GET', '/api/v1/seller/products'],
+  ['GET', '/api/v1/seller/orders'],
   ['GET', '/api/v1/admin/customers'],
   ['GET', '/api/v1/admin/customers/64a1b2c3d4e5f6a7b8c9d0e1'],
   ['GET', '/api/v1/admin/customers/64a1b2c3d4e5f6a7b8c9d0e1/orders'],
@@ -59,6 +66,7 @@ const protectedRoutes = [
   ['PATCH', '/api/v1/admin/users/64a1b2c3d4e5f6a7b8c9d0e1/role'],
   ['PATCH', '/api/v1/admin/users/64a1b2c3d4e5f6a7b8c9d0e1/status'],
   ['GET', '/api/v1/delivery-partners/orders'],
+  ['GET', '/api/v1/delivery-partners/orders/history'],
   ['PATCH', '/api/v1/delivery-partners/orders/64a1b2c3d4e5f6a7b8c9d0e1/status'],
 ] as const;
 
@@ -307,6 +315,23 @@ describe('backend API foundation', () => {
 
     expect(response.status).toBe(401);
     expect(response.body.error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('requires Super Admin authentication for the global overview', async () => {
+    const response = await request(app).get('/api/v1/super-admin/overview');
+
+    expect(response.status).toBe(401);
+    expect(response.body.error.code).toBe('UNAUTHORIZED');
+  });
+
+  it('requires City Admin authentication for city-scoped endpoints', async () => {
+    const dashboard = await request(app).get('/api/v1/city-admin/dashboard');
+    const orders = await request(app).get('/api/v1/city-admin/orders');
+
+    expect(dashboard.status).toBe(401);
+    expect(dashboard.body.error.code).toBe('UNAUTHORIZED');
+    expect(orders.status).toBe(401);
+    expect(orders.body.error.code).toBe('UNAUTHORIZED');
   });
 
   it('returns not-ready until the database is connected', async () => {

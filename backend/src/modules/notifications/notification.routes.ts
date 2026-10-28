@@ -27,6 +27,6 @@ pushNotificationRoutes.use(requireAuth, requireRole('customer'));
 pushNotificationRoutes.post('/push-token', pushTokenLimiter, registerPushToken);
 pushNotificationRoutes.delete('/push-token', pushTokenLimiter, removePushToken);
 
-adminNotificationRoutes.use(requireAuth, requireRole('admin'));
+adminNotificationRoutes.use(requireAuth, requireRole('admin', 'super_admin'));
 adminNotificationRoutes.get('/', listFailedNotifications);
 adminNotificationRoutes.post('/:id/retry', retryFailedNotification);

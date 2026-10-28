@@ -10,6 +10,7 @@ import {
   getMyOrder,
   listAdminOrders,
   listAssignedPartnerOrders,
+  listPartnerDeliveryHistory,
   listMyOrders,
   requestOrderCancellation,
   reviewCancellation,
@@ -30,14 +31,15 @@ customerOrderRoutes.post('/:id/cancellation-requests', requestOrderCancellation)
 
 deliveryPartnerRoutes.use(requireAuth, requireRole('delivery_partner'));
 deliveryPartnerRoutes.get('/orders', listAssignedPartnerOrders);
+deliveryPartnerRoutes.get('/orders/history', listPartnerDeliveryHistory);
 deliveryPartnerRoutes.patch('/orders/:id/status', updatePartnerOrderStatus);
 
-adminOrderRoutes.use(requireAuth, requireRole('admin', 'staff'));
+adminOrderRoutes.use(requireAuth, requireRole('admin', 'staff', 'super_admin'));
 adminOrderRoutes.get('/', listAdminOrders);
 adminOrderRoutes.get('/:id', getAdminOrder);
 adminOrderRoutes.post('/delivery-partner-assignments', bulkAssignDeliveryPartner);
 adminOrderRoutes.patch('/:id/fulfilment', updateFulfilmentStatus);
 adminOrderRoutes.put('/:id/delivery-partner', assignDeliveryPartner);
-adminOrderRoutes.post('/:id/notes', requireRole('admin', 'staff'), addInternalNote);
-adminOrderRoutes.post('/:id/payment-review', requireRole('admin'), reviewPayment);
-adminOrderRoutes.post('/:id/cancellation-review', requireRole('admin'), reviewCancellation);
+adminOrderRoutes.post('/:id/notes', requireRole('admin', 'staff', 'super_admin'), addInternalNote);
+adminOrderRoutes.post('/:id/payment-review', requireRole('admin', 'super_admin'), reviewPayment);
+adminOrderRoutes.post('/:id/cancellation-review', requireRole('admin', 'super_admin'), reviewCancellation);

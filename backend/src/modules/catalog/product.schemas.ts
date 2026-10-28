@@ -27,6 +27,7 @@ const variantInputSchema = z.object({
 });
 
 export const productCreateSchema = z.object({
+  sellerId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
   name: z.string().trim().min(1).max(160),
   slug: z.string().trim().toLowerCase().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(180),
   description: z.string().trim().min(1).max(5000),
@@ -44,6 +45,7 @@ export const productCreateSchema = z.object({
 });
 
 export const productUpdateSchema = z.object({
+  sellerId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
   name: z.string().trim().min(1).max(160).optional(),
   slug: z.string().trim().toLowerCase().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(180).optional(),
   description: z.string().trim().min(1).max(5000).optional(),

@@ -19,7 +19,7 @@ export const listProducts: RequestHandler = async (req, res) => {
   };
   const [products, total] = await Promise.all([
     Product.find(filter)
-      .select('name slug description category pricePaise imageUrls variants stock')
+      .select('sellerId name slug description category pricePaise imageUrls variants stock')
       .sort(query.q ? { score: { $meta: 'textScore' as const } } : { createdAt: -1 })
       .skip((query.page - 1) * query.limit)
       .limit(query.limit)
@@ -49,6 +49,7 @@ export const listBestSellingProducts: RequestHandler = async (req, res) => {
     {
       $project: {
         _id: '$product._id',
+        sellerId: '$product.sellerId',
         name: '$product.name',
         slug: '$product.slug',
         description: '$product.description',
@@ -68,7 +69,7 @@ export const listBestSellingProducts: RequestHandler = async (req, res) => {
       isArchived: false,
       ...(bestSellers.length ? { _id: { $nin: bestSellers.map((product) => product._id) } } : {}),
     })
-      .select('name slug description category pricePaise imageUrls variants stock')
+      .select('sellerId name slug description category pricePaise imageUrls variants stock')
       .sort({ createdAt: -1, _id: -1 })
       .limit(remaining)
       .lean()
@@ -79,7 +80,7 @@ export const listBestSellingProducts: RequestHandler = async (req, res) => {
 export const getProductBySlug: RequestHandler = async (req, res) => {
   const { slug } = slugParamsSchema.parse(req.params);
   const product = await Product.findOne({ slug, isActive: true, isArchived: false })
-    .select('name slug description category pricePaise imageUrls variants stock')
+    .select('sellerId name slug description category pricePaise imageUrls variants stock')
     .lean();
   if (!product) throw new AppError(404, 'NOT_FOUND', 'Product not found.');
   sendData(res, product);
@@ -89,12 +90,14 @@ export const listAllProductsForAdmin: RequestHandler = async (req, res) => {
   const query = productListQuerySchema.extend({
     active: zBooleanQuery.active.optional(),
     archived: zBooleanQuery.archived.optional(),
+    sellerId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
   }).parse(req.query);
   const filter = {
     ...(query.category ? { category: query.category } : {}),
     ...(query.q ? { $text: { $search: query.q } } : {}),
     ...(query.active === undefined ? {} : { isActive: query.active }),
     ...(query.archived === undefined ? {} : { isArchived: query.archived }),
+    ...(query.sellerId ? { sellerId: new mongoose.Types.ObjectId(query.sellerId) } : {}),
   };
   const [products, total] = await Promise.all([
     Product.find(filter)
@@ -105,6 +108,13 @@ export const listAllProductsForAdmin: RequestHandler = async (req, res) => {
     Product.countDocuments(filter),
   ]);
   sendPage(res, products, query.page, query.limit, total);
+};
+
+export const getAdminProduct: RequestHandler = async (req, res) => {
+  const { id } = idParamsSchema.parse(req.params);
+  const product = await Product.findById(id).lean();
+  if (!product) throw new AppError(404, 'NOT_FOUND', 'Product not found.');
+  sendData(res, product);
 };
 
 const zBooleanQuery = {
@@ -119,13 +129,17 @@ export const createProduct: RequestHandler = async (req, res) => {
   let product;
   try {
     product = await session.withTransaction(async () => {
-      const [created] = await Product.create([input], { session });
+      const { sellerId, ...productFields } = input;
+      const createInput = sellerId
+        ? { ...productFields, sellerId: new mongoose.Types.ObjectId(sellerId) }
+        : productFields;
+      const [created] = await Product.create([createInput], { session });
       if (!created) throw new AppError(500, 'INTERNAL_ERROR', 'The product could not be created.');
       await AuditLog.create([{
         actorId,
         action: 'product.created',
         resourceType: 'product',
-        resourceId: created.id,
+        resourceId: String(created.id),
         metadata: { category: created.category },
       }], { session });
       return created;
@@ -155,7 +169,7 @@ export const updateProduct: RequestHandler = async (req, res) => {
         actorId,
         action: 'product.updated',
         resourceType: 'product',
-        resourceId: updated.id,
+        resourceId: String(updated.id),
         metadata: { changedFields: Object.keys(input) },
       }], { session });
       return updated;
@@ -184,7 +198,7 @@ export const archiveProduct: RequestHandler = async (req, res) => {
         actorId,
         action: 'product.archived',
         resourceType: 'product',
-        resourceId: archived.id,
+        resourceId: String(archived.id),
       }], { session });
       return archived;
     });

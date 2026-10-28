@@ -78,6 +78,30 @@ npm run admin:create -- +91XXXXXXXXXX
 
 There is no public admin-registration or role-promotion endpoint. Configure the store via `PUT /api/v1/admin/settings` after provisioning an admin.
 
+To provision a distinct Super Admin account, use the separate trusted-terminal command:
+
+```powershell
+npm run super-admin:create -- +91XXXXXXXXXX
+```
+
+This command assigns only the `super_admin` role and writes a system audit event. It does not expose a public role-assignment API or grant access by OTP registration. The Super Admin overview requires an active account with that explicit role.
+
+To provision a City Admin account for the currently configured launch city, use the trusted-terminal command:
+
+```powershell
+npm run city-admin:create -- +91XXXXXXXXXX
+```
+
+The command scopes the account to `Settings.city`, refuses to replace a different administrative/operational role or reactivate a disabled account, and writes a system audit event. City Admin accounts cannot choose or change their own city. Authentication still uses the normal OTP flow.
+
+After seller approval, provision the seller account from a trusted terminal:
+
+```powershell
+npm run seller:create -- +91XXXXXXXXXX
+```
+
+This command assigns the `seller` role, creates the user if needed, and writes a system audit event. It can promote an active customer account but refuses disabled accounts and accounts with any other role. Seller access is not available through public registration or OTP verification.
+
 ### Useful project commands
 
 ```powershell
@@ -178,6 +202,8 @@ The refresh token is not returned in JSON. It is set as the `esakhi_refresh` Htt
 | Customer | Own profile and customer order endpoints |
 | Staff | Admin dashboard, catalogue reads, order reads and fulfilment actions, and internal order notes, when staff access is enabled in settings |
 | Admin | All admin APIs, including product management, customer management, payment review, settings, and inventory |
+| City Admin | Read-only city dashboard and order directory, limited to the assigned city stored on the account; provisioned through the trusted CLI command |
+| Super Admin | Global overview endpoint only in the initial dashboard phase; provisioned through the trusted CLI command. The existing city, seller, finance, refund, payout, support, and audit modules are not implemented. |
 
 An authenticated user without the required role receives `403 FORBIDDEN`. A missing or invalid access token receives `401`.
 
@@ -215,6 +241,13 @@ This table lists every HTTP endpoint registered by the current backend. The deta
 | `POST` | `/api/v1/notifications/push-token` | Authenticated customer | `201` |
 | `DELETE` | `/api/v1/notifications/push-token` | Authenticated customer; own token only | `200` |
 | `GET` | `/api/v1/admin/dashboard` | Admin | `200` |
+| `GET` | `/api/v1/super-admin/overview` | Super Admin | `200` |
+| `GET` | `/api/v1/super-admin/orders` | Super Admin | `200` |
+| `GET` | `/api/v1/city-admin/dashboard` | City Admin; assigned city only | `200` |
+| `GET` | `/api/v1/city-admin/orders` | City Admin; assigned city only | `200` |
+| `GET` | `/api/v1/seller/dashboard` | Approved seller; own products and order items only | `200` |
+| `GET` | `/api/v1/seller/products` | Approved seller; own products only | `200` |
+| `GET` | `/api/v1/seller/orders` | Approved seller; own order items only | `200` |
 | `GET` | `/api/v1/admin/customers` | Admin | `200` |
 | `GET` | `/api/v1/admin/customers/:customerId` | Admin | `200` |
 | `GET` | `/api/v1/admin/customers/:customerId/orders` | Admin | `200` |
@@ -234,6 +267,7 @@ This table lists every HTTP endpoint registered by the current backend. The deta
 | `GET` | `/api/v1/admin/delivery-partners/:userId` | Admin | `200` |
 | `PATCH` | `/api/v1/admin/delivery-partners/:userId/status` | Admin | `200` |
 | `GET` | `/api/v1/delivery-partners/orders` | Delivery partner | `200` |
+| `GET` | `/api/v1/delivery-partners/orders/history` | Delivery partner | `200` |
 | `PATCH` | `/api/v1/delivery-partners/orders/:id/status` | Delivery partner | `200` |
 | `POST` | `/api/v1/admin/orders/:id/notes` | Admin, or staff when staff access is enabled | `200` |
 | `POST` | `/api/v1/admin/orders/:id/payment-review` | Admin | `200` |
@@ -278,9 +312,9 @@ GET /ready
 | `POST /api/v1/auth/otp/verify` | Public | `200` | `400 VALIDATION_ERROR` or `OTP_INVALID`, `403 ACCOUNT_DISABLED`, `429 RATE_LIMIT_EXCEEDED`, `503 OTP_PROVIDER_UNAVAILABLE` |
 | `POST /api/v1/auth/refresh` | Refresh cookie | `200` | `401 UNAUTHORIZED` or `REFRESH_TOKEN_INVALID`, `429 RATE_LIMIT_EXCEEDED` |
 | `POST /api/v1/auth/logout` | Optional refresh cookie | `200` | — |
-| `GET /api/v1/auth/me` | Customer/staff/admin | `200` | `401`, `404 NOT_FOUND` |
-| `PATCH /api/v1/auth/me` | Customer/staff/admin | `200` | `400 VALIDATION_ERROR`, `401`, `404 NOT_FOUND` |
-| `PUT /api/v1/auth/me/addresses` | Customer/staff/admin | `200` | `400 VALIDATION_ERROR`, `401`, `404 NOT_FOUND` |
+| `GET /api/v1/auth/me` | Any authenticated role | `200` | `401`, `404 NOT_FOUND` |
+| `PATCH /api/v1/auth/me` | Any authenticated role | `200` | `400 VALIDATION_ERROR`, `401`, `404 NOT_FOUND` |
+| `PUT /api/v1/auth/me/addresses` | Any authenticated role | `200` | `400 VALIDATION_ERROR`, `401`, `404 NOT_FOUND` |
 
 #### Request an OTP
 
@@ -356,9 +390,56 @@ Product list query parameters:
 | `category` | `Bangles`, `Jewellery`, `Dupattas`, or `Others` | Optional category filter |
 | `q` | String, up to 100 characters | Optional text search |
 
-The public catalogue returns only active, non-archived products. Price fields use integer paise. `GET /api/v1/service-area` returns `configured: false` when neither pickup nor delivery is enabled. When delivery is enabled, it returns the configured localities and six-digit postal codes. Checkout validates the locality and postal code against this configuration; it does not perform a municipal-boundary or geospatial address check.
+The public catalogue returns only active, non-archived products. Product records include a stable `sellerId` for the assigned seller when a product is linked to one; price fields use integer paise. `GET /api/v1/service-area` returns `configured: false` when neither pickup nor delivery is enabled. When delivery is enabled, it returns the configured localities and six-digit postal codes. Checkout validates the locality and postal code against this configuration; it does not perform a municipal-boundary or geospatial address check.
 
 `GET /api/v1/products/bestsellers` returns up to five products by default (set `limit` from 1 to 12). Ranking uses total units in orders with confirmed payment, excluding cancelled orders. When there are fewer ranked products than requested, the response is filled with the newest active, non-archived catalogue products.
+
+### Super Admin overview
+
+| Method and path | Auth | Success | Other expected outcomes |
+|---|---|---:|---|
+| `GET /api/v1/super-admin/overview` | Active Super Admin | `200` | `400 VALIDATION_ERROR`, `401 UNAUTHORIZED` or `TOKEN_INVALID`, `403 FORBIDDEN`, `503 DATABASE_UNAVAILABLE` |
+| `GET /api/v1/super-admin/orders` | Active Super Admin | `200` | `400 VALIDATION_ERROR`, `401 UNAUTHORIZED` or `TOKEN_INVALID`, `403 FORBIDDEN`, `503 DATABASE_UNAVAILABLE` |
+
+The overview returns database-backed active-customer, active-delivery-partner and active-product counts, total and action-needed order counts, payments awaiting review, unassigned active delivery orders, low-stock product/variant counts, fulfilment-status counts, daily order counts for the requested period, and up to eight recent orders. `days` is optional and accepts 7–30 (default 30). Recent order data excludes customer contact details and internal notes. The overview's `orderValuePaise` is the sum of non-cancelled order totals and is not platform revenue, verified collections, or a finance-ledger figure.
+
+The order directory supports `page` (default 1), `limit` (default 20, maximum 100), `q` (order reference or customer-name search), `paymentStatus`, `fulfilmentStatus`, `from`, and `to` (ISO datetimes with offsets). It returns only the order reference, customer name, delivery city, product-name snapshots, payment/fulfilment state, total, and creation time; it does not expose customer phone/address, internal notes, or payment-review notes. This route is read-only and Super Admin-only.
+
+The response includes `generatedAt` and an `unavailableModules` list. City/zone administration, seller verification, financial ledgers, refunds, settlements/payouts, support cases, and global reports are not yet available; their counts must not be inferred from this overview.
+
+Example response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "generatedAt": "2026-10-28T05:30:00.000Z",
+    "metrics": {
+      "activeCustomers": 0,
+      "activeDeliveryPartners": 0,
+      "totalOrders": 0,
+      "pendingPayments": 0,
+      "ordersNeedingAction": 0,
+      "unassignedDeliveryOrders": 0,
+      "lowStockItems": 0
+    },
+    "ordersByFulfilmentStatus": [],
+    "recentOrders": [],
+    "unavailableModules": [
+      "cities_and_zones",
+      "city_administrators",
+      "sellers_and_shgs",
+      "financial_ledgers",
+      "refunds",
+      "settlements_and_payouts",
+      "support_cases",
+      "global_reports"
+    ]
+  }
+}
+```
+
+The Super Admin role is a separate role, not an alias for the existing `admin` role. It is not assignable through customer registration, OTP verification, or the existing admin role-update endpoint. Use `npm run super-admin:create -- <phone>` from a trusted backend terminal; the operation is recorded as a system audit event.
 
 ### Customer orders
 
@@ -397,7 +478,7 @@ Content-Type: application/json
 
 For delivery, set `fulfilmentMethod` to `delivery` and include `address` with `name`, matching `phone`, `addressLine1`, optional `addressLine2`, `locality`, and six-digit `postalCode`. The locality and postal code must match an admin-configured serviceable locality; a provided address phone must match `customerPhone`. Delivery is not checked against an official municipal boundary.
 
-Each item requires a 24-character MongoDB ObjectId `productId`, an integer `quantity` from 1 to 99, and an optional 24-character `variantId`. A product/variant can appear only once in `items`. The server calculates prices, delivery fees, and totals; client-submitted prices are not accepted.
+Each item requires a 24-character MongoDB ObjectId `productId`, an integer `quantity` from 1 to 99, and an optional 24-character `variantId`. A product/variant can appear only once in `items`. An optional 24-character `sellerId` is accepted only for server-side validation and is ignored for routing if the product already has a persisted seller assignment; the server resolves the authoritative seller from the database. The server calculates prices, delivery fees, and totals; client-submitted prices are not accepted.
 
 #### Checkout scenarios
 
@@ -444,7 +525,30 @@ Role update body:
 }
 ```
 
-`customer`, `staff`, and `delivery_partner` are accepted; this endpoint cannot grant the `admin` role. An admin cannot change their own role (`400 INVALID_REQUEST`). Grant delivery-partner access to an existing active account to reuse its phone-based sign-in; this does not create a new account.
+`customer`, `staff`, `seller`, and `delivery_partner` are accepted; this endpoint cannot grant the `admin`, `city_admin`, or `super_admin` role. An admin cannot change their own role (`400 INVALID_REQUEST`). Seller access should be granted only after the seller application has completed the required review and approval. Role changes are recorded in the audit log.
+
+### Seller workspace
+
+The seller workspace is a read-only MVP. All routes require an authenticated `seller` role. Products and order items are scoped to the authenticated user ID stored as `sellerId`; order responses include only that seller's items and subtotal and omit customer contact/address details and other sellers' items.
+
+| Method and path | Minimum role | Success | Other expected outcomes |
+|---|---|---:|---|
+| `GET /api/v1/seller/dashboard` | Seller | `200` | `401`, `403` |
+| `GET /api/v1/seller/products` | Seller | `200` | `400 VALIDATION_ERROR`, `401`, `403` |
+| `GET /api/v1/seller/orders` | Seller | `200` | `400 VALIDATION_ERROR`, `401`, `403` |
+
+`GET /api/v1/seller/dashboard` returns active/total/low-stock product counts, order counts by work status, up to five recent non-terminal orders containing seller items, and gross confirmed paid product-item totals for the current UTC month. For products with variants, low stock is based on the summed variant stock; products without variants use base stock. The gross sales amount is before commissions, refunds, and settlement adjustments; it is not a payable or payout balance. `GET /api/v1/seller/products` and `GET /api/v1/seller/orders` accept `page` (default 1) and `limit` (default 20, maximum 100). Seller product creation/updates, inventory adjustment, order acceptance/preparation actions, applications/verification status, reviews, and settlements are not implemented. No payout or commission values are estimated.
+
+### City Admin dashboard and order directory
+
+| Method and path | Auth | Success | Other expected outcomes |
+|---|---|---:|---|
+| `GET /api/v1/city-admin/dashboard` | Active City Admin with an assigned city | `200` | `401`, `403 FORBIDDEN` or `CITY_SCOPE_REQUIRED`, `503 DATABASE_UNAVAILABLE` |
+| `GET /api/v1/city-admin/orders` | Active City Admin with an assigned city | `200` | `400 VALIDATION_ERROR`, `401`, `403 FORBIDDEN` or `CITY_SCOPE_REQUIRED`, `503 DATABASE_UNAVAILABLE` |
+
+The dashboard uses only orders whose delivery address city matches the server-side `assignedCity`. Today's counts and status breakdown use India Standard Time calendar-day boundaries; the seven-day trend includes today and the six preceding city-local days. The response includes today's order count, delivery orders awaiting assignment, orders out for delivery, orders delivered today, orders needing fulfilment action, payments awaiting review, per-fulfilment-status counts, recent orders, and unassigned delivery orders. The current schema does not record city ownership for sellers, inventory, delivery partners, partner applications, or support cases, so those dashboard metrics are explicitly unavailable and no cross-city data is substituted.
+
+The order directory supports `page` (default 1), `limit` (default 20, maximum 100), `q` (order reference or customer-name search), `fulfilmentStatus`, `paymentStatus`, and `unassignedOnly=true`. Every result is constrained to the authenticated user's assigned city, regardless of query parameters. Responses omit phone numbers, street addresses, delivery instructions, internal notes, and review notes. These endpoints are read-only; assignment mutations and finance/support operations are not yet available to City Admins.
 
 Status update body:
 
@@ -522,12 +626,15 @@ Staff with staff access enabled and admins can use these routes. Payment review 
 | `GET /api/v1/admin/delivery-partners/:userId` | Admin | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND` |
 | `PATCH /api/v1/admin/delivery-partners/:userId/status` | Admin | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND` |
 | `GET /api/v1/delivery-partners/orders` | Delivery partner | `200` | `401`, `403` |
+| `GET /api/v1/delivery-partners/orders/history` | Delivery partner | `200` | `401`, `403` |
 | `PATCH /api/v1/delivery-partners/orders/:id/status` | Delivery partner | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND`, `409 INVALID_STATUS_TRANSITION` |
 | `POST /api/v1/admin/orders/:id/notes` | Staff | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND` |
 | `POST /api/v1/admin/orders/:id/payment-review` | Admin | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `409 PAYMENT_ALREADY_REVIEWED` |
 | `POST /api/v1/admin/orders/:id/cancellation-review` | Admin | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `409` cancellation-related errors |
 
 `GET /admin/orders` accepts `page`, `limit`, `q`, `paymentStatus`, `fulfilmentStatus`, `cancellationRequest`, `from`, and `to`. Set `cancellationRequest=pending` to list unreviewed requests, or `reviewed` to list requests with a decision. Dates must be ISO-8601 timestamps with timezone offsets; `from` must not be later than `to`.
+
+`GET /api/v1/delivery-partners/orders` returns only non-terminal orders assigned to the authenticated partner. `GET /api/v1/delivery-partners/orders/history` returns up to 100 terminal orders currently or previously assigned to that partner (`delivered`, `completed`, `delivery_failed`, or `cancelled`), newest first. Delivery partners can update only orders assigned to their own account, with allowed transitions `preparing|ready_for_pickup → out_for_delivery → delivered|delivery_failed`. Updates are audited and may include a partner note.
 
 Fulfilment update body:
 

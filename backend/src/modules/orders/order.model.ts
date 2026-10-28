@@ -4,6 +4,7 @@ import type { InferSchemaType } from 'mongoose';
 const orderItemSchema = new Schema(
   {
     productId: { type: Schema.Types.ObjectId, required: true, ref: 'Product' },
+    sellerId: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     variantId: { type: Schema.Types.ObjectId },
     productName: { type: String, required: true },
     variantAttributes: { type: Map, of: String, default: {} },

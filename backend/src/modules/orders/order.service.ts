@@ -22,13 +22,16 @@ async function reserveItem(
   item: Checkout['items'][number],
   actorId: string,
   session: ClientSession,
-): Promise<{ productName: string; unitPricePaise: number; variantAttributes: Map<string, string> }> {
+): Promise<{ productName: string; sellerId: string | null; unitPricePaise: number; variantAttributes: Map<string, string> }> {
   const product = await Product.findOne({
     _id: item.productId,
     isActive: true,
     isArchived: false,
   }).session(session);
   if (!product) throw new AppError(409, 'PRODUCT_UNAVAILABLE', 'A selected product is no longer available.');
+  if (!product.sellerId) {
+    throw new AppError(409, 'SELLER_NOT_FOUND', 'This product is not assigned to a seller yet.');
+  }
 
   if (product.variants.length > 0) {
     if (!item.variantId) throw new AppError(400, 'VARIANT_REQUIRED', 'Select an available product option.');
@@ -47,7 +50,7 @@ async function reserveItem(
       reason: 'Order stock reservation',
       actorId,
     }], { session });
-    return { productName: product.name, unitPricePaise: product.pricePaise, variantAttributes: variant.attributes };
+    return { productName: product.name, sellerId: product.sellerId ? product.sellerId.toString() : null, unitPricePaise: product.pricePaise, variantAttributes: variant.attributes };
   }
 
   if (item.variantId) throw new AppError(400, 'VARIANT_INVALID', 'This product does not have selectable options.');
@@ -63,7 +66,7 @@ async function reserveItem(
     reason: 'Order stock reservation',
     actorId,
   }], { session });
-  return { productName: product.name, unitPricePaise: product.pricePaise, variantAttributes: new Map() };
+  return { productName: product.name, sellerId: product.sellerId ? product.sellerId.toString() : null, unitPricePaise: product.pricePaise, variantAttributes: new Map() };
 }
 
 export async function createOrder(actorId: string, input: Checkout): Promise<{ order: mongoose.HydratedDocument<OrderRecord>; created: boolean }> {
@@ -113,20 +116,21 @@ export async function createOrder(actorId: string, input: Checkout): Promise<{ o
 
       const itemSnapshots: Array<{
         productId: string;
+        sellerId?: string | null;
         variantId?: string;
         productName: string;
         variantAttributes: Map<string, string>;
         unitPricePaise: number;
         quantity: number;
         lineTotalPaise: number;
-      }> = [];
-      let subtotalPaise = 0;
+      }> = [];      let subtotalPaise = 0;
       for (const item of input.items) {
         const reserved = await reserveItem(item, actorId, session);
         const lineTotalPaise = reserved.unitPricePaise * item.quantity;
         subtotalPaise += lineTotalPaise;
         itemSnapshots.push({
           productId: item.productId,
+          ...(reserved.sellerId ? { sellerId: reserved.sellerId } : { sellerId: null }),
           ...(item.variantId ? { variantId: item.variantId } : {}),
           productName: reserved.productName,
           variantAttributes: reserved.variantAttributes,
