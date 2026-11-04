@@ -74,10 +74,15 @@ const refreshCookieOptions = {
   maxAge: env.JWT_REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000,
 };
 
-export const requestOtpController: RequestHandler = async (req, res) => {
-  const { phone } = requestOtpSchema.parse(req.body);
-  await requestOtp(phone);
-  sendData(res, { message: 'If the number can receive a code, one has been sent.' }, 202);
+export const requestOtpController: RequestHandler = async (req, res, next) => {
+  try {
+    const { phone } = requestOtpSchema.parse(req.body);
+    await requestOtp(phone);
+    sendData(res, { message: 'If the number can receive a code, one has been sent.' }, 202);
+  } catch (error) {
+    console.error("[OTP_REQUEST_FAILURE]:", error);
+    next(error);
+  }
 };
 
 export const verifyOtpController: RequestHandler = async (req, res) => {
