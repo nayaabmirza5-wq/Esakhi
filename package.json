@@ -5,6 +5,12 @@
   "engines": {
     "node": "^24.0.0"
   },
+  "overrides": {
+    "jwks-rsa": {
+      "jose": "4.15.5"
+    },
+    "jose": "^4.15.5"
+  },
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "npm --prefix backend run build && npm --prefix frontend run build",

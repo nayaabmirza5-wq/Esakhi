@@ -35,7 +35,9 @@ export function getFirebaseAdminApp(): App {
       projectId: serviceAccount.project_id,
     });
   }
-  return initializeApp();
+  return initializeApp({
+    projectId: process.env.FIREBASE_PROJECT_ID || 'shg-marketplace',
+  });
 }
 
 export function firebaseMessaging() {
