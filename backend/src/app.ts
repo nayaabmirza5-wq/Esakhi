@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import { rateLimit } from 'express-rate-limit';
 import mongoose from 'mongoose';
 import { env } from './config/env.js';
+import { connectDatabase } from './config/db.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { productRoutes, adminProductRoutes } from './modules/catalog/product.routes.js';
@@ -80,6 +81,16 @@ app.use('/uploads/product-images', express.static(productImagesDirectory, {
     response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   },
 }));
+
+app.use(async (req, _res, next) => {
+  if (req.path === '/health') return next();
+  try {
+    await connectDatabase();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.get('/health', (_req, res) => {
   res.status(200).json({ success: true, data: { status: 'ok' } });

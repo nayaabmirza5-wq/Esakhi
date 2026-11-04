@@ -1,9 +1,9 @@
 import type { RequestHandler } from 'express';
 import { env } from '../../config/env.js';
 import { sendData } from '../../utils/apiResponse.js';
-import { requestOtpSchema, verifyOtpSchema } from './auth.schemas.js';
+import { requestOtpSchema, verifyOtpSchema, firebaseLoginSchema } from './auth.schemas.js';
 import { replaceSavedAddressesSchema, updateProfileSchema } from './auth.schemas.js';
-import { issueSession, requestOtp, revokeSession, rotateSession, verifyOtp } from './auth.service.js';
+import { issueSession, requestOtp, revokeSession, rotateSession, verifyOtp, firebaseLogin } from './auth.service.js';
 import { User } from './user.model.js';
 import type { SavedAddressRecord } from './user.model.js';
 import { authenticatedUserId } from '../../utils/authenticatedUser.js';
@@ -324,4 +324,25 @@ export const searchAddressController: RequestHandler = async (req, res) => {
 export const reverseAddressController: RequestHandler = async (req, res) => {
   const coordinates = addressReverseQuerySchema.parse(req.query);
   sendData(res, await reverseAddress(coordinates.latitude, coordinates.longitude));
+};
+export const firebaseLoginController: RequestHandler = async (req, res, next) => {
+  try {
+    const { idToken, role } = firebaseLoginSchema.parse(req.body);
+    const result = await firebaseLogin(idToken, role);
+    res.cookie(refreshCookieName, result.refreshToken, refreshCookieOptions);
+    res.status(200).json({
+      success: true,
+      user: result.user,
+      token: result.accessToken,
+      accessToken: result.accessToken,
+      data: {
+        accessToken: result.accessToken,
+        token: result.accessToken,
+        user: result.user,
+      },
+    });
+  } catch (error) {
+    console.error('[FIREBASE_LOGIN_FAILURE]:', error);
+    next(error);
+  }
 };

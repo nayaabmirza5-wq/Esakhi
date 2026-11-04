@@ -1,5 +1,6 @@
-import { cert, getApps, initializeApp } from 'firebase-admin/app';
+import { cert, getApps, initializeApp, type App } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
+import { getAuth } from 'firebase-admin/auth';
 import { z } from 'zod';
 import { env } from '../../config/env.js';
 
@@ -13,24 +14,36 @@ export function isFirebaseAdminConfigured(): boolean {
   return Boolean(env.FIREBASE_SERVICE_ACCOUNT_JSON);
 }
 
-export function firebaseMessaging() {
-  if (!env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    throw new Error('Firebase Admin is not configured.');
+export function getFirebaseAdminApp(): App {
+  if (getApps().length > 0) {
+    return getApps()[0]!;
   }
-  let credentials: unknown;
-  try {
-    credentials = JSON.parse(env.FIREBASE_SERVICE_ACCOUNT_JSON);
-  } catch {
-    throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON must be valid JSON.');
-  }
-  const serviceAccount = serviceAccountSchema.parse(credentials);
-  const app = getApps()[0] ?? initializeApp({
-    credential: cert({
+  if (env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    let credentials: unknown;
+    try {
+      credentials = JSON.parse(env.FIREBASE_SERVICE_ACCOUNT_JSON);
+    } catch {
+      throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON must be valid JSON.');
+    }
+    const serviceAccount = serviceAccountSchema.parse(credentials);
+    return initializeApp({
+      credential: cert({
+        projectId: serviceAccount.project_id,
+        clientEmail: serviceAccount.client_email,
+        privateKey: serviceAccount.private_key,
+      }),
       projectId: serviceAccount.project_id,
-      clientEmail: serviceAccount.client_email,
-      privateKey: serviceAccount.private_key,
-    }),
-    projectId: serviceAccount.project_id,
-  });
+    });
+  }
+  return initializeApp();
+}
+
+export function firebaseMessaging() {
+  const app = getFirebaseAdminApp();
   return getMessaging(app);
+}
+
+export function firebaseAuth() {
+  const app = getFirebaseAdminApp();
+  return getAuth(app);
 }

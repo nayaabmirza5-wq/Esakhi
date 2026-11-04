@@ -109,6 +109,7 @@ export const api = {
   ready: () => request<{ status: string }>('/ready'),
   requestOtp: (phone: string) => request<{ message: string }>('/api/v1/auth/otp/request', { method: 'POST', body: JSON.stringify({ phone }) }),
   verifyOtp: (phone: string, code: string) => request<{ accessToken: string; user: User }>('/api/v1/auth/otp/verify', { method: 'POST', body: JSON.stringify({ phone, code }) }, false),
+  firebaseLogin: (idToken: string, role = 'customer') => request<{ accessToken: string; token?: string; user: User }>('/api/v1/auth/firebase-login', { method: 'POST', body: JSON.stringify({ idToken, role }) }, false),
   refresh: () => request<{ accessToken: string }>('/api/v1/auth/refresh', { method: 'POST' }, false),
   logout: () => request<{ message: string }>('/api/v1/auth/logout', { method: 'POST' }, false),
   me: () => request<User>('/api/v1/auth/me'),

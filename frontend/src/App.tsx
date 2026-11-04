@@ -1,4 +1,5 @@
-import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { auth, RecaptchaVerifier, signInWithPhoneNumber, type ConfirmationResult } from './firebase';
 import type { ChangeEvent, FormEvent, ReactNode } from 'react';
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ApiError, api, onSessionRefresh, refreshSession, resolveProductImageUrl, setAccessToken } from './api';
@@ -848,6 +849,14 @@ function HelpPage(): ReactNode {
   );
 }
 
+function formatE164(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
+  if (phone.trim().startsWith('+')) return `+${digits}`;
+  return `+91${digits}`;
+}
+
 function SignInPage(): ReactNode {
   const { setSession, user, reloadUser } = useAuth();
   const navigate = useNavigate();
@@ -857,25 +866,103 @@ function SignInPage(): ReactNode {
   const [requested, setRequested] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
+  const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
+
   const signInState = location.state as { from?: string; checkoutState?: unknown } | null;
   if (user) return <div className="page-container narrow"><Notice tone="success">You are signed in as {user.name || user.phone}.</Notice><Link to={workspacePathForRole(user.role)} className="button">Continue to your workspace</Link></div>;
-  const submitPhone = async (event: FormEvent) => {
-    event.preventDefault(); setLoading(true); setError('');
-    try { await api.requestOtp(phone); setRequested(true); }
-    catch (cause) { setError(displayError(cause)); }
-    finally { setLoading(false); }
+
+  const getOrCreateRecaptcha = () => {
+    if (recaptchaVerifierRef.current) return recaptchaVerifierRef.current;
+    const verifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+      size: 'invisible',
+    });
+    recaptchaVerifierRef.current = verifier;
+    return verifier;
   };
-  const submitCode = async (event: FormEvent) => {
-    event.preventDefault(); setLoading(true); setError('');
+
+  const submitPhone = async (event: FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    setError('');
     try {
-      const session = await api.verifyOtp(phone, code);
-      setSession(session.user, session.accessToken);
+      const formattedNumber = formatE164(phone);
+      if (!/^\+91[6-9]\d{9}$/.test(formattedNumber)) {
+        throw new Error('Please enter a valid 10-digit Indian mobile number.');
+      }
+      const verifier = getOrCreateRecaptcha();
+      const confirmation = await signInWithPhoneNumber(auth, formattedNumber, verifier);
+      setConfirmationResult(confirmation);
+      setRequested(true);
+    } catch (cause: any) {
+      console.error('[FIREBASE_PHONE_AUTH_ERROR]:', cause);
+      if (recaptchaVerifierRef.current) {
+        try { recaptchaVerifierRef.current.clear(); } catch {}
+        recaptchaVerifierRef.current = null;
+      }
+      setError(displayError(cause?.message || cause));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitCode = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!confirmationResult) {
+      setError('Verification session expired. Please request a new code.');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const userCredential = await confirmationResult.confirm(code);
+      const idToken = await userCredential.user.getIdToken();
+      const session = await api.firebaseLogin(idToken, 'customer');
+      setSession(session.user, session.accessToken || session.token!);
       await reloadUser();
       navigate(signInState?.from || workspacePathForRole(session.user.role), { replace: true, state: signInState?.checkoutState });
-    } catch (cause) { setError(displayError(cause)); }
-    finally { setLoading(false); }
+    } catch (cause: any) {
+      console.error('[FIREBASE_VERIFY_ERROR]:', cause);
+      setError(displayError(cause?.message || cause));
+    } finally {
+      setLoading(false);
+    }
   };
-  return <div className="auth-layout"><div className="auth-art"><img src="/images/maitri-sisterhood-logo.png" alt="" /><span>Handmade by women,<br />made for you.</span></div><section className="auth-card"><span className="eyebrow">Welcome to eSakhi</span><h1>{requested ? 'Enter your code.' : 'A little care goes a long way.'}</h1><p>{requested ? 'Enter the six-digit verification code sent to your phone.' : 'Sign in with your Indian mobile number to see your orders and check out.'}</p>{error && <Notice tone="error">{error}</Notice>}{!requested ? <form onSubmit={(event) => void submitPhone(event)} className="stack-form"><label className="field"><span>Mobile number</span><input autoComplete="tel" inputMode="tel" required value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+91 98765 43210" /></label><button className="button" disabled={loading}>{loading ? 'Requesting…' : 'Send verification code'}</button></form> : <form onSubmit={(event) => void submitCode(event)} className="stack-form"><label className="field"><span>Six-digit code</span><input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="••••••" /></label><button className="button" disabled={loading}>{loading ? 'Verifying…' : 'Verify and continue'}</button><button className="text-button" type="button" onClick={() => { setRequested(false); setCode(''); }}>Use another number</button></form>}<small>New here? Your customer account is created securely after successful phone verification.</small></section></div>;
+
+  return (
+    <div className="auth-layout">
+      <div className="auth-art">
+        <img src="/images/maitri-sisterhood-logo.png" alt="" />
+        <span>Handmade by women,<br />made for you.</span>
+      </div>
+      <section className="auth-card">
+        <span className="eyebrow">Welcome to eSakhi</span>
+        <h1>{requested ? 'Enter your code.' : 'A little care goes a long way.'}</h1>
+        <p>{requested ? 'Enter the six-digit verification code sent to your phone.' : 'Sign in with your Indian mobile number to see your orders and check out.'}</p>
+        <div id="recaptcha-container"></div>
+        {error && <Notice tone="error">{error}</Notice>}
+        {!requested ? (
+          <form onSubmit={(event) => void submitPhone(event)} className="stack-form">
+            <label className="field">
+              <span>Mobile number</span>
+              <input autoComplete="tel" inputMode="tel" required value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+91 98765 43210" />
+            </label>
+            <button className="button" disabled={loading}>{loading ? 'Requesting…' : 'Send verification code'}</button>
+          </form>
+        ) : (
+          <form onSubmit={(event) => void submitCode(event)} className="stack-form">
+            <label className="field">
+              <span>Six-digit code</span>
+              <input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="••••••" />
+            </label>
+            <button className="button" disabled={loading}>{loading ? 'Verifying…' : 'Verify and continue'}</button>
+            <button className="text-button" type="button" onClick={() => { setRequested(false); setCode(''); setConfirmationResult(null); if (recaptchaVerifierRef.current) { try { recaptchaVerifierRef.current.clear(); } catch {} recaptchaVerifierRef.current = null; } }}>Use another number</button>
+          </form>
+        )}
+        <small>New here? Your customer account is created securely after successful phone verification.</small>
+      </section>
+    </div>
+  );
 }
 
 function CartPage(): ReactNode {
