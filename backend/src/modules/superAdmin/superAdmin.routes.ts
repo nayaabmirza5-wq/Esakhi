@@ -8,10 +8,13 @@ import {
   getSuperAdminCityAdmins,
   getSuperAdminSeller,
   getSuperAdminSellers,
+  getSuperAdminSettlementsLedger,
   listSuperAdminAuditLogs,
   listSuperAdminCities,
   listSuperAdminOrders,
   getSuperAdminOverview,
+  processSuperAdminOrderRefund,
+  settleSuperAdminPenalty,
   updateSuperAdminCityAdmin,
 } from './superAdmin.controller.js';
 
@@ -19,7 +22,10 @@ export const superAdminRoutes = Router();
 
 superAdminRoutes.use(requireAuth, requireRole('super_admin'));
 superAdminRoutes.get('/overview', getSuperAdminOverview);
+superAdminRoutes.get('/settlements', getSuperAdminSettlementsLedger);
 superAdminRoutes.get('/orders', listSuperAdminOrders);
+superAdminRoutes.post('/orders/:orderId/process-refund', processSuperAdminOrderRefund);
+superAdminRoutes.patch('/penalties/:penaltyId/settle', settleSuperAdminPenalty);
 superAdminRoutes.get('/cities', listSuperAdminCities);
 superAdminRoutes.get('/cities/:city', getSuperAdminCity);
 superAdminRoutes.get('/city-admins', getSuperAdminCityAdmins);

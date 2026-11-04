@@ -31,6 +31,24 @@
       "value": "",
       "type": "default",
       "enabled": true
+    },
+    {
+      "key": "sellerApplicationId",
+      "value": "",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "deliveryPartnerApplicationId",
+      "value": "",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "deliveryPartnerId",
+      "value": "",
+      "type": "default",
+      "enabled": true
     }
   ],
   "_postman_variable_scope": "environment",

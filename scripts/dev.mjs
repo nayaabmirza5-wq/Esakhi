@@ -33,7 +33,7 @@ if (missing.length > 0) {
 let stopping = false;
 const children = services.map(({ name, cwd, command, args }) => {
   console.log(`Starting ${name}...`);
-  const child = spawn(process.execPath, [command, ...args], { cwd, stdio: 'inherit' });
+  const child = spawn(process.execPath, [command, ...args], { cwd, stdio: ['ignore', 'inherit', 'inherit'] });
 
   child.on('error', (error) => {
     console.error(`Could not start ${name}: ${error.message}`);

@@ -1,0 +1,13 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/city-admin/delivery-partner-applications/{{deliveryPartnerApplicationId}}/review"
+method: PATCH
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "decision": "needs_info",
+      "note": "Please provide the missing application information."
+    }
+order: 11000

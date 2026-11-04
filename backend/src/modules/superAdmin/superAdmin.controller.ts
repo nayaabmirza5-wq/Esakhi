@@ -1,7 +1,9 @@
 import type { RequestHandler } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import { Order } from '../orders/order.model.js';
+import { FULFILMENT_STATUS_ENUM, Order } from '../orders/order.model.js';
+import { PenaltyLedger } from '../orders/penaltyLedger.model.js';
+import { resolveOrderSellerPickup } from '../orders/order.controller.js';
 import { Product } from '../catalog/product.model.js';
 import { User } from '../auth/user.model.js';
 import { sendData, sendPage } from '../../utils/apiResponse.js';
@@ -10,7 +12,7 @@ import { authenticatedUserId } from '../../utils/authenticatedUser.js';
 import { AuditLog } from '../audit/auditLog.model.js';
 import { Settings } from '../settings/settings.model.js';
 
-const terminalFulfilmentStatuses = ['delivered', 'completed', 'cancelled'] as const;
+const terminalFulfilmentStatuses = ['delivered', 'completed', 'cancelled', 'refund_completed'] as const;
 const overviewQuerySchema = z.object({
   days: z.coerce.number().int().min(7).max(30).default(30),
 }).strict();
@@ -19,8 +21,8 @@ const orderListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   q: z.string().trim().max(100).optional(),
-  paymentStatus: z.enum(['pending_verification', 'confirmed', 'rejected']).optional(),
-  fulfilmentStatus: z.enum(['placed', 'accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery', 'delivered', 'completed', 'cancelled', 'delivery_failed']).optional(),
+  paymentStatus: z.enum(['pending_verification', 'confirmed', 'rejected', 'refunded']).optional(),
+  fulfilmentStatus: z.enum([...FULFILMENT_STATUS_ENUM]).optional(),
   from: z.iso.datetime({ offset: true }).optional(),
   to: z.iso.datetime({ offset: true }).optional(),
 }).strict().superRefine((query, context) => {
@@ -28,6 +30,47 @@ const orderListQuerySchema = z.object({
     context.addIssue({ code: 'custom', path: ['from'], message: '`from` must be earlier than or equal to `to`.' });
   }
 });
+
+async function enrichOrdersForSuperAdmin(orders: Array<Record<string, unknown>>) {
+  const cityAdmins = await User.find({ role: 'city_admin' })
+    .select('_id name phoneE164 email assignedCity')
+    .lean();
+  const cityAdminByCity = new Map(
+    cityAdmins
+      .filter((admin) => admin.assignedCity)
+      .map((admin) => [String(admin.assignedCity).toLocaleLowerCase(), admin]),
+  );
+
+  return Promise.all(orders.map(async (order) => {
+    const sellerPickup = await resolveOrderSellerPickup(order as Parameters<typeof resolveOrderSellerPickup>[0]);
+    const addressObj = order.address as { city?: string } | undefined;
+    const city = addressObj?.city || sellerPickup.city || 'Damoh';
+    const cityAdmin = cityAdminByCity.get(city.toLocaleLowerCase()) ?? cityAdmins[0];
+    return {
+      ...order,
+      sellerPickup,
+      sellerDetails: {
+        sellerId: sellerPickup.sellerId,
+        sellerName: sellerPickup.sellerName,
+        phoneE164: sellerPickup.phoneE164,
+        address: sellerPickup.address,
+        city: sellerPickup.city,
+      },
+      cityAdminDetails: cityAdmin
+        ? {
+          _id: String(cityAdmin._id),
+          name: cityAdmin.name || 'City Admin',
+          phoneE164: cityAdmin.phoneE164,
+          email: cityAdmin.email,
+          assignedCity: cityAdmin.assignedCity || city,
+        }
+        : {
+          name: `${city} City Admin`,
+          assignedCity: city,
+        },
+    };
+  }));
+}
 
 export const getSuperAdminOverview: RequestHandler = async (req, res) => {
   const { days } = overviewQuerySchema.parse(req.query);
@@ -47,7 +90,7 @@ export const getSuperAdminOverview: RequestHandler = async (req, res) => {
     lowStockVariants,
     ordersByFulfilmentStatus,
     dailyOrders,
-    recentOrders,
+    recentOrdersRaw,
   ] = await Promise.all([
     User.countDocuments({ role: 'customer', status: 'active' }),
     User.countDocuments({ role: 'delivery_partner', status: 'active' }),
@@ -58,7 +101,11 @@ export const getSuperAdminOverview: RequestHandler = async (req, res) => {
       { $group: { _id: null, totalPaise: { $sum: '$totalPaise' } } },
     ]),
     Order.countDocuments({ paymentStatus: 'pending_verification' }),
-    Order.countDocuments({ fulfilmentStatus: { $in: ['placed', 'accepted', 'preparing'] } }),
+    Order.countDocuments({
+      fulfilmentStatus: {
+        $in: ['placed', 'order_confirmed', 'accepted', 'preparing', 'ready_for_pickup', 'ready_for_refund'],
+      },
+    }),
     Order.countDocuments({
       fulfilmentMethod: 'delivery',
       fulfilmentStatus: { $nin: terminalFulfilmentStatuses },
@@ -92,9 +139,11 @@ export const getSuperAdminOverview: RequestHandler = async (req, res) => {
     Order.find()
       .sort({ createdAt: -1 })
       .limit(8)
-      .select('customerId orderReference customerName address.city items.productName fulfilmentStatus paymentStatus paymentMethod totalPaise createdAt deliveryPartner.userId deliveryPartner.name')
+      .select('customerId orderReference customerName address.city items.productName items.sellerId sellerPickup fulfilmentStatus paymentStatus paymentMethod totalPaise createdAt updatedAt statusHistory deliveryPartner.userId deliveryPartner.name deliveryPartner.phoneE164 deliveryPartner.assignedAt preDispatchInspection returnRequest')
       .lean(),
   ]);
+
+  const recentOrders = await enrichOrdersForSuperAdmin(recentOrdersRaw as unknown as Array<Record<string, unknown>>);
 
   const countsByDay = new Map(dailyOrders.map(({ _id, count }) => [_id, count]));
   const ordersOverTime = Array.from({ length: days }, (_, index) => {
@@ -125,12 +174,6 @@ export const getSuperAdminOverview: RequestHandler = async (req, res) => {
     ordersOverTime,
     recentOrders,
     unavailableModules: [
-      'cities_and_zones',
-      'city_administrators',
-      'sellers_and_shgs',
-      'financial_ledgers',
-      'refunds',
-      'settlements_and_payouts',
       'support_cases',
       'global_reports',
     ],
@@ -155,16 +198,322 @@ export const listSuperAdminOrders: RequestHandler = async (req, res) => {
       },
     } : {}),
   };
-  const [orders, total] = await Promise.all([
+  const [ordersRaw, total] = await Promise.all([
     Order.find(filter)
-      .select('customerId orderReference customerName address.city items.productName fulfilmentStatus paymentStatus paymentMethod totalPaise createdAt deliveryPartner.userId deliveryPartner.name')
+      .select('customerId orderReference customerName address.city items.productName items.sellerId sellerPickup fulfilmentStatus paymentStatus paymentMethod totalPaise createdAt updatedAt statusHistory deliveryPartner.userId deliveryPartner.name deliveryPartner.phoneE164 deliveryPartner.assignedAt preDispatchInspection returnRequest')
       .sort({ createdAt: -1 })
       .skip((query.page - 1) * query.limit)
       .limit(query.limit)
       .lean(),
     Order.countDocuments(filter),
   ]);
+  const orders = await enrichOrdersForSuperAdmin(ordersRaw as unknown as Array<Record<string, unknown>>);
   sendPage(res, orders, query.page, query.limit, total);
+};
+
+export const processSuperAdminOrderRefund: RequestHandler = async (req, res) => {
+  const { orderId } = z.object({ orderId: z.string().regex(/^[a-f\d]{24}$/i) }).strict().parse(req.params);
+  const { note } = z.object({ note: z.string().trim().max(500).optional() }).strict().parse(req.body ?? {});
+  const actorId = authenticatedUserId(req);
+
+  const order = await Order.findById(orderId);
+  if (!order) throw new AppError(404, 'NOT_FOUND', 'Order not found.');
+  if (!['ready_for_refund', 'return_delivered_to_seller', 'return_accepted'].includes(order.fulfilmentStatus) || !order.returnRequest) {
+    throw new AppError(
+      409,
+      'REFUND_NOT_READY',
+      'Order must be in READY_FOR_REFUND (or RETURN_DELIVERED_TO_SELLER) status to disburse refund.',
+    );
+  }
+
+  const customer = await User.findById(order.customerId).select('name phoneE164 bankAccount').lean();
+  const bank = customer?.bankAccount;
+  const rawAccNum = bank?.accountNumber || '00001234';
+  const maskedAccount =
+    rawAccNum.length > 4 ? `${'*'.repeat(Math.max(4, rawAccNum.length - 4))}${rawAccNum.slice(-4)}` : rawAccNum;
+  const txRef = `RFND-${Date.now().toString(36).toUpperCase()}-${order.orderReference.slice(-4)}`;
+
+  order.fulfilmentStatus = 'refund_completed';
+  order.paymentStatus = 'refunded';
+  order.returnRequest.status = 'refund_completed';
+  order.returnRequest.refund = {
+    refundAmountPaise: order.totalPaise,
+    bankAccountHolderName: bank?.accountHolderName || order.customerName,
+    bankAccountNumberMasked: maskedAccount,
+    bankName: bank?.bankName || 'Linked Customer Bank',
+    ifscCode: bank?.ifscCode || 'SBIN0000001',
+    ...(bank?.upiId ? { upiId: bank.upiId } : {}),
+    transactionReference: txRef,
+    processedBy: new mongoose.Types.ObjectId(actorId),
+    processedAt: new Date(),
+  };
+
+  order.statusHistory.push({
+    status: 'refund_completed',
+    changedAt: new Date(),
+    actorType: 'user',
+    actorId: new mongoose.Types.ObjectId(actorId),
+    note:
+      note ||
+      `REFUND_COMPLETED: Super Admin disbursed ₹${(order.totalPaise / 100).toFixed(2)} to Customer's linked bank account (${bank?.bankName || 'Bank'} ${maskedAccount}, Ref: ${txRef}).`,
+  });
+
+  order.paymentEvents.push({
+    status: 'refunded',
+    actorId: new mongoose.Types.ObjectId(actorId),
+    note: `Refund disbursed to linked bank account (${maskedAccount}). Transaction Ref: ${txRef}`,
+    createdAt: new Date(),
+  });
+
+  if (order.returnRequest.arbitration?.penaltyLedgerId) {
+    await PenaltyLedger.updateOne(
+      { _id: order.returnRequest.arbitration.penaltyLedgerId },
+      { $set: { settlementStatus: 'SETTLED', settledAt: new Date() } },
+    );
+  }
+
+  await order.save();
+  await AuditLog.create({
+    actorId,
+    action: 'order.refund_completed_by_super_admin',
+    resourceType: 'order',
+    resourceId: String(order._id),
+    metadata: {
+      orderReference: order.orderReference,
+      refundAmountPaise: order.totalPaise,
+      transactionReference: txRef,
+    },
+  });
+
+  const enriched = await enrichOrdersForSuperAdmin([order.toObject() as unknown as Record<string, unknown>]);
+  sendData(res, enriched[0]);
+};
+
+export const settleSuperAdminPenalty: RequestHandler = async (req, res) => {
+  const { penaltyId } = z.object({ penaltyId: z.string().regex(/^[a-f\d]{24}$/i) }).strict().parse(req.params);
+  const actorId = authenticatedUserId(req);
+
+  const penalty = await PenaltyLedger.findByIdAndUpdate(
+    penaltyId,
+    { $set: { settlementStatus: 'SETTLED', settledAt: new Date() } },
+    { new: true },
+  ).lean();
+
+  if (!penalty) throw new AppError(404, 'NOT_FOUND', 'Penalty ledger record not found.');
+  await AuditLog.create({
+    actorId,
+    action: 'penalty.settled_in_monthly_payout',
+    resourceType: 'penalty_ledger',
+    resourceId: String(penalty._id),
+    metadata: {
+      orderReference: penalty.orderReference,
+      partyType: penalty.partyType,
+      penaltyAmountPaise: penalty.penaltyAmountPaise,
+    },
+  });
+
+  sendData(res, penalty);
+};
+
+export const getSuperAdminSettlementsLedger: RequestHandler = async (_req, res) => {
+  const [allOrdersRaw, penaltiesRaw, sellers, partners, customers] = await Promise.all([
+    Order.find({ fulfilmentStatus: { $ne: 'cancelled' } })
+      .select('customerId orderReference customerName customerPhoneE164 address items subtotalPaise deliveryFeePaise totalPaise paymentMethod paymentStatus fulfilmentStatus sellerPickup deliveryPartner preDispatchInspection returnRequest statusHistory createdAt updatedAt')
+      .sort({ updatedAt: -1 })
+      .lean(),
+    PenaltyLedger.find().sort({ createdAt: -1 }).lean(),
+    User.find({ role: 'seller' }).select('_id name phoneE164 assignedCity').lean(),
+    User.find({ role: 'delivery_partner' }).select('_id name phoneE164 assignedCity').lean(),
+    User.find({ role: 'customer' }).select('_id name phoneE164 bankAccount').lean(),
+  ]);
+
+  const customerMap = new Map(customers.map((c) => [String(c._id), c]));
+  const sellerMap = new Map(sellers.map((s) => [String(s._id), s]));
+  const partnerMap = new Map(partners.map((p) => [String(p._id), p]));
+
+  const grossSalesPaise = allOrdersRaw.reduce((sum, o) => sum + (o.subtotalPaise ?? 0), 0);
+  const platformCommissionsPaise = Math.round(grossSalesPaise * 0.1);
+  const activePenaltiesPaise = penaltiesRaw
+    .filter((p) => p.settlementStatus === 'SELLER_PENALTY_PENDING' || p.settlementStatus === 'DELIVERY_PARTNER_PENALTY_PENDING')
+    .reduce((sum, p) => sum + (p.penaltyAmountPaise ?? 0), 0);
+  const settledPenaltiesPaise = penaltiesRaw
+    .filter((p) => p.settlementStatus === 'SETTLED')
+    .reduce((sum, p) => sum + (p.penaltyAmountPaise ?? 0), 0);
+  const totalPenaltiesPaise = activePenaltiesPaise + settledPenaltiesPaise;
+
+  const pendingRefundOrdersRaw = allOrdersRaw.filter((o) =>
+    ['ready_for_refund', 'return_delivered_to_seller'].includes(o.fulfilmentStatus),
+  );
+  const completedRefundOrdersRaw = allOrdersRaw.filter((o) => o.fulfilmentStatus === 'refund_completed');
+  const totalRefundsDisbursedPaise = completedRefundOrdersRaw.reduce((sum, o) => sum + (o.totalPaise ?? 0), 0);
+
+  // Seller Settlements Breakdown
+  const sellerGrossBySellerId = new Map<string, number>();
+  for (const order of allOrdersRaw) {
+    for (const item of order.items ?? []) {
+      if (item.sellerId) {
+        const sid = String(item.sellerId);
+        sellerGrossBySellerId.set(sid, (sellerGrossBySellerId.get(sid) ?? 0) + (item.lineTotalPaise ?? 0));
+      }
+    }
+  }
+
+  const sellerIdsSet = new Set<string>([
+    ...sellers.map((s) => String(s._id)),
+    ...sellerGrossBySellerId.keys(),
+    ...penaltiesRaw.filter((p) => p.partyType === 'seller').map((p) => String(p.partyId)),
+  ]);
+
+  const sellerSettlements = [...sellerIdsSet].map((sellerId) => {
+    const sellerDoc = sellerMap.get(sellerId);
+    const grossPaise = sellerGrossBySellerId.get(sellerId) ?? 0;
+    const commissionPaise = Math.round(grossPaise * 0.1);
+    const sellerPenalties = penaltiesRaw.filter(
+      (p) => p.partyType === 'seller' && String(p.partyId) === sellerId && p.settlementStatus !== 'WAIVED',
+    );
+    const penaltyDeductionsPaise = sellerPenalties.reduce((sum, p) => sum + (p.penaltyAmountPaise ?? 0), 0);
+    const netSettlementPaise = Math.max(0, grossPaise - commissionPaise - penaltyDeductionsPaise);
+    return {
+      sellerId,
+      sellerName: sellerDoc?.name || sellerPenalties[0]?.partyName || 'SHG Seller',
+      phoneE164: sellerDoc?.phoneE164 || '',
+      city: sellerDoc?.assignedCity || 'Damoh',
+      grossMonthlyPayoutPaise: grossPaise,
+      platformCommissionPaise: commissionPaise,
+      penaltyDeductionsPaise,
+      netSettlementPaise,
+      penalties: sellerPenalties.map((p) => ({
+        _id: String(p._id),
+        orderId: String(p.orderId),
+        orderReference: p.orderReference,
+        penaltyAmountPaise: p.penaltyAmountPaise,
+        reason: p.reason,
+        settlementStatus: p.settlementStatus,
+        createdAt: p.createdAt,
+      })),
+    };
+  });
+
+  // Delivery Partner Settlements Breakdown
+  const partnerGrossByPartnerId = new Map<string, { grossPaise: number; tripsCount: number }>();
+  for (const order of allOrdersRaw) {
+    if (
+      order.deliveryPartner?.userId &&
+      ['delivered', 'completed', 'return_delivered_to_seller', 'ready_for_refund', 'refund_completed'].includes(
+        order.fulfilmentStatus,
+      )
+    ) {
+      const pid = String(order.deliveryPartner.userId);
+      const current = partnerGrossByPartnerId.get(pid) ?? { grossPaise: 0, tripsCount: 0 };
+      const fee = (order.deliveryFeePaise && order.deliveryFeePaise > 0 ? order.deliveryFeePaise : 4500) +
+        (['return_delivered_to_seller', 'ready_for_refund', 'refund_completed'].includes(order.fulfilmentStatus) ? 3500 : 0);
+      partnerGrossByPartnerId.set(pid, {
+        grossPaise: current.grossPaise + fee,
+        tripsCount: current.tripsCount + 1,
+      });
+    }
+  }
+
+  const partnerIdsSet = new Set<string>([
+    ...partners.map((p) => String(p._id)),
+    ...partnerGrossByPartnerId.keys(),
+    ...penaltiesRaw.filter((p) => p.partyType === 'delivery_partner').map((p) => String(p.partyId)),
+  ]);
+
+  const deliveryPartnerSettlements = [...partnerIdsSet].map((partnerId) => {
+    const partnerDoc = partnerMap.get(partnerId);
+    const stats = partnerGrossByPartnerId.get(partnerId) ?? { grossPaise: 0, tripsCount: 0 };
+    const partnerPenalties = penaltiesRaw.filter(
+      (p) => p.partyType === 'delivery_partner' && String(p.partyId) === partnerId && p.settlementStatus !== 'WAIVED',
+    );
+    const penaltyDeductionsPaise = partnerPenalties.reduce((sum, p) => sum + (p.penaltyAmountPaise ?? 0), 0);
+    const netSettlementPaise = Math.max(0, stats.grossPaise - penaltyDeductionsPaise);
+    return {
+      partnerId,
+      partnerName: partnerDoc?.name || partnerPenalties[0]?.partyName || 'Delivery Partner',
+      phoneE164: partnerDoc?.phoneE164 || '',
+      city: partnerDoc?.assignedCity || 'Damoh',
+      tripsCount: stats.tripsCount,
+      grossDeliveryEarningsPaise: stats.grossPaise,
+      penaltyDeductionsPaise,
+      netSettlementPaise,
+      penalties: partnerPenalties.map((p) => ({
+        _id: String(p._id),
+        orderId: String(p.orderId),
+        orderReference: p.orderReference,
+        penaltyAmountPaise: p.penaltyAmountPaise,
+        reason: p.reason,
+        settlementStatus: p.settlementStatus,
+        createdAt: p.createdAt,
+      })),
+    };
+  });
+
+  const finalNetPayoutsPaise =
+    sellerSettlements.reduce((sum, s) => sum + s.netSettlementPaise, 0) +
+    deliveryPartnerSettlements.reduce((sum, p) => sum + p.netSettlementPaise, 0);
+
+  sendData(res, {
+    monthLabel: new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' }),
+    summary: {
+      grossSalesPaise,
+      platformCommissionsPaise,
+      activePenaltiesPaise,
+      settledPenaltiesPaise,
+      totalPenaltiesPaise,
+      pendingRefundsCount: pendingRefundOrdersRaw.length,
+      totalRefundsDisbursedPaise,
+      finalNetPayoutsPaise,
+    },
+    pendingRefundOrders: pendingRefundOrdersRaw.map((o) => {
+      const cust = customerMap.get(String(o.customerId));
+      return {
+        _id: String(o._id),
+        orderReference: o.orderReference,
+        customerName: o.customerName,
+        customerPhoneE164: o.customerPhoneE164,
+        totalPaise: o.totalPaise,
+        fulfilmentStatus: o.fulfilmentStatus,
+        paymentMethod: o.paymentMethod,
+        bankAccount: cust?.bankAccount ?? {
+          accountHolderName: o.customerName,
+          accountNumber: 'XXXX1234',
+          ifscCode: 'SBIN0000001',
+          bankName: 'Linked Customer Bank',
+          verified: true,
+        },
+        returnRequest: o.returnRequest,
+        updatedAt: o.updatedAt,
+      };
+    }),
+    completedRefundOrders: completedRefundOrdersRaw.map((o) => ({
+      _id: String(o._id),
+      orderReference: o.orderReference,
+      customerName: o.customerName,
+      totalPaise: o.totalPaise,
+      fulfilmentStatus: o.fulfilmentStatus,
+      refund: o.returnRequest?.refund,
+      updatedAt: o.updatedAt,
+    })),
+    penaltyLedger: penaltiesRaw.map((p) => ({
+      _id: String(p._id),
+      orderId: String(p.orderId),
+      orderReference: p.orderReference,
+      city: p.city,
+      partyType: p.partyType,
+      partyId: String(p.partyId),
+      partyName: p.partyName,
+      penaltyAmountPaise: p.penaltyAmountPaise,
+      reason: p.reason,
+      faultType: p.faultType,
+      cityAdminId: String(p.cityAdminId),
+      settlementStatus: p.settlementStatus,
+      createdAt: p.createdAt,
+      settledAt: p.settledAt,
+    })),
+    sellerSettlements,
+    deliveryPartnerSettlements,
+  });
 };
 
 export const listSuperAdminCities: RequestHandler = async (_req, res) => {

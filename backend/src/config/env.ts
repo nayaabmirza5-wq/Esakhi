@@ -7,6 +7,7 @@ const envSchema = z.object({
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
   MONGODB_URI: z.string().regex(/^mongodb(?:\+srv)?:\/\//),
   CLIENT_ORIGINS: z.string().min(1),
+  GEOCODER_BASE_URL: z.string().url().default('https://photon.komoot.io'),
   JWT_ACCESS_SECRET: z.string().regex(/^[a-fA-F0-9]{128}$/, 'Use 64 random bytes encoded as 128 hex characters.'),
   JWT_REFRESH_SECRET: z.string().regex(/^[a-fA-F0-9]{128}$/, 'Use a different 64 random bytes encoded as 128 hex characters.'),
   JWT_REFRESH_TTL_DAYS: z.coerce.number().int().min(1).max(30).default(7),
@@ -55,6 +56,10 @@ const corsOrigins = configuredCorsOrigins.map((origin) => {
 
 if (config.JWT_ACCESS_SECRET === config.JWT_REFRESH_SECRET) {
   throw new Error('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different.');
+}
+const geocoderUrl = new URL(config.GEOCODER_BASE_URL);
+if (geocoderUrl.pathname !== '/' || geocoderUrl.search || geocoderUrl.hash || geocoderUrl.username || geocoderUrl.password) {
+  throw new Error('GEOCODER_BASE_URL must be an origin without credentials, path, query, or fragment.');
 }
 if (config.NODE_ENV === 'production' && config.OTP_PROVIDER !== 'msg91') {
   throw new Error('Production requires OTP_PROVIDER=msg91.');

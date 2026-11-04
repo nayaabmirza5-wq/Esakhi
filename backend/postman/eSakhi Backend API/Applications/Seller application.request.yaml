@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/seller-applications"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "shgName": "Sample Self Help Group",
+      "representative": "Sample Representative",
+      "phone": "+919876543210",
+      "city": "Sample City",
+      "address": "Sample address for review",
+      "productType": "Bangles"
+    }
+order: 1000

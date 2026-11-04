@@ -8,6 +8,7 @@ import { env } from './config/env.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { productRoutes, adminProductRoutes } from './modules/catalog/product.routes.js';
+import { categoriesController } from './modules/catalog/product.controller.js';
 import { customerOrderRoutes, adminOrderRoutes, deliveryPartnerRoutes } from './modules/orders/order.routes.js';
 import { settingsRoutes, adminSettingsRoutes } from './modules/settings/settings.routes.js';
 import { inventoryRoutes } from './modules/inventory/inventory.routes.js';
@@ -18,7 +19,12 @@ import { productImagesDirectory } from './modules/catalog/productImageUpload.js'
 import { adminNotificationRoutes, pushNotificationRoutes } from './modules/notifications/notification.routes.js';
 import { superAdminRoutes } from './modules/superAdmin/superAdmin.routes.js';
 import { cityAdminRoutes } from './modules/cityAdmin/cityAdmin.routes.js';
+import { trackCityAdminOrderPartner } from './modules/cityAdmin/cityAdminOrder.controller.js';
+import { requireAuth } from './middleware/requireAuth.js';
+import { requireRole } from './middleware/requireRole.js';
 import { sellerRoutes } from './modules/seller/seller.routes.js';
+import { sellerApplicationRoutes } from './modules/seller/sellerApplication.routes.js';
+import { deliveryPartnerApplicationRoutes } from './modules/cityAdmin/deliveryPartnerApplication.routes.js';
 
 export const app = express();
 app.set('trust proxy', env.TRUST_PROXY_HOPS);
@@ -102,7 +108,7 @@ api.get('/', (_req, res) => {
     success: true,
     data: {
       message: 'eSakhi API v1',
-      endpoints: ['/auth', '/products', '/categories', '/service-area', '/orders', '/delivery-partners', '/admin', '/super-admin'],
+      endpoints: ['/auth', '/products', '/categories', '/service-area', '/orders', '/delivery-partners', '/seller-applications', '/admin', '/super-admin'],
       health: '/health',
     },
   });
@@ -110,9 +116,7 @@ api.get('/', (_req, res) => {
 api.use('/auth', authRoutes);
 api.use('/notifications', pushNotificationRoutes);
 api.use('/products', productRoutes);
-api.use('/categories', (_req, res) => {
-  res.status(200).json({ success: true, data: ['Bangles', 'Jewellery', 'Dupattas', 'Others'] });
-});
+api.get('/categories', categoriesController);
 api.use('/service-area', settingsRoutes);
 api.use('/orders', customerOrderRoutes);
 api.use('/delivery-partners', deliveryPartnerRoutes);
@@ -124,8 +128,12 @@ api.use('/admin/inventory', inventoryRoutes);
 api.use('/admin', adminRoutes);
 api.use('/super-admin', superAdminRoutes);
 api.use('/city-admin', cityAdminRoutes);
+api.get('/track/partner/:orderId', requireAuth, requireRole('city_admin', 'admin', 'super_admin'), trackCityAdminOrderPartner);
 api.use('/seller', sellerRoutes);
+api.use('/seller-applications', sellerApplicationRoutes);
+api.use('/delivery-partner-applications', deliveryPartnerApplicationRoutes);
 app.use('/api/v1', api);
+app.get('/api/track/partner/:orderId', apiLimiter, requireAuth, requireRole('city_admin', 'admin', 'super_admin'), trackCityAdminOrderPartner);
 
 app.use((_req, res) => {
   res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Route not found.' } });

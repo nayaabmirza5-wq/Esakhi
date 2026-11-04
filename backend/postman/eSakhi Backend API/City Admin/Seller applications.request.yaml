@@ -1,0 +1,4 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/seller-applications?page=1&limit=20&status=pending"
+method: GET
+order: 5000
