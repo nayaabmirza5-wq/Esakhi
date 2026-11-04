@@ -10,7 +10,7 @@ import { InventoryAdjustment } from '../inventory/inventoryAdjustment.model.js';
 import { Product } from '../catalog/product.model.js';
 import { Settings } from '../settings/settings.model.js';
 import { SellerApplication } from '../seller/sellerApplication.model.js';
-import { Order } from './order.model.js';
+import { Order, DELIVERY_EXCEPTION_REASON_CODES, RIDER_REQUESTED_ACTIONS } from './order.model.js';
 import { PenaltyLedger } from './penaltyLedger.model.js';
 import {
   cancellationRequestSchema,
@@ -27,6 +27,7 @@ import {
   orderPaginationQuerySchema,
   partnerAvailabilitySchema,
   paymentReviewSchema,
+  reportDeliveryFailureSchema,
   returnRequestInputSchema,
   reverseOrderPartnerStatusSchema,
 } from './order.schemas.js';
@@ -817,7 +818,7 @@ export const listPartnerDeliveryHistory: RequestHandler = async (req, res) => {
 
 export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
   const { id } = orderIdParamsSchema.parse(req.params);
-  const { status, note, paymentCollected } = z.object({
+  const { status, note, paymentCollected, reasonCode, reasonNotes, proofImageUrl, riderRequestedAction } = z.object({
     status: z.enum([
       'out_for_pickup',
       'picked_up',
@@ -829,6 +830,10 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
     ]),
     note: z.string().trim().max(500).optional(),
     paymentCollected: z.boolean().optional(),
+    reasonCode: z.enum(DELIVERY_EXCEPTION_REASON_CODES).optional(),
+    reasonNotes: z.string().trim().max(1000).optional(),
+    proofImageUrl: z.string().trim().nullish().transform((v) => v ?? null),
+    riderRequestedAction: z.enum(RIDER_REQUESTED_ACTIONS).optional(),
   }).strict().parse(req.body);
   const partnerId = authenticatedUserId(req);
   const order = await Order.findOne({
@@ -884,15 +889,54 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
         returnSubUpdates['returnRequest.reverseDeliveryPartner.deliveredToSellerAt'] = new Date();
       }
 
+      let nextDeliveryStatus = order.deliveryStatus || 'UNASSIGNED';
+      if (status === 'delivered') {
+        nextDeliveryStatus = 'DELIVERED';
+      } else if (status === 'out_for_delivery') {
+        nextDeliveryStatus = 'OUT_FOR_DELIVERY';
+      } else if (status === 'out_for_pickup' || status === 'picked_up') {
+        nextDeliveryStatus = 'ASSIGNED';
+      } else if (status === 'delivery_failed') {
+        const action = riderRequestedAction || 'UNASSIGN_ME';
+        nextDeliveryStatus = (action === 'RETRY_LATER') ? 'DELIVERY_FAILED' : 'ESCALATED_TO_ADMIN';
+      }
+
+      const exceptionData = (status === 'delivery_failed') ? {
+        attemptedAt: new Date(),
+        riderId: new mongoose.Types.ObjectId(partnerId),
+        reasonCode: reasonCode || 'OTHER',
+        reasonNotes: reasonNotes || note || '',
+        proofImageUrl: proofImageUrl || null,
+        riderRequestedAction: riderRequestedAction || 'UNASSIGN_ME',
+      } : null;
+
+      const unassignPartnerUpdate: Record<string, unknown> = {};
+      const historyEntry = (status === 'delivery_failed' && (riderRequestedAction === 'UNASSIGN_ME' || !riderRequestedAction) && order.deliveryPartner) ? {
+        ...(order.deliveryPartner.userId ? { userId: order.deliveryPartner.userId } : {}),
+        name: order.deliveryPartner.name,
+        phoneE164: order.deliveryPartner.phoneE164,
+        assignedAt: order.deliveryPartner.assignedAt,
+        assignedBy: order.deliveryPartner.assignedBy,
+        unassignedAt: new Date(),
+        unassignedBy: new mongoose.Types.ObjectId(partnerId),
+        changeReason: `Delivery failed [${reasonCode || 'OTHER'}]: ${reasonNotes || note || ''} (Rider requested unassignment)`.trim(),
+      } : null;
+
+      if (status === 'delivery_failed' && (riderRequestedAction === 'UNASSIGN_ME' || !riderRequestedAction)) {
+        unassignPartnerUpdate['deliveryPartner'] = null;
+      }
+
       const changed = await Order.findOneAndUpdate(
         { _id: id, fulfilmentStatus: priorStatus },
         {
           $set: {
             fulfilmentStatus: status,
+            deliveryStatus: nextDeliveryStatus,
             ...(shouldConfirmPayment ? { paymentStatus: 'confirmed' } : {}),
             ...(finalLat !== undefined ? { 'deliveryPartner.latitude': finalLat } : {}),
             ...(finalLng !== undefined ? { 'deliveryPartner.longitude': finalLng } : {}),
             ...returnSubUpdates,
+            ...unassignPartnerUpdate,
           },
           $push: {
             statusHistory: {
@@ -900,8 +944,10 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
               changedAt: new Date(),
               actorType: 'user',
               actorId: partnerId,
-              note: note || defaultNotes[status] || `Status updated to ${status}`,
+              note: note || (status === 'delivery_failed' ? `Delivery failed: ${reasonCode || 'OTHER'} - ${reasonNotes || ''}` : defaultNotes[status]) || `Status updated to ${status}`,
             },
+            ...(exceptionData ? { deliveryExceptions: exceptionData } : {}),
+            ...(historyEntry ? { deliveryPartnerHistory: historyEntry } : {}),
             ...(shouldConfirmPayment && order.paymentStatus !== 'confirmed'
               ? {
                 paymentEvents: {
@@ -972,6 +1018,17 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
         ? 'GPS_STREAM_INACTIVE'
         : 'GPS_STREAM_ACTIVE',
   });
+};
+
+export const reportPartnerDeliveryFailure: RequestHandler = async (req, res, next) => {
+  const { id } = orderIdParamsSchema.parse(req.params);
+  const parsed = reportDeliveryFailureSchema.parse(req.body);
+  req.body = {
+    status: 'delivery_failed',
+    note: parsed.reasonNotes,
+    ...parsed,
+  };
+  return updatePartnerOrderStatus(req, res, next);
 };
 
 export const updatePartnerReverseOrderStatus: RequestHandler = async (req, res) => {

@@ -23,6 +23,7 @@ import {
   submitCustomerReturnRequest,
   updateFulfilmentStatus,
   updatePartnerAvailability,
+  reportPartnerDeliveryFailure,
   updatePartnerOrderStatus,
   updatePartnerReverseOrderStatus,
   upsertCustomerBankAccount,
@@ -49,6 +50,7 @@ deliveryPartnerRoutes.get('/orders', listAssignedPartnerOrders);
 deliveryPartnerRoutes.get('/orders/history', listPartnerDeliveryHistory);
 deliveryPartnerRoutes.get('/settlements', getPartnerSettlements);
 deliveryPartnerRoutes.patch('/orders/:id/status', updatePartnerOrderStatus);
+deliveryPartnerRoutes.post('/orders/:id/delivery-failure', reportPartnerDeliveryFailure);
 deliveryPartnerRoutes.patch('/orders/:id/reverse-status', updatePartnerReverseOrderStatus);
 deliveryPartnerRoutes.post('/orders/:id/location', broadcastPartnerOrderLocation);
 

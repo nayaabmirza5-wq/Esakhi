@@ -10,6 +10,11 @@ import { AddressBook } from './AddressBook';
 import { CityAdminLiveFleetOverview, CityAdminLiveTracker } from './CityAdminLiveTracker';
 import { SellerOrderCard, SellerOrderSkeleton } from './SellerOrderCard';
 import {
+  CityAdminDeliveryEscalationQueue,
+  CityAdminDeliveryResolutionPanel,
+  DeliveryFailureReportModal,
+} from './DeliveryEscalationSystem';
+import {
   CustomerReturnAndCancelPanel,
   CityAdminDisputeArbitrationPanel,
   SellerSettlementsLedgerPanel,
@@ -3156,6 +3161,16 @@ function CityAdminOrdersPage(): ReactNode {
         />
       )}
       {result.data?.data && <CityAdminLiveFleetOverview orders={result.data.data} />}
+      {result.data?.data && (
+        <CityAdminDeliveryEscalationQueue
+          orders={result.data.data}
+          onRefresh={() => {
+            void result.reload(false);
+            void partners.reload(false);
+            window.dispatchEvent(new Event('city-admin-order-updated'));
+          }}
+        />
+      )}
       <section className="city-admin-panel city-admin-order-directory">
         {unassignedOnly && <div className="city-admin-filter-note">Showing delivery orders awaiting a partner. <Link to="/city-admin/orders">Clear filter</Link></div>}
         <div className="city-admin-order-tools">
@@ -3290,6 +3305,15 @@ function CityAdminOrderDetailPage(): ReactNode {
         />
       </div>
     )}
+    <CityAdminDeliveryResolutionPanel
+      order={item}
+      partners={partners.data?.data ?? []}
+      onResolved={() => {
+        void order.reload(false);
+        void partners.reload(false);
+        window.dispatchEvent(new Event('city-admin-order-updated'));
+      }}
+    />
     <div className="city-admin-lower-grid">
       <section className="city-admin-panel">
         <div className="city-admin-panel-heading"><div><h2>Items & sellers</h2><p>Order snapshots and assigned city sellers</p></div></div>
@@ -4722,6 +4746,7 @@ function DeliveryPartnerPage(): ReactNode {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [updatingAvailability, setUpdatingAvailability] = useState(false);
+  const [reportingFailureOrder, setReportingFailureOrder] = useState<Order | null>(null);
 
   const toggleOnlineAvailability = async (nextOnline: boolean, nextStatus?: 'available' | 'busy' | 'offline') => {
     setUpdatingAvailability(true);
@@ -5013,17 +5038,32 @@ function DeliveryPartnerPage(): ReactNode {
             </button>
           )}
           {order.fulfilmentStatus === 'picked_up' && (
-            <button className="delivery-primary-action" onClick={() => void updateStatus(order._id, 'out_for_delivery', order.orderReference)}>
-              Start Route to Customer (OUT_FOR_DELIVERY)
-            </button>
+            <>
+              <button className="delivery-primary-action" onClick={() => void updateStatus(order._id, 'out_for_delivery', order.orderReference)}>
+                Start Route to Customer (OUT_FOR_DELIVERY)
+              </button>
+              <button
+                type="button"
+                className="delivery-secondary-action"
+                style={{ color: '#b91c1c', borderColor: '#fca5a5', fontSize: '0.82rem' }}
+                onClick={() => setReportingFailureOrder(order)}
+              >
+                ⚠️ Report Issue / Unassign
+              </button>
+            </>
           )}
           {order.fulfilmentStatus === 'out_for_delivery' && (
             <>
               <button className="delivery-primary-action" onClick={() => void updateStatus(order._id, 'delivered', order.orderReference, true)}>
                 Confirm Payment ({order.paymentMethod === 'cash' ? `Collect Cash ${formatMoney(order.totalPaise)}` : 'Online Paid'}) & Mark DELIVERED
               </button>
-              <button className="delivery-secondary-action" onClick={() => void updateStatus(order._id, 'delivery_failed', order.orderReference)}>
-                Report Delivery Problem
+              <button
+                type="button"
+                className="delivery-secondary-action"
+                style={{ color: '#b91c1c', borderColor: '#fca5a5' }}
+                onClick={() => setReportingFailureOrder(order)}
+              >
+                ⚠️ Report Delivery Issue
               </button>
             </>
           )}
@@ -5131,6 +5171,16 @@ function DeliveryPartnerPage(): ReactNode {
         {view === 'profile' && <><section className="delivery-panel delivery-profile-panel"><div className="delivery-panel-heading"><div><span className="delivery-section-kicker">YOUR ACCOUNT & GPS</span><h2>Partner profile</h2></div><Link to="/account/profile">Edit profile <span aria-hidden="true">→</span></Link></div><dl><div><dt>Name</dt><dd>{user?.name || 'Not provided'}</dd></div><div><dt>Phone</dt><dd>{user?.phone || 'Not available'}</dd></div><div><dt>Account</dt><dd>Delivery partner</dd></div><div><dt>Approved Localities</dt><dd>{profile.data?.serviceableLocalities?.join(', ') || 'Damoh'}</dd></div><div><dt>Availability</dt><dd>{isOnline ? `ONLINE (${availabilityStatus.toUpperCase()})` : 'OFFLINE'}</dd></div><div><dt>Live GPS Coordinates</dt><dd>{partnerCoords ? `${partnerCoords.latitude.toFixed(4)}, ${partnerCoords.longitude.toFixed(4)}` : '23.8388, 79.4422 (Damoh)'}</dd></div></dl></section><DeliveryPartnerPaySlipPanel /></>}
         <p className="delivery-data-note">Follow the checkpoint buttons in order: Accept (OUT_FOR_PICKUP) → Picked Up from Seller (PICKED_UP) → Out for Delivery (OUT_FOR_DELIVERY) → Confirm Payment & Mark Delivered (DELIVERED). When an order is marked DELIVERED, your status automatically reverts to AVAILABLE.</p>
       </main>
+      {reportingFailureOrder && (
+        <DeliveryFailureReportModal
+          order={reportingFailureOrder}
+          onClose={() => setReportingFailureOrder(null)}
+          onSuccess={(msg) => {
+            setMessage(msg);
+            void Promise.all([orders.reload(false), history.reload(false), profile.reload(false)]);
+          }}
+        />
+      )}
       <nav className="delivery-mobile-nav" aria-label="Delivery portal navigation">
         <button className={view === 'overview' ? 'active' : ''} onClick={() => selectView('overview')}><span>⌂</span>Home</button>
         <button className={view === 'deliveries' ? 'active' : ''} onClick={() => selectView('deliveries')}><span>▣</span>Deliveries</button>

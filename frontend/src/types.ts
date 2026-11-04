@@ -81,6 +81,48 @@ export interface OrderReturnRequest {
   };
 }
 
+export type DeliveryStatus =
+  | 'UNASSIGNED'
+  | 'ASSIGNED'
+  | 'OUT_FOR_DELIVERY'
+  | 'DELIVERY_FAILED'
+  | 'ESCALATED_TO_ADMIN'
+  | 'DELIVERED'
+  | 'RETURN_TO_ORIGIN';
+
+export type DeliveryExceptionReasonCode =
+  | 'CUSTOMER_UNAVAILABLE'
+  | 'INCORRECT_ADDRESS'
+  | 'CUSTOMER_REFUSED'
+  | 'RIDER_VEHICLE_ISSUE'
+  | 'WEATHER_OR_ROAD_BLOCK'
+  | 'RIDER_EMERGENCY'
+  | 'OTHER';
+
+export type RiderRequestedAction = 'RETRY_LATER' | 'UNASSIGN_ME' | 'CANCEL_ORDER';
+
+export type AdminResolutionAction =
+  | 'REASSIGN_SAME_RIDER'
+  | 'REASSIGN_NEW_RIDER'
+  | 'RESCHEDULE_LATER'
+  | 'TRIGGER_RTO';
+
+export interface DeliveryException {
+  attemptedAt: string;
+  riderId?: string;
+  reasonCode: DeliveryExceptionReasonCode;
+  reasonNotes?: string;
+  proofImageUrl?: string;
+  riderRequestedAction: RiderRequestedAction;
+}
+
+export interface AdminResolution {
+  resolvedBy?: string;
+  resolvedAt: string;
+  action: AdminResolutionAction;
+  adminNotes?: string;
+}
+
 export interface PenaltyLedgerEntry {
   _id: string;
   orderId: string;
@@ -402,6 +444,9 @@ export interface Order {
   paymentStatus: 'pending_verification' | 'confirmed' | 'rejected' | 'refunded';
   fulfilmentMethod: 'delivery' | 'pickup';
   fulfilmentStatus: string;
+  deliveryStatus?: DeliveryStatus;
+  deliveryExceptions?: DeliveryException[];
+  adminResolution?: AdminResolution;
   address?: OrderAddressSnapshot;
   sellerPickup?: SellerPickupSnapshot;
   cityAdminDetails?: {
@@ -848,6 +893,9 @@ export interface CityAdminOrder {
   paymentStatus: 'pending_verification' | 'confirmed' | 'rejected' | 'refunded';
   fulfilmentMethod: 'delivery' | 'pickup';
   fulfilmentStatus: string;
+  deliveryStatus?: DeliveryStatus;
+  deliveryExceptions?: DeliveryException[];
+  adminResolution?: AdminResolution;
   address?: OrderAddressSnapshot;
   sellerPickup?: SellerPickupSnapshot;
   deliveryPartner?: {

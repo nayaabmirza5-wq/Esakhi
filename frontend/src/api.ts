@@ -1,5 +1,8 @@
 import type {
   Address,
+  AdminResolutionAction,
+  DeliveryExceptionReasonCode,
+  RiderRequestedAction,
   AddressSuggestion,
   AuditLogEntry,
   CityAdminDashboard,
@@ -249,6 +252,20 @@ export const api = {
   escalateCityAdminOrderRefund: (orderId: string, note?: string) =>
     request<Order>(`/api/v1/city-admin/orders/${encodeURIComponent(orderId)}/escalate-refund`, { method: 'POST', body: JSON.stringify(note ? { note } : {}) }),
   cityAdminOrders: (query: URLSearchParams = new URLSearchParams()) => request<PageResult<CityAdminOrder>>(`/api/v1/city-admin/orders${query.size ? `?${query}` : ''}`),
+  cityAdminEscalatedOrders: (query: URLSearchParams = new URLSearchParams()) =>
+    request<PageResult<CityAdminOrder>>(`/api/v1/city-admin/orders/escalations${query.size ? `?${query}` : ''}`),
+  resolveCityAdminDeliveryFailure: (
+    orderId: string,
+    payload: {
+      action: AdminResolutionAction;
+      newRiderId?: string;
+      partnerId?: string;
+      adminNotes?: string;
+    },
+  ) => request<Order>(`/api/v1/city-admin/orders/${encodeURIComponent(orderId)}/delivery-resolution`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
   submitSellerApplication: (payload: { shgName: string; representative: string; phone: string; city: string; address: string; categoryId: string; subcategoryId: string; productType: string; fssaiRegistrationNumber?: string }) => request<{ status: string; message: string }>('/api/v1/seller-applications', { method: 'POST', body: JSON.stringify(payload) }),
   cityAdminSellerApplications: (query: URLSearchParams = new URLSearchParams()) => request<PageResult<SellerApplication>>(`/api/v1/seller-applications${query.size ? `?${query}` : ''}`),
   reviewSellerApplication: (id: string, decision: 'approved' | 'rejected' | 'needs_info', note?: string, fssaiDecision?: 'verified' | 'needs_info') => request<{ applicationId: string; status: string; sellerId?: string }>(`/api/v1/seller-applications/${encodeURIComponent(id)}/review`, { method: 'PATCH', body: JSON.stringify({ decision, ...(note ? { note } : {}), ...(fssaiDecision ? { fssaiDecision } : {}) }) }),
@@ -304,6 +321,18 @@ export const api = {
   partnerOrders: () => request<Order[]>('/api/v1/delivery-partners/orders'),
   partnerOrderHistory: () => request<Order[]>('/api/v1/delivery-partners/orders/history'),
   partnerSettlements: () => request<PartnerSettlementsResponse>('/api/v1/delivery-partners/settlements'),
+  reportPartnerDeliveryFailure: (
+    id: string,
+    payload: {
+      reasonCode: DeliveryExceptionReasonCode;
+      reasonNotes?: string;
+      proofImageUrl?: string;
+      riderRequestedAction?: RiderRequestedAction;
+    },
+  ) => request<Order>(`/api/v1/delivery-partners/orders/${encodeURIComponent(id)}/delivery-failure`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
   updatePartnerOrderStatus: (
     id: string,
     status: 'out_for_pickup' | 'picked_up' | 'out_for_delivery' | 'delivered' | 'delivery_failed' | 'return_picked_up' | 'return_delivered_to_seller',

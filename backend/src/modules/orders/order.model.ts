@@ -41,6 +41,43 @@ export const RETURN_FAULT_ATTRIBUTIONS = [
 ] as const;
 export type ReturnFaultAttribution = (typeof RETURN_FAULT_ATTRIBUTIONS)[number];
 
+export const DELIVERY_STATUS_ENUM = [
+  'UNASSIGNED',
+  'ASSIGNED',
+  'OUT_FOR_DELIVERY',
+  'DELIVERY_FAILED',
+  'ESCALATED_TO_ADMIN',
+  'DELIVERED',
+  'RETURN_TO_ORIGIN',
+] as const;
+export type DeliveryStatus = (typeof DELIVERY_STATUS_ENUM)[number];
+
+export const DELIVERY_EXCEPTION_REASON_CODES = [
+  'CUSTOMER_UNAVAILABLE',
+  'INCORRECT_ADDRESS',
+  'CUSTOMER_REFUSED',
+  'RIDER_VEHICLE_ISSUE',
+  'WEATHER_OR_ROAD_BLOCK',
+  'RIDER_EMERGENCY',
+  'OTHER',
+] as const;
+export type DeliveryExceptionReasonCode = (typeof DELIVERY_EXCEPTION_REASON_CODES)[number];
+
+export const RIDER_REQUESTED_ACTIONS = [
+  'RETRY_LATER',
+  'UNASSIGN_ME',
+  'CANCEL_ORDER',
+] as const;
+export type RiderRequestedAction = (typeof RIDER_REQUESTED_ACTIONS)[number];
+
+export const ADMIN_RESOLUTION_ACTIONS = [
+  'REASSIGN_SAME_RIDER',
+  'REASSIGN_NEW_RIDER',
+  'RESCHEDULE_LATER',
+  'TRIGGER_RTO',
+] as const;
+export type AdminResolutionAction = (typeof ADMIN_RESOLUTION_ACTIONS)[number];
+
 const orderItemSchema = new Schema(
   {
     productId: { type: Schema.Types.ObjectId, required: true, ref: 'Product' },
@@ -217,6 +254,39 @@ const returnRequestSchema = new Schema(
   { _id: false },
 );
 
+const deliveryExceptionSchema = new Schema(
+  {
+    attemptedAt: { type: Date, default: Date.now },
+    riderId: { type: Schema.Types.ObjectId, ref: 'User' },
+    reasonCode: {
+      type: String,
+      enum: [...DELIVERY_EXCEPTION_REASON_CODES],
+      required: true,
+    },
+    reasonNotes: { type: String, default: '' },
+    proofImageUrl: { type: String, default: null },
+    riderRequestedAction: {
+      type: String,
+      enum: [...RIDER_REQUESTED_ACTIONS],
+      default: 'UNASSIGN_ME',
+    },
+  },
+  { _id: true },
+);
+
+const adminResolutionSchema = new Schema(
+  {
+    resolvedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    resolvedAt: { type: Date },
+    action: {
+      type: String,
+      enum: [...ADMIN_RESOLUTION_ACTIONS],
+    },
+    adminNotes: { type: String },
+  },
+  { _id: false },
+);
+
 const orderSchema = new Schema(
   {
     orderReference: { type: String, required: true, unique: true },
@@ -263,6 +333,14 @@ const orderSchema = new Schema(
     preDispatchInspection: { type: preDispatchInspectionSchema },
     returnRequest: { type: returnRequestSchema },
     internalNotes: { type: [String], default: [] },
+    deliveryStatus: {
+      type: String,
+      enum: [...DELIVERY_STATUS_ENUM],
+      default: 'UNASSIGNED',
+      index: true,
+    },
+    deliveryExceptions: { type: [deliveryExceptionSchema], default: [] },
+    adminResolution: { type: adminResolutionSchema },
   },
   { timestamps: true },
 );
@@ -271,6 +349,7 @@ orderSchema.index({ customerId: 1, createdAt: -1 });
 orderSchema.index({ idempotencyKey: 1, customerId: 1 }, { unique: true });
 orderSchema.index({ fulfilmentStatus: 1, paymentStatus: 1, createdAt: -1 });
 orderSchema.index({ 'deliveryPartner.userId': 1, createdAt: -1 });
+orderSchema.index({ deliveryStatus: 1, createdAt: -1 });
 
 export const Order = model('Order', orderSchema);
 export type OrderRecord = InferSchemaType<typeof orderSchema>;

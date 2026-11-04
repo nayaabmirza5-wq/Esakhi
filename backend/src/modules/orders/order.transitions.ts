@@ -49,7 +49,7 @@ export function canAssignDeliveryPartner(status: FulfilmentStatus, hasAssignment
 }
 
 export function statusAfterDeliveryPartnerAssignment(status: FulfilmentStatus): FulfilmentStatus {
-  return status === 'delivery_failed' ? 'preparing' : status;
+  return status === 'delivery_failed' ? 'delivery_partner_assigned' : status;
 }
 
 export function nextFulfilmentStatus(
@@ -104,8 +104,16 @@ export function canPartnerTransitionOrder(
       current === 'preparing'
     );
   }
-  if (target === 'delivered' || target === 'delivery_failed') {
+  if (target === 'delivered') {
     return current === 'out_for_delivery' || current === 'picked_up';
+  }
+  if (target === 'delivery_failed') {
+    return (
+      current === 'out_for_delivery' ||
+      current === 'picked_up' ||
+      current === 'out_for_pickup' ||
+      current === 'delivery_partner_assigned'
+    );
   }
   if (target === 'return_picked_up') {
     return current === 'return_partner_assigned' || current === 'return_accepted';

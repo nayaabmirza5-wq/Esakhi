@@ -8,6 +8,8 @@ import {
   assignCityAdminDeliveryPartner,
   assignCityAdminReverseDeliveryPartner,
   escalateCityAdminOrderRefund,
+  listCityAdminFailedDeliveries,
+  resolveCityAdminDeliveryFailure,
   getCityAdminOrder,
   trackCityAdminOrderPartner,
 } from './cityAdminOrder.controller.js';
@@ -31,4 +33,6 @@ cityAdminRoutes.put('/orders/:orderId/delivery-partner', assignCityAdminDelivery
 cityAdminRoutes.post('/orders/:orderId/return-arbitration', arbitrateCityAdminReturnDispute);
 cityAdminRoutes.put('/orders/:orderId/reverse-partner', assignCityAdminReverseDeliveryPartner);
 cityAdminRoutes.post('/orders/:orderId/escalate-refund', escalateCityAdminOrderRefund);
+cityAdminRoutes.get('/orders/escalations', listCityAdminFailedDeliveries);
+cityAdminRoutes.post('/orders/:orderId/delivery-resolution', resolveCityAdminDeliveryFailure);
 cityAdminRoutes.get('/orders', listCityAdminOrders);

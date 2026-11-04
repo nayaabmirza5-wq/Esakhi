@@ -1,8 +1,12 @@
 import { z } from 'zod';
 import {
+  ADMIN_RESOLUTION_ACTIONS,
+  DELIVERY_EXCEPTION_REASON_CODES,
+  DELIVERY_STATUS_ENUM,
   FULFILMENT_STATUS_ENUM,
   RETURN_FAULT_ATTRIBUTIONS,
   RETURN_REASON_CODES,
+  RIDER_REQUESTED_ACTIONS,
 } from './order.model.js';
 
 const addressSchema = z.object({
@@ -92,6 +96,28 @@ export const cityAdminReturnArbitrationSchema = z.object({
   penaltyAmountRupees: z.number().min(0).max(100000).optional(),
   reviewNote: z.string().trim().min(3).max(600),
 }).strict();
+export const reportDeliveryFailureSchema = z.object({
+  reasonCode: z.enum(DELIVERY_EXCEPTION_REASON_CODES),
+  reasonNotes: z.string().trim().max(1000).optional().default(''),
+  proofImageUrl: z.string().trim().nullish().transform((v) => v ?? null),
+  riderRequestedAction: z.enum(RIDER_REQUESTED_ACTIONS).optional().default('UNASSIGN_ME'),
+}).strict();
+
+export const cityAdminResolveDeliveryFailureSchema = z.object({
+  action: z.enum(ADMIN_RESOLUTION_ACTIONS),
+  newRiderId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
+  partnerId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
+  adminNotes: z.string().trim().max(1000).optional().default(''),
+}).strict().superRefine((data, ctx) => {
+  if (data.action === 'REASSIGN_NEW_RIDER' && !data.newRiderId && !data.partnerId) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['newRiderId'],
+      message: 'A new delivery partner is required when choosing REASSIGN_NEW_RIDER.',
+    });
+  }
+});
+
 export const reverseOrderPartnerStatusSchema = z.object({
   status: z.enum(['return_picked_up', 'return_delivered_to_seller']),
   note: z.string().trim().max(500).optional(),
@@ -157,6 +183,7 @@ export const orderListQuerySchema = orderPaginationQuerySchema.extend({
   q: z.string().trim().max(100).optional(),
   paymentStatus: z.enum(['pending_verification', 'confirmed', 'rejected', 'refunded']).optional(),
   fulfilmentStatus: z.enum([...FULFILMENT_STATUS_ENUM]).optional(),
+  deliveryStatus: z.enum([...DELIVERY_STATUS_ENUM]).optional(),
   cancellationRequest: z.enum(['pending', 'reviewed']).optional(),
   from: z.iso.datetime({ offset: true }).optional(),
   to: z.iso.datetime({ offset: true }).optional(),

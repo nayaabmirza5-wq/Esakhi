@@ -3,12 +3,12 @@ import mongoose from 'mongoose';
 import { z } from 'zod';
 import { AppError } from '../../utils/AppError.js';
 import { authenticatedUserId } from '../../utils/authenticatedUser.js';
-import { sendData } from '../../utils/apiResponse.js';
+import { sendData, sendPage } from '../../utils/apiResponse.js';
 import { AuditLog } from '../audit/auditLog.model.js';
 import { User } from '../auth/user.model.js';
 import { Order } from '../orders/order.model.js';
 import { PenaltyLedger } from '../orders/penaltyLedger.model.js';
-import { cityAdminReturnArbitrationSchema } from '../orders/order.schemas.js';
+import { cityAdminReturnArbitrationSchema, cityAdminResolveDeliveryFailureSchema, orderPaginationQuerySchema } from '../orders/order.schemas.js';
 import { resolveOrderSellerPickup } from '../orders/order.controller.js';
 import { enqueueOrderStatusNotification } from '../notifications/orderNotification.service.js';
 import { SellerApplication } from '../seller/sellerApplication.model.js';
@@ -307,8 +307,15 @@ export const assignCityAdminDeliveryPartner: RequestHandler = async (req, res) =
         assignedBy: new mongoose.Types.ObjectId(actorId),
       };
 
-      if (order.fulfilmentStatus === 'delivery_failed') {
+      order.deliveryStatus = 'ASSIGNED';
+      if (order.fulfilmentStatus === 'delivery_failed' || (order as any).deliveryStatus === 'ESCALATED_TO_ADMIN') {
         order.fulfilmentStatus = statusAfterDeliveryPartnerAssignment(order.fulfilmentStatus);
+        order.adminResolution = {
+          resolvedBy: new mongoose.Types.ObjectId(actorId),
+          resolvedAt: new Date(),
+          action: 'REASSIGN_NEW_RIDER',
+          adminNotes: reassignmentReason || 'Reassigned to new delivery partner by City Admin',
+        };
         order.statusHistory.push({
           status: order.fulfilmentStatus,
           changedAt: new Date(),
@@ -600,6 +607,231 @@ export const escalateCityAdminOrderRefund: RequestHandler = async (req, res) => 
   const resolvedPickup = await resolveOrderSellerPickup(order.toObject());
   sendData(res, {
     ...order.toObject(),
+    sellerPickup: resolvedPickup,
+  });
+};
+
+
+export const listCityAdminFailedDeliveries: RequestHandler = async (req, res) => {
+  const city = cityScope(req);
+  const query = orderPaginationQuerySchema.parse(req.query);
+  const filter: Record<string, any> = {
+    'address.city': cityFilter(city),
+    $or: [
+      { deliveryStatus: { $in: ['DELIVERY_FAILED', 'ESCALATED_TO_ADMIN'] } },
+      { fulfilmentStatus: 'delivery_failed' },
+    ],
+  };
+
+  const [orders, total] = await Promise.all([
+    Order.find(filter as any)
+      .sort({ updatedAt: -1 })
+      .skip((query.page - 1) * query.limit)
+      .limit(query.limit)
+      .lean(),
+    Order.countDocuments(filter as any),
+  ]);
+
+  const rawOrders = orders as any[];
+  const sellerIds = [...new Set(rawOrders.flatMap((o) => (o.items || []).map((i: any) => i.sellerId?.toString())).filter(Boolean))];
+  const [sellers, sellerApps] = await Promise.all([
+    sellerIds.length ? User.find({ _id: { $in: sellerIds }, role: 'seller' }).select('name phoneE164').lean() : [],
+    sellerIds.length ? SellerApplication.find({ sellerId: { $in: sellerIds }, status: 'approved' }).select('sellerId shgName representative').lean() : [],
+  ]);
+  const appNames = new Map(sellerApps.map((a: any) => [String(a.sellerId), a.shgName || a.representative]));
+  const sellerNames = new Map(sellers.map((s: any) => [String(s._id), s.name || appNames.get(String(s._id)) || s.phoneE164 || 'Seller']));
+
+  const enriched = await Promise.all(
+    rawOrders.map(async (order) => {
+      const sellerPickup = await resolveOrderSellerPickup(order);
+      return {
+        ...order,
+        sellerPickup,
+        items: (order.items || []).map((item: any) => ({
+          ...item,
+          sellerName: item.sellerId ? sellerNames.get(item.sellerId.toString()) || appNames.get(item.sellerId.toString()) || 'Seller' : 'Unassigned',
+        })),
+      };
+    }),
+  );
+
+  sendPage(res, enriched, query.page, query.limit, total);
+};
+
+export const resolveCityAdminDeliveryFailure: RequestHandler = async (req, res) => {
+  const city = cityScope(req);
+  const { orderId } = orderParamsSchema.parse(req.params);
+  const { action, newRiderId, partnerId, adminNotes } = cityAdminResolveDeliveryFailureSchema.parse(req.body);
+  const actorId = authenticatedUserId(req);
+  const session = await mongoose.startSession();
+  let updated;
+
+  try {
+    updated = await session.withTransaction(async () => {
+      const order = await Order.findOne({ _id: orderId, 'address.city': cityFilter(city) }).session(session);
+      if (!order) throw new AppError(404, 'NOT_FOUND', 'Order not found in your assigned city.');
+
+      const resolvedAt = new Date();
+      const resolution = {
+        resolvedBy: new mongoose.Types.ObjectId(actorId),
+        resolvedAt,
+        action,
+        adminNotes: adminNotes || '',
+      };
+
+      order.adminResolution = resolution;
+
+      if (action === 'REASSIGN_NEW_RIDER') {
+        const targetPartnerId = newRiderId || partnerId;
+        if (!targetPartnerId) throw new AppError(400, 'PARTNER_ID_REQUIRED', 'A new delivery partner is required.');
+
+        const partner = await User.findOne({
+          _id: targetPartnerId,
+          role: 'delivery_partner',
+          status: 'active',
+          $or: [{ assignedCity: cityFilter(city) }, { assignedCity: { $exists: false } }, { assignedCity: null }, { assignedCity: '' }],
+        }).session(session).lean();
+        if (!partner) throw new AppError(404, 'DELIVERY_PARTNER_NOT_FOUND', 'Delivery partner not found in this city.');
+        if (partner.isOnline === false || partner.availabilityStatus === 'offline') {
+          throw new AppError(409, 'PARTNER_OFFLINE', 'Selected delivery partner is currently offline.');
+        }
+
+        const resolvedPickup = await resolveOrderSellerPickup(order.toObject());
+        const partnerLat = partner.currentLocation?.latitude ?? 23.8415;
+        const partnerLng = partner.currentLocation?.longitude ?? 79.445;
+        const distanceKm = haversineDistanceKm(resolvedPickup.latitude, resolvedPickup.longitude, partnerLat, partnerLng);
+
+        if (order.deliveryPartner) {
+          order.deliveryPartnerHistory.push({
+            ...(order.deliveryPartner.userId ? { userId: order.deliveryPartner.userId } : {}),
+            name: order.deliveryPartner.name,
+            phoneE164: order.deliveryPartner.phoneE164,
+            assignedAt: order.deliveryPartner.assignedAt,
+            assignedBy: order.deliveryPartner.assignedBy,
+            unassignedAt: resolvedAt,
+            unassignedBy: new mongoose.Types.ObjectId(actorId),
+            changeReason: adminNotes || 'Reassigned after delivery failure by City Admin',
+          });
+        }
+
+        order.deliveryPartner = {
+          userId: partner._id,
+          name: partner.name || 'Delivery Partner',
+          phoneE164: partner.phoneE164,
+          distanceKm,
+          latitude: partnerLat,
+          longitude: partnerLng,
+          assignedAt: resolvedAt,
+          assignedBy: new mongoose.Types.ObjectId(actorId),
+        };
+
+        order.deliveryStatus = 'ASSIGNED';
+        order.fulfilmentStatus = 'delivery_partner_assigned';
+        order.statusHistory.push({
+          status: 'delivery_partner_assigned',
+          changedAt: resolvedAt,
+          actorType: 'user',
+          actorId: new mongoose.Types.ObjectId(actorId),
+          note: `Reassigned to new Delivery Partner (${partner.name || 'Partner'}) by City Admin: ${adminNotes || 'Failure escalation resolved'}`,
+        });
+
+        await User.updateOne(
+          { _id: partner._id },
+          { $set: { isOnline: true, availabilityStatus: 'busy' } },
+          { session },
+        );
+      } else if (action === 'REASSIGN_SAME_RIDER') {
+        let riderIdToKeep = order.deliveryPartner?.userId;
+        let riderNameToKeep = order.deliveryPartner?.name;
+        let riderPhoneToKeep = order.deliveryPartner?.phoneE164;
+
+        if (!riderIdToKeep && order.deliveryExceptions.length > 0) {
+          const lastException = order.deliveryExceptions[order.deliveryExceptions.length - 1];
+          if (lastException && lastException.riderId) {
+            const riderId = lastException.riderId;
+            riderIdToKeep = riderId;
+            const existingUser = await User.findById(riderId).session(session).lean();
+            if (existingUser) {
+              riderNameToKeep = existingUser.name || 'Delivery Partner';
+              riderPhoneToKeep = existingUser.phoneE164;
+            }
+          }
+        }
+
+        if (riderIdToKeep) {
+          order.deliveryPartner = {
+            userId: riderIdToKeep,
+            name: riderNameToKeep || 'Delivery Partner',
+            phoneE164: riderPhoneToKeep || '',
+            assignedAt: resolvedAt,
+            assignedBy: new mongoose.Types.ObjectId(actorId),
+          };
+          await User.updateOne(
+            { _id: riderIdToKeep },
+            { $set: { isOnline: true, availabilityStatus: 'busy' } },
+            { session },
+          );
+        }
+
+        order.deliveryStatus = 'ASSIGNED';
+        order.fulfilmentStatus = 'out_for_delivery';
+        order.statusHistory.push({
+          status: 'out_for_delivery',
+          changedAt: resolvedAt,
+          actorType: 'user',
+          actorId: new mongoose.Types.ObjectId(actorId),
+          note: `City Admin instructed same partner to retry delivery: ${adminNotes || 'Retry delivery attempt'}`,
+        });
+      } else if (action === 'RESCHEDULE_LATER') {
+        order.deliveryStatus = 'ASSIGNED';
+        order.fulfilmentStatus = 'ready_for_pickup';
+        order.statusHistory.push({
+          status: 'ready_for_pickup',
+          changedAt: resolvedAt,
+          actorType: 'user',
+          actorId: new mongoose.Types.ObjectId(actorId),
+          note: `Delivery rescheduled for later by City Admin: ${adminNotes || 'Awaiting reschedule window'}`,
+        });
+      } else if (action === 'TRIGGER_RTO') {
+        order.deliveryStatus = 'RETURN_TO_ORIGIN';
+        order.fulfilmentStatus = 'return_requested';
+        order.returnRequest = {
+          status: 'requested',
+          reasonCode: 'other',
+          reasonText: adminNotes || 'Delivery failed: Return To Origin (RTO) triggered by City Admin.',
+          boxConditionImages: [],
+          productFaultImages: [],
+          requestedBy: new mongoose.Types.ObjectId(actorId),
+          requestedAt: resolvedAt,
+        };
+        order.statusHistory.push({
+          status: 'return_requested',
+          changedAt: resolvedAt,
+          actorType: 'user',
+          actorId: new mongoose.Types.ObjectId(actorId),
+          note: `Return-To-Origin (RTO) initiated by City Admin: ${adminNotes || 'Customer unreachable / refused delivery'}`,
+        });
+      }
+
+      await order.save({ session });
+      await AuditLog.create([{
+        actorId,
+        action: 'order.delivery_escalation_resolved',
+        resourceType: 'order',
+        resourceId: String(order._id),
+        metadata: { action, adminNotes },
+      }], { session });
+
+      await enqueueOrderStatusNotification(order, order.fulfilmentStatus, session);
+      return order;
+    });
+  } finally {
+    await session.endSession();
+  }
+
+  const resolvedPickup = await resolveOrderSellerPickup(updated.toObject());
+  sendData(res, {
+    ...updated.toObject(),
     sellerPickup: resolvedPickup,
   });
 };

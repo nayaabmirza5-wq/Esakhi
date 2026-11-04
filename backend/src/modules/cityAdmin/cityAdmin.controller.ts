@@ -5,7 +5,7 @@ import { AppError } from '../../utils/AppError.js';
 import { authenticatedUserId } from '../../utils/authenticatedUser.js';
 import { sendData, sendPage } from '../../utils/apiResponse.js';
 import { AuditLog } from '../audit/auditLog.model.js';
-import { FULFILMENT_STATUS_ENUM, Order } from '../orders/order.model.js';
+import { DELIVERY_STATUS_ENUM, FULFILMENT_STATUS_ENUM, Order } from '../orders/order.model.js';
 import { resolveOrderSellerPickup } from '../orders/order.controller.js';
 import { Settings } from '../settings/settings.model.js';
 import { SellerApplication } from '../seller/sellerApplication.model.js';
@@ -20,6 +20,7 @@ const orderQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   q: z.string().trim().max(100).optional(),
   fulfilmentStatus: z.enum([...FULFILMENT_STATUS_ENUM]).optional(),
+  deliveryStatus: z.enum([...DELIVERY_STATUS_ENUM]).optional(),
   paymentStatus: z.enum(['pending_verification', 'confirmed', 'rejected', 'refunded']).optional(),
   unassignedOnly: z.enum(['true', 'false']).optional(),
   sellerId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
@@ -544,6 +545,7 @@ export const listCityAdminOrders: RequestHandler = async (req, res) => {
   const filter: Record<string, unknown> = {
     'address.city': cityFilter(city),
     ...(query.fulfilmentStatus ? { fulfilmentStatus: query.fulfilmentStatus } : {}),
+    ...(query.deliveryStatus ? { deliveryStatus: query.deliveryStatus } : {}),
     ...(query.paymentStatus ? { paymentStatus: query.paymentStatus } : {}),
     ...(query.sellerId ? { 'items.sellerId': new mongoose.Types.ObjectId(query.sellerId) } : {}),
     ...(query.deliveryPartnerId ? { 'deliveryPartner.userId': new mongoose.Types.ObjectId(query.deliveryPartnerId) } : {}),
@@ -571,7 +573,7 @@ export const listCityAdminOrders: RequestHandler = async (req, res) => {
       .sort({ createdAt: -1 })
       .skip((query.page - 1) * query.limit)
       .limit(query.limit)
-      .select('orderReference customerName customerPhoneE164 items.productId items.sellerId items.productName items.quantity subtotalPaise deliveryFeePaise totalPaise paymentMethod paymentStatus fulfilmentMethod fulfilmentStatus deliveryPartner.userId deliveryPartner.name deliveryPartner.phoneE164 deliveryPartner.distanceKm deliveryPartner.assignedAt address sellerPickup preDispatchInspection returnRequest statusHistory createdAt')
+      .select('orderReference customerName customerPhoneE164 items.productId items.sellerId items.productName items.quantity subtotalPaise deliveryFeePaise totalPaise paymentMethod paymentStatus fulfilmentMethod fulfilmentStatus deliveryPartner.userId deliveryPartner.name deliveryPartner.phoneE164 deliveryPartner.distanceKm deliveryPartner.assignedAt address sellerPickup preDispatchInspection returnRequest statusHistory deliveryStatus deliveryExceptions adminResolution createdAt')
       .lean(),
     Order.countDocuments(filter),
     findCitySellers(city),
