@@ -1,8 +1,16 @@
-import { getApp, getApps, initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, RecaptchaVerifier, signInWithPhoneNumber, type ConfirmationResult } from 'firebase/auth';
 
+const VALID_API_KEY = 'AIzaSyA5wXayHYIW9SO0bFhekLVWo6E18Hz88nY';
+const rawApiKey = import.meta.env.VITE_FIREBASE_API_KEY;
+
+// Sanitize if empty or if set to the typo variant (lowercase x, double-zero 00, lowercase f)
+const apiKey = (!rawApiKey || rawApiKey === 'AIzaSyA5wxayHYIW9S00bfhekLVWo6E18Hz88nY')
+  ? VALID_API_KEY
+  : rawApiKey;
+
 export const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyA5wXayHYIW9SO0bFhekLVWo6E18Hz88nY',
+  apiKey,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'shg-marketplace.firebaseapp.com',
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'shg-marketplace',
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'shg-marketplace.firebasestorage.app',
@@ -11,7 +19,8 @@ export const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || '',
 };
 
-export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export { RecaptchaVerifier, signInWithPhoneNumber };
 export type { ConfirmationResult };
+export default app;
