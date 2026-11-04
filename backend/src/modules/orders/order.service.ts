@@ -5,6 +5,7 @@ import { AuditLog } from '../audit/auditLog.model.js';
 import { InventoryAdjustment } from '../inventory/inventoryAdjustment.model.js';
 import { Product } from '../catalog/product.model.js';
 import { Settings } from '../settings/settings.model.js';
+import { SellerApplication } from '../seller/sellerApplication.model.js';
 import { Order, type OrderRecord } from './order.model.js';
 import { User } from '../auth/user.model.js';
 import type { z } from 'zod';
@@ -27,6 +28,12 @@ async function reserveItem(
     _id: item.productId,
     isActive: true,
     isArchived: false,
+    approvalStatus: 'approved',
+    classificationStatus: 'classified',
+    $or: [
+      { isFoodProduct: false },
+      { isFoodProduct: true, foodComplianceStatus: 'verified' },
+    ],
   }).session(session);
   if (!product) throw new AppError(409, 'PRODUCT_UNAVAILABLE', 'A selected product is no longer available.');
   if (!product.sellerId) {
@@ -38,7 +45,7 @@ async function reserveItem(
     const variant = product.variants.id(item.variantId);
     if (!variant) throw new AppError(409, 'VARIANT_UNAVAILABLE', 'A selected product option is no longer available.');
     const update = await Product.updateOne(
-      { _id: product._id, isActive: true, isArchived: false, variants: { $elemMatch: { _id: item.variantId, stock: { $gte: item.quantity } } } },
+      { _id: product._id, isActive: true, isArchived: false, approvalStatus: 'approved', classificationStatus: 'classified', variants: { $elemMatch: { _id: item.variantId, stock: { $gte: item.quantity } } } },
       { $inc: { 'variants.$.stock': -item.quantity } },
       { session },
     );
@@ -55,7 +62,7 @@ async function reserveItem(
 
   if (item.variantId) throw new AppError(400, 'VARIANT_INVALID', 'This product does not have selectable options.');
   const update = await Product.updateOne(
-    { _id: product._id, isActive: true, isArchived: false, stock: { $gte: item.quantity } },
+    { _id: product._id, isActive: true, isArchived: false, approvalStatus: 'approved', classificationStatus: 'classified', stock: { $gte: item.quantity } },
     { $inc: { stock: -item.quantity } },
     { session },
   );
@@ -123,7 +130,8 @@ export async function createOrder(actorId: string, input: Checkout): Promise<{ o
         unitPricePaise: number;
         quantity: number;
         lineTotalPaise: number;
-      }> = [];      let subtotalPaise = 0;
+      }> = [];
+      let subtotalPaise = 0;
       for (const item of input.items) {
         const reserved = await reserveItem(item, actorId, session);
         const lineTotalPaise = reserved.unitPricePaise * item.quantity;
@@ -143,6 +151,45 @@ export async function createOrder(actorId: string, input: Checkout): Promise<{ o
         throw new AppError(400, 'INVALID_TOTAL', 'The order total exceeds the supported amount.');
       }
 
+      const primarySellerId = itemSnapshots.find((item) => item.sellerId)?.sellerId;
+      let sellerPickup:
+        | {
+            sellerId: mongoose.Types.ObjectId;
+            sellerName: string;
+            phoneE164?: string;
+            address: string;
+            city: string;
+            latitude: number;
+            longitude: number;
+          }
+        | undefined;
+      if (primarySellerId) {
+        const [sellerUser, sellerApp] = await Promise.all([
+          User.findById(primarySellerId).select('name phoneE164 assignedCity currentLocation').session(session).lean(),
+          SellerApplication.findOne({
+            $or: [
+              { sellerId: primarySellerId, status: 'approved' },
+            ],
+          }).sort({ reviewedAt: -1, createdAt: -1 }).session(session).lean(),
+        ]);
+        const fallbackApp = !sellerApp && sellerUser?.phoneE164
+          ? await SellerApplication.findOne({ phoneE164: sellerUser.phoneE164, status: 'approved' })
+            .sort({ reviewedAt: -1, createdAt: -1 })
+            .session(session)
+            .lean()
+          : sellerApp;
+        const resolvedPhone = fallbackApp?.phoneE164 || sellerUser?.phoneE164;
+        sellerPickup = {
+          sellerId: new mongoose.Types.ObjectId(primarySellerId),
+          sellerName: fallbackApp?.shgName || sellerUser?.name || fallbackApp?.representative || 'SHG Seller',
+          ...(resolvedPhone ? { phoneE164: resolvedPhone } : {}),
+          address: fallbackApp?.registeredAddress || `${settings.city} SHG Workshop, ${settings.city}, ${settings.state}`,
+          city: fallbackApp?.city || sellerUser?.assignedCity || settings.city,
+          latitude: fallbackApp?.latitude ?? sellerUser?.currentLocation?.latitude ?? 23.8388,
+          longitude: fallbackApp?.longitude ?? sellerUser?.currentLocation?.longitude ?? 79.4422,
+        };
+      }
+
       const [order] = await Order.create([{
         orderReference: orderReference(),
         idempotencyKey: input.idempotencyKey,
@@ -150,11 +197,12 @@ export async function createOrder(actorId: string, input: Checkout): Promise<{ o
         customerName: input.customerName,
         customerPhoneE164: input.customerPhone,
         ...(input.deliveryInstructions ? { deliveryInstructions: input.deliveryInstructions } : {}),
+        ...(sellerPickup ? { sellerPickup } : {}),
         ...(input.fulfilmentMethod === 'delivery' && input.address ? {
           address: {
             name: input.address.name,
             phoneE164: input.address.phone,
-            addressLine1: input.address.addressLine1,
+            addressLine1: input.address.addressLine1 || [input.address.houseNumber, input.address.street, input.address.area].filter(Boolean).join(', '),
             ...(input.address.addressLine2 ? { addressLine2: input.address.addressLine2 } : {}),
             locality: settings.serviceableLocalities.find((candidate) =>
               candidate.name.toLocaleLowerCase() === input.address?.locality.toLocaleLowerCase() &&
@@ -162,6 +210,34 @@ export async function createOrder(actorId: string, input: Checkout): Promise<{ o
             city: settings.city,
             state: settings.state,
             postalCode: input.address.postalCode,
+            ...(input.address.houseNumber ? { houseNumber: input.address.houseNumber } : {}),
+            ...(input.address.street ? { street: input.address.street } : {}),
+            ...(input.address.area ? { area: input.address.area } : {}),
+            ...(input.address.landmark ? { landmark: input.address.landmark } : {}),
+            ...(input.address.villageOrCity ? { villageOrCity: input.address.villageOrCity } : {}),
+            ...(input.address.district ? { district: input.address.district } : {}),
+            ...(input.address.latitude !== undefined && input.address.longitude !== undefined
+              ? { latitude: input.address.latitude, longitude: input.address.longitude }
+              : {}),
+            ...(input.address.locationAccuracyMeters !== undefined
+              ? { locationAccuracyMeters: input.address.locationAccuracyMeters }
+              : {}),
+            ...(input.address.deliveryInstructions ? { deliveryInstructions: input.address.deliveryInstructions } : {}),
+            formattedAddress: [
+              input.address.houseNumber,
+              input.address.street,
+              input.address.area,
+              input.address.landmark ? `Near ${input.address.landmark}` : undefined,
+              input.address.villageOrCity,
+              input.address.district,
+              input.address.city && input.address.city.toLocaleLowerCase() !== settings.city.toLocaleLowerCase()
+                ? input.address.city
+                : undefined,
+              input.address.state && input.address.state.toLocaleLowerCase() !== settings.state.toLocaleLowerCase()
+                ? input.address.state
+                : settings.state,
+              input.address.postalCode,
+            ].filter(Boolean).join(', '),
           },
         } : {}),
         fulfilmentMethod: input.fulfilmentMethod,
@@ -180,6 +256,7 @@ export async function createOrder(actorId: string, input: Checkout): Promise<{ o
           changedAt: new Date(),
           actorType: 'user',
           actorId,
+          note: 'Order Confirmed — sent to Seller dashboard for preparation.',
         }],
         paymentEvents: [{ status: 'pending_verification', actorId, note: 'Order placed' }],
       }], { session });

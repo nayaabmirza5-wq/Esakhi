@@ -1,9 +1,20 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ChangeEvent, FormEvent, ReactNode } from 'react';
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ApiError, api, refreshSession, resolveProductImageUrl, setAccessToken } from './api';
-import type { Address, AuditLogEntry, CityAdminOrder, Order, Product, SellerOrder, Settings, SuperAdminCity, SuperAdminCitySummary, SuperAdminOrder, User } from './types';
-import { disableOrderPushNotifications, enableOrderPushNotifications, pushNotificationsConfigured } from './pushNotifications';
+import { ApiError, api, onSessionRefresh, refreshSession, resolveProductImageUrl, setAccessToken } from './api';
+import type { AuditLogEntry, CityAdminDeliveryPartner, CityAdminOrder, CityAdminProduct, Order, Product, ProductCategory, SellerDashboard, SellerInventoryAdjustment, SellerOrder, Settings, SuperAdminOrder, User } from './types';
+import { autoRegisterPushNotifications, disableOrderPushNotifications, enableOrderPushNotifications, pushNotificationsConfigured } from './pushNotifications';
+import type { ForegroundPushMessage } from './pushNotifications';
+import { AddressBook } from './AddressBook';
+import { CityAdminLiveFleetOverview, CityAdminLiveTracker } from './CityAdminLiveTracker';
+import { SellerOrderCard, SellerOrderSkeleton } from './SellerOrderCard';
+import {
+  CustomerReturnAndCancelPanel,
+  CityAdminDisputeArbitrationPanel,
+  SellerSettlementsLedgerPanel,
+  DeliveryPartnerPaySlipPanel,
+  SuperAdminRefundsAndSettlementsView,
+} from './ReturnDisputeSystem';
 
 type AuthContextValue = {
   user: User | null;
@@ -85,6 +96,15 @@ function getId(item: { _id?: string; id?: string }): string {
   return item._id ?? item.id ?? '';
 }
 
+function workspacePathForRole(role: User['role']): string {
+  if (role === 'super_admin') return '/super-admin';
+  if (role === 'city_admin') return '/city-admin';
+  if (role === 'admin' || role === 'staff') return '/admin';
+  if (role === 'delivery_partner') return '/delivery-partner';
+  if (role === 'seller') return '/seller';
+  return '/account';
+}
+
 const EMPTY_DEPENDENCIES: unknown[] = [];
 
 function useLoad<T>(load: () => Promise<T>, dependencies: unknown[] = EMPTY_DEPENDENCIES): {
@@ -117,7 +137,7 @@ function useLoad<T>(load: () => Promise<T>, dependencies: unknown[] = EMPTY_DEPE
 function useRefreshOnFocus(reload: (showLoading?: boolean) => Promise<void>): void {
   useEffect(() => {
     const refresh = () => { void reload(false); };
-    const timer = window.setInterval(refresh, 30_000);
+    const timer = window.setInterval(refresh, 5_000);
     window.addEventListener('focus', refresh);
     return () => {
       window.clearInterval(timer);
@@ -143,11 +163,17 @@ function App(): ReactNode {
   const reloadUser = useCallback(async () => {
     const me = await api.me();
     setUser(me);
+    if (me?.id) {
+      try { localStorage.setItem('esakhi.session.userId', me.id); } catch { /* ignore */ }
+    }
   }, []);
 
   const setSession = useCallback((nextUser: User, token: string) => {
     setAccessToken(token);
     setUser(nextUser);
+    if (nextUser?.id) {
+      try { localStorage.setItem('esakhi.session.userId', nextUser.id); } catch { /* ignore */ }
+    }
   }, []);
 
   const signOut = useCallback(async () => {
@@ -156,6 +182,7 @@ function App(): ReactNode {
     } finally {
       setAccessToken(null);
       setUser(null);
+      try { localStorage.removeItem('esakhi.session.userId'); } catch { /* ignore */ }
     }
   }, []);
 
@@ -226,23 +253,66 @@ function App(): ReactNode {
   useEffect(() => {
     let active = true;
 
-    void (async () => {
+    const syncCurrentSession = async () => {
       if (await refreshSession()) {
         try {
           const me = await api.me();
-          if (active) setUser(me);
+          if (active) {
+            setUser(me);
+            if (me?.id) {
+              try { localStorage.setItem('esakhi.session.userId', me.id); } catch { /* ignore */ }
+            }
+          }
         } catch {
           setAccessToken(null);
+          if (active) setUser(null);
         }
+      } else if (active) {
+        setUser(null);
       }
-
       if (active) setReady(true);
-    })();
+    };
+
+    void syncCurrentSession();
+
+    const unsubscribeRefresh = onSessionRefresh((refreshed) => {
+      if (!active) return;
+      if (!refreshed) {
+        setUser(null);
+        return;
+      }
+      void api.me().then((me) => {
+        if (active) setUser(me);
+      }).catch(() => {
+        if (active) setUser(null);
+      });
+    });
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === 'esakhi.session.userId') {
+        void syncCurrentSession();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
 
     return () => {
       active = false;
+      unsubscribeRefresh();
+      window.removeEventListener('storage', handleStorage);
     };
   }, []);
+
+  const [pushToast, setPushToast] = useState<ForegroundPushMessage | null>(null);
+  const signedInUserId = user?.id;
+  useEffect(() => {
+    if (!signedInUserId) return;
+    void autoRegisterPushNotifications(api.registerPushToken, setPushToast);
+  }, [signedInUserId]);
+  useEffect(() => {
+    if (!pushToast) return;
+    const timer = window.setTimeout(() => setPushToast(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [pushToast]);
 
   const authValue = useMemo(
     () => ({ user, ready, setSession, signOut, reloadUser }),
@@ -261,6 +331,12 @@ function App(): ReactNode {
     <AuthContext.Provider value={authValue}>
       <CartContext.Provider value={cartValue}>
         <div className="app-shell">
+          {pushToast && (
+            <div role="status" aria-live="polite" onClick={() => setPushToast(null)} style={{ position: 'fixed', top: '1rem', right: '1rem', zIndex: 10000, maxWidth: '340px', padding: '0.85rem 1rem', borderRadius: '12px', background: '#0f172a', color: '#fff', boxShadow: '0 8px 24px rgba(0,0,0,0.25)', cursor: 'pointer' }}>
+              <strong style={{ display: 'block' }}>{pushToast.title}</strong>
+              <span style={{ fontSize: '0.88rem' }}>{pushToast.body}</span>
+            </div>
+          )}
           {!location.pathname.startsWith('/super-admin') && !location.pathname.startsWith('/city-admin') && !isDeliveryPortal && !isSellerPortal && <Header theme={theme} setTheme={setTheme} />}
           <main id="main-content">
             <Routes>
@@ -278,8 +354,11 @@ function App(): ReactNode {
               <Route path="/account/profile" element={<AccountProfilePage />} />
               <Route path="/orders" element={<OrdersPage />} />
               <Route path="/orders/:id" element={<CustomerOrderPage />} />
+              <Route path="/delivery-partner/apply" element={<DeliveryPartnerApplicationPage />} />
               <Route path="/delivery-partner" element={<DeliveryPartnerGate><DeliveryPartnerPage /></DeliveryPartnerGate>} />
               <Route path="/seller" element={<SellerGate><SellerPortalPage /></SellerGate>} />
+              <Route path="/seller/apply" element={<SellerRegistrationPage />} />
+              <Route path="/seller/products/new" element={<SellerGate><SellerPortalPage initialView="new_product" /></SellerGate>} />
               <Route path="/super-admin" element={<SuperAdminGate><SuperAdminOverviewPage /></SuperAdminGate>} />
               <Route path="/super-admin/cities" element={<SuperAdminGate><SuperAdminCitiesPage /></SuperAdminGate>} />
               <Route path="/super-admin/cities/:city" element={<SuperAdminGate><SuperAdminCityDetailPage /></SuperAdminGate>} />
@@ -306,7 +385,12 @@ function App(): ReactNode {
               <Route path="/super-admin/roles" element={<SuperAdminGate><SuperAdminRolesPage /></SuperAdminGate>} />
               <Route path="/super-admin/security" element={<SuperAdminGate><SuperAdminSecurityPage /></SuperAdminGate>} />
               <Route path="/city-admin" element={<CityAdminGate><CityAdminDashboardPage /></CityAdminGate>} />
+              <Route path="/city-admin/service-zones" element={<CityAdminGate><CityAdminServiceZonesPage /></CityAdminGate>} />
+              <Route path="/city-admin/sellers" element={<CityAdminGate><CityAdminSellerApplicationsPage /></CityAdminGate>} />
+              <Route path="/city-admin/products" element={<CityAdminGate><CityAdminProductReviewPage /></CityAdminGate>} />
               <Route path="/city-admin/orders" element={<CityAdminGate><CityAdminOrdersPage /></CityAdminGate>} />
+              <Route path="/city-admin/orders/:id" element={<CityAdminGate><CityAdminOrderDetailPage /></CityAdminGate>} />
+              <Route path="/city-admin/delivery-partners" element={<CityAdminGate><CityAdminDeliveryPartnersPage /></CityAdminGate>} />
               <Route path="/admin" element={<AdminGate><AdminDashboardPage /></AdminGate>} />
               <Route path="/admin/products" element={<AdminGate><AdminProductsPage /></AdminGate>} />
               <Route path="/admin/inventory" element={<AdminGate adminOnly><AdminInventoryPage /></AdminGate>} />
@@ -338,12 +422,13 @@ function Header({ theme, setTheme }: { theme: string; setTheme: (value: string) 
     <header className="site-header">
       <div className="header-inner">
         <Link to="/" className="brand" aria-label="eSakhi home">
-          <img src="/images/esakhi-emblem.png" alt="eSakhi — Handmade by women, made for you" />
+          <img src="/images/maitri-sisterhood-logo.png" alt="eSakhi — Handmade by women, made for you" />
         </Link>
         <nav className="main-nav" aria-label="Main navigation">
           <NavLink to="/shop">Shop</NavLink>
           <NavLink to="/our-story">Our story</NavLink>
-          {user && <NavLink to="/orders">My orders</NavLink>}
+          {user && user.role !== 'seller' && <NavLink to="/orders">My orders</NavLink>}
+          {user?.role === 'seller' && <NavLink to="/seller">Seller dashboard</NavLink>}
           {user?.role === 'city_admin' && <NavLink to="/city-admin">City Admin</NavLink>}
           {user && (user.role === 'admin' || user.role === 'staff') && <NavLink to="/admin">Workspace</NavLink>}
           {user?.role === 'super_admin' && <NavLink to="/super-admin">Super Admin</NavLink>}
@@ -374,7 +459,7 @@ function Footer(): ReactNode {
   return (
     <footer className="site-footer">
       <div className="footer-main">
-        <Link to="/" className="footer-brand"><img src="/images/esakhi-emblem.png" alt="" /><span>Handmade with love.<br />Empowered by you.</span></Link>
+        <Link to="/" className="footer-brand"><img src="/images/maitri-sisterhood-logo.png" alt="" /><span>Handmade with love.<br />Empowered by you.</span></Link>
         <div><strong>Explore</strong><Link to="/shop">Shop handmade</Link><Link to="/our-story">Our story</Link><Link to="/service-area">Service area</Link><Link to="/help">Help & policies</Link><Link to="/cart">Your bag</Link></div>
         <div><strong>Your account</strong><Link to="/account">Profile</Link><Link to="/orders">Order history</Link><Link to="/sign-in">Sign in</Link></div>
       </div>
@@ -403,25 +488,34 @@ function ProductCard({ product }: { product: Product }): ReactNode {
   const { add } = useCart();
   const navigate = useNavigate();
   const image = product.imageUrls?.[0] ? resolveProductImageUrl(product.imageUrls[0]) : undefined;
+  const stock = product.variants?.length
+    ? product.variants.reduce((total, variant) => total + variant.stock, 0)
+    : product.stock;
+  const available = stock > 0;
   return (
     <article className="product-card">
       <Link to={`/products/${encodeURIComponent(product.slug)}`} className="product-image">
-        {image ? <img src={image} alt={product.name} loading="lazy" /> : <div className="image-placeholder" aria-label="No product image available"><img src="/images/esakhi-emblem.png" alt="" /></div>}
-        {(product.stock ?? 0) <= 0 && <span className="image-badge">Unavailable</span>}
+        {image ? <img src={image} alt={product.name} loading="lazy" /> : <div className="image-placeholder" aria-label="No product image available"><img src="/images/maitri-sisterhood-logo.png" alt="" /></div>}
+        {!available && <span className="image-badge">Out of stock</span>}
       </Link>
       <div className="product-card-body">
-        <div className="product-category">{product.category}</div>
+        <div className="product-category">{product.categoryName} · {product.subcategoryName}</div>
         <Link to={`/products/${encodeURIComponent(product.slug)}`} className="product-name">{product.name}</Link>
-        <div className="product-card-bottom"><strong>{formatMoney(product.pricePaise)}</strong><button className="add-button" disabled={!product.stock} onClick={() => { add(product); navigate('/cart'); }} aria-label={`Add ${product.name} to bag`}>Add +</button></div>
+        <p className="product-seller">{product.sellerName || 'Seller details unavailable'}</p>
+        <div className="product-availability"><span className={available ? 'stock-indicator' : 'stock-indicator unavailable'}>{available ? 'In stock' : 'Out of stock'}</span></div>
+        <div className="product-card-bottom"><strong>{formatMoney(product.pricePaise)}</strong><button className="add-button" disabled={!available} onClick={() => {
+          if (product.variants.length) navigate(`/products/${encodeURIComponent(product.slug)}`);
+          else { add(product); navigate('/cart'); }
+        }} aria-label={product.variants.length ? `Choose options for ${product.name}` : `Add ${product.name} to bag`}>{product.variants.length ? 'View options' : 'Add +'}</button></div>
       </div>
     </article>
   );
 }
 
-function ProductGrid({ products, loading, error, reload }: { products: Product[]; loading: boolean; error: string; reload?: () => void }): ReactNode {
+function ProductGrid({ products, loading, error, reload, emptyTitle = 'No pieces to show just yet' }: { products: Product[]; loading: boolean; error: string; reload?: () => void; emptyTitle?: string }): ReactNode {
   if (loading) return <Loading label="Finding pieces made with care…" />;
   if (error) return <div className="section-state"><Notice tone="error">{error}</Notice>{reload && <button className="button button-outline" onClick={() => void reload()}>Try again</button>}</div>;
-  if (!products.length) return <EmptyState title="No pieces to show just yet">Please check back soon as the catalogue is updated.</EmptyState>;
+  if (!products.length) return <EmptyState title={emptyTitle}>Please check back soon as the catalogue is updated.</EmptyState>;
   return <div className="product-grid">{products.map((product) => <ProductCard key={getId(product) || product.slug} product={product} />)}</div>;
 }
 
@@ -463,7 +557,7 @@ function HeroCarousel({ products }: { products: Product[] }): ReactNode {
       >
         {image
           ? <img src={resolveProductImageUrl(image)} alt={activeProduct.name} />
-          : <img src="/images/esakhi-emblem.png" alt="eSakhi emblem representing women creating together" />}
+          : <img src="/images/maitri-sisterhood-logo.png" alt="eSakhi emblem representing women creating together" />}
       </Link>
       {products.length > 1 && (
         <div className="hero-carousel-controls" aria-label="Featured product slides">
@@ -482,12 +576,12 @@ function HeroCarousel({ products }: { products: Product[] }): ReactNode {
           <button className="hero-carousel-arrow" onClick={() => showProduct(activeIndex + 1)} aria-label="Next product">›</button>
         </div>
       )}
-      <div className="hero-stamp"><img src="/images/esakhi-emblem.png" alt="" /><span>Made<br />together</span></div>
+      <div className="hero-stamp"><img src="/images/maitri-sisterhood-logo.png" alt="" /><span>Made<br />together</span></div>
       <div className="hero-note">
         <span className="note-flower" aria-hidden="true">✿</span>
         <span>
           {activeProduct
-            ? <><span className="hero-product-category">Customer favourite · {activeProduct.category}</span><strong>{activeProduct.name}</strong><span>{formatMoney(activeProduct.pricePaise)}</span></>
+            ? <><span className="hero-product-category">Customer favourite · {activeProduct.categoryName}</span><strong>{activeProduct.name}</strong><span>{formatMoney(activeProduct.pricePaise)}</span></>
             : <>Thoughtful craft.<br />A community of makers.</>}
         </span>
       </div>
@@ -508,6 +602,7 @@ function HomePage(): ReactNode {
           <p>Every handmade piece carries a story of courage, creativity, and women building a brighter future together.</p>
           <div className="hero-actions"><Link to="/shop" className="button">Discover handmade <span aria-hidden="true">↗</span></Link><Link to="/our-story" className="quiet-link">Meet the makers <span aria-hidden="true">→</span></Link></div>
           <div className="hero-caption"><span className="caption-rule" /> Handmade by women, made for you</div>
+          <div className="hero-join-links"><span>Be part of eSakhi</span><Link to="/seller/apply">Become a seller</Link><Link to="/delivery-partner/apply">Join as a delivery partner</Link></div>
         </div>
         <div className="hero-art">
           <div className="hero-orbit orbit-one" /><div className="hero-orbit orbit-two" />
@@ -516,10 +611,10 @@ function HomePage(): ReactNode {
       </section>
       <section className="section section-categories">
         <div className="section-heading"><div><span className="eyebrow">Find your favorite</span><h2>Made to be <em>treasured.</em></h2></div><Link to="/shop" className="quiet-link">Explore everything →</Link></div>
-        {categories.error && <Notice tone="error">{categories.error}</Notice>}
+        {categories.error && <div className="section-state"><Notice tone="error">{categories.error}</Notice><button className="button button-outline" onClick={() => void categories.reload()}>Retry categories</button></div>}
         <div className="category-grid">
-          {(categories.data ?? []).map((category, index) => <Link key={category} className={`category-tile category-${index % 4}`} to={`/shop?category=${encodeURIComponent(category)}`}><span className="category-number">0{index + 1}</span><span>{category}</span><b aria-hidden="true">↗</b></Link>)}
-          {!categories.loading && categories.data?.length === 0 && <EmptyState title="Categories are not available right now" />}
+          {(categories.data ?? []).map((category, index) => <CategoryCard key={category.categoryId} category={category} index={index} />)}
+          {!categories.loading && !categories.error && categories.data?.length === 0 && <EmptyState title="Categories are not available right now" />}
           {categories.loading && <Loading label="Loading categories…" />}
         </div>
       </section>
@@ -528,7 +623,7 @@ function HomePage(): ReactNode {
         <ProductGrid products={(products.data ?? []).slice(0, 4)} loading={products.loading} error={products.error} reload={products.reload} />
       </section>
       <section className="story-band">
-        <div className="story-band-mark"><img src="/images/esakhi-emblem.png" alt="" /></div>
+        <div className="story-band-mark"><img src="/images/maitri-sisterhood-logo.png" alt="" /></div>
         <div><span className="eyebrow">More than a purchase</span><h2>Every order helps<br />a story <em>continue.</em></h2><p>When you choose eSakhi, you celebrate skill, support a community, and help handmade traditions find a place in modern homes.</p><Link to="/our-story" className="button button-light">Read our story <span>→</span></Link></div>
         <div className="story-band-side"><span>01</span><span>Skill</span><span>02</span><span>Community</span><span>03</span><span>Independence</span></div>
       </section>
@@ -541,23 +636,56 @@ function HomePage(): ReactNode {
   );
 }
 
+function CategoryCard({ category, index }: { category: ProductCategory; index: number }): ReactNode {
+  const categoryIcons: Record<string, string> = {
+    home: '⌂',
+    women: '✿',
+    men: '◈',
+    care: '✧',
+    food: '❋',
+    kids: '☆',
+  };
+  return <Link className={`category-tile category-${index % 6}`} to={`/shop?categoryId=${encodeURIComponent(category.categoryId)}`}>
+    <span className="category-icon" aria-hidden="true">{categoryIcons[category.icon] ?? '✿'}</span>
+    <span className="category-number">{String(index + 1).padStart(2, '0')}</span>
+    <span>{category.categoryName}</span>
+    <small>{category.subcategories.length} collections</small>
+    <b aria-hidden="true">↗</b>
+  </Link>;
+}
+
 function ShopPage(): ReactNode {
   const [params, setParams] = useSearchParams();
   const page = Number(params.get('page') || '1');
   const [search, setSearch] = useState(params.get('q') || '');
-  const [category, setCategory] = useState(params.get('category') || '');
+  const categoryId = params.get('categoryId') || '';
+  const subcategoryId = params.get('subcategoryId') || '';
+  const sort = params.get('sort') || 'newest';
   const categories = useLoad(() => api.categories());
   const query = new URLSearchParams({ page: String(page), limit: '20' });
-  if (category) query.set('category', category);
+  if (categoryId) query.set('categoryId', categoryId);
+  if (subcategoryId) query.set('subcategoryId', subcategoryId);
   if (search.trim()) query.set('q', search.trim());
-  const result = useLoad(() => api.products(query), [page, category, search]);
-  const setFilter = (nextCategory: string, nextSearch = search) => {
-    setCategory(nextCategory);
-    setSearch(nextSearch);
+  if (sort) query.set('sort', sort);
+  const result = useLoad(() => api.products(query), [page, categoryId, subcategoryId, search, sort]);
+  const selectedCategory = categories.data?.find((category) => category.categoryId === categoryId);
+  const selectedSubcategory = selectedCategory?.subcategories.find((subcategory) => subcategory.subcategoryId === subcategoryId);
+  const updateFilters = (updates: { categoryId?: string; subcategoryId?: string; sort?: string; q?: string }) => {
     setParams((previous) => {
       const next = new URLSearchParams(previous);
-      if (nextCategory) next.set('category', nextCategory); else next.delete('category');
-      if (nextSearch.trim()) next.set('q', nextSearch.trim()); else next.delete('q');
+      if (updates.categoryId !== undefined) {
+        if (updates.categoryId) next.set('categoryId', updates.categoryId); else next.delete('categoryId');
+        next.delete('subcategoryId');
+      }
+      if (updates.subcategoryId !== undefined) {
+        if (updates.subcategoryId) next.set('subcategoryId', updates.subcategoryId); else next.delete('subcategoryId');
+      }
+      if (updates.sort !== undefined) {
+        if (updates.sort) next.set('sort', updates.sort); else next.delete('sort');
+      }
+      if (updates.q !== undefined) {
+        if (updates.q.trim()) next.set('q', updates.q.trim()); else next.delete('q');
+      }
       next.delete('page');
       return next;
     });
@@ -565,11 +693,23 @@ function ShopPage(): ReactNode {
   return (
     <div className="page-container">
       <PageIntro eyebrow="The eSakhi collection" title="Made by hand. Chosen by you." description="Explore pieces shaped by patience, skill, and a community of women makers." />
+      {categories.error && <div className="section-state"><Notice tone="error">{categories.error}</Notice><button className="button button-outline" onClick={() => void categories.reload()}>Retry categories</button></div>}
+      {!categoryId && categories.data && <section className="shop-category-section" aria-label="Browse marketplace categories">
+        <div className="section-heading"><div><span className="eyebrow">Explore the marketplace</span><h2>Shop by category</h2></div></div>
+        <div className="category-grid">{categories.data.map((category, index) => <CategoryCard key={category.categoryId} category={category} index={index} />)}</div>
+      </section>}
+      <nav className="breadcrumbs shop-breadcrumbs" aria-label="Breadcrumb">
+        <Link to="/shop">Shop</Link>
+        {selectedCategory && <><span>/</span><Link to={`/shop?categoryId=${encodeURIComponent(selectedCategory.categoryId)}`}>{selectedCategory.categoryName}</Link></>}
+        {selectedSubcategory && <><span>/</span><span>{selectedSubcategory.subcategoryName}</span></>}
+      </nav>
       <div className="shop-toolbar">
-        <div className="filter-chips"><button className={!category ? 'chip active' : 'chip'} onClick={() => setFilter('')}>All pieces</button>{(categories.data ?? []).map((value) => <button key={value} className={category === value ? 'chip active' : 'chip'} onClick={() => setFilter(value)}>{value}</button>)}</div>
-        <label className="search-field"><span className="sr-only">Search products</span><input value={search} onChange={(event) => setFilter(category, event.target.value)} placeholder="Search the collection" /><span aria-hidden="true">⌕</span></label>
+        <label className="field shop-filter"><span>Main category</span><select value={categoryId} onChange={(event) => updateFilters({ categoryId: event.target.value })}><option value="">All categories</option>{(categories.data ?? []).map((category) => <option key={category.categoryId} value={category.categoryId}>{category.categoryName}</option>)}</select></label>
+        <label className="field shop-filter"><span>Subcategory</span><select value={subcategoryId} disabled={!selectedCategory} onChange={(event) => updateFilters({ subcategoryId: event.target.value })}><option value="">All subcategories</option>{(selectedCategory?.subcategories ?? []).map((subcategory) => <option key={subcategory.subcategoryId} value={subcategory.subcategoryId}>{subcategory.subcategoryName}</option>)}</select></label>
+        <label className="field shop-filter"><span>Sort by</span><select value={sort} onChange={(event) => updateFilters({ sort: event.target.value })}><option value="newest">Newest listings</option><option value="price_asc">Price: low to high</option><option value="price_desc">Price: high to low</option></select></label>
+        <label className="search-field shop-search"><span className="sr-only">Search products by name</span><input value={search} onChange={(event) => { setSearch(event.target.value); updateFilters({ q: event.target.value }); }} placeholder="Search products by name" /><span aria-hidden="true">⌕</span></label>
       </div>
-      <ProductGrid products={result.data?.data ?? []} loading={result.loading} error={result.error || categories.error} reload={result.reload} />
+      <ProductGrid products={result.data?.data ?? []} loading={result.loading} error={result.error} reload={result.reload} emptyTitle={selectedSubcategory ? `No approved products in ${selectedSubcategory.subcategoryName}` : selectedCategory ? `No approved products in ${selectedCategory.categoryName}` : 'No approved products yet'} />
       {result.data?.pagination && result.data.pagination.totalPages > 1 && <Pagination page={result.data.pagination.page} pages={result.data.pagination.totalPages} onChange={(next) => setParams((previous) => { const params = new URLSearchParams(previous); params.set('page', String(next)); return params; })} />}
     </div>
   );
@@ -588,17 +728,20 @@ function ProductPage(): ReactNode {
   const [variantId, setVariantId] = useState('');
   const item = product.data;
   const variant = item?.variants.find((option) => option._id === variantId);
-  const stock = variant?.stock ?? item?.stock ?? 0;
+  const stock = variant?.stock ?? (item?.variants.length
+    ? item.variants.reduce((total, option) => total + option.stock, 0)
+    : item?.stock ?? 0);
   if (product.loading) return <div className="page-container"><Loading /></div>;
   if (product.error || !item) return <div className="page-container"><Notice tone="error">{product.error || 'Product not found.'}</Notice><Link to="/shop" className="button button-outline">Back to shop</Link></div>;
   return (
     <div className="page-container product-detail">
-      <div className="breadcrumbs"><Link to="/shop">Shop</Link><span>/</span><span>{item.category}</span></div>
+      <div className="breadcrumbs"><Link to="/shop">Shop</Link><span>/</span><Link to={`/shop?categoryId=${encodeURIComponent(item.categoryId)}`}>{item.categoryName}</Link><span>/</span><Link to={`/shop?categoryId=${encodeURIComponent(item.categoryId)}&subcategoryId=${encodeURIComponent(item.subcategoryId)}`}>{item.subcategoryName}</Link></div>
       <div className="detail-grid">
-        <div className="detail-gallery">{item.imageUrls.length ? item.imageUrls.map((image, index) => <img key={image} src={resolveProductImageUrl(image)} alt={`${item.name}, view ${index + 1}`} />) : <div className="detail-placeholder"><img src="/images/esakhi-emblem.png" alt="" /><span>Product image coming soon</span></div>}</div>
-        <div className="detail-copy"><span className="eyebrow">{item.category} · Handmade</span><h1>{item.name}</h1><p className="detail-price">{formatMoney(item.pricePaise)}</p><p className="detail-description">{item.description}</p>
+        <div className="detail-gallery">{item.imageUrls.length ? item.imageUrls.map((image, index) => <img key={image} src={resolveProductImageUrl(image)} alt={`${item.name}, view ${index + 1}`} />) : <div className="detail-placeholder"><img src="/images/maitri-sisterhood-logo.png" alt="" /><span>Product image coming soon</span></div>}</div>
+        <div className="detail-copy"><span className="eyebrow">{item.categoryName} · {item.subcategoryName}</span><h1>{item.name}</h1><p className="detail-price">{formatMoney(item.pricePaise)}</p><p className="detail-description">{item.description}</p>
+          <p className="detail-seller">Seller / SHG: <strong>{item.sellerName || 'Seller details unavailable'}</strong></p>
           {item.variants.length > 0 && <label className="field"><span>Choose an option</span><select value={variantId} onChange={(event) => setVariantId(event.target.value)}><option value="">Select an option</option>{item.variants.map((option) => <option key={option._id} value={option._id}>{Object.values(option.attributes).join(' · ') || option.sku || 'Option'}{option.stock <= 0 ? ' — unavailable' : ''}</option>)}</select></label>}
-          <p className={stock > 0 ? 'stock-note' : 'stock-note unavailable'}>{stock > 0 ? 'Available to order' : 'Currently unavailable'}</p>
+          <p className={stock > 0 ? 'stock-note' : 'stock-note unavailable'}>{stock > 0 ? variant || item.variants.length === 0 ? 'In stock' : 'Options available — choose an option' : 'Out of stock'}</p>
           {stock > 0 && <div className="detail-buy"><label className="quantity-control"><span className="sr-only">Quantity</span><button onClick={() => setQuantity(Math.max(1, quantity - 1))} aria-label="Decrease quantity">−</button><input value={quantity} type="number" min="1" max={Math.min(stock, 99)} onChange={(event) => setQuantity(Math.max(1, Math.min(stock, Number(event.target.value) || 1)))} /><button onClick={() => setQuantity(Math.min(stock, 99, quantity + 1))} aria-label="Increase quantity">+</button></label><button className="button" disabled={item.variants.length > 0 && !variantId} onClick={() => { add(item, quantity, variantId || undefined); navigate('/cart'); }}>Add to cart</button><button className="button button-outline" disabled={item.variants.length > 0 && !variantId} onClick={() => navigate('/checkout', { state: { buyNow: { product: item, quantity, ...(variantId ? { variantId } : {}) } } })}>Buy now</button></div>}
           <div className="detail-promise"><span>Made with care</span><span>Local fulfilment options at checkout</span></div>
         </div>
@@ -610,7 +753,7 @@ function ProductPage(): ReactNode {
 function StoryPage(): ReactNode {
   return (
     <div className="story-page">
-      <section className="story-hero"><div className="story-hero-logo"><img src="/images/esakhi-emblem.png" alt="eSakhi — Handmade by women, made for you" /></div><div><span className="eyebrow">The people behind every piece</span><h1>From her hands<br />to your <em>heart.</em></h1><p>Every handmade product carries a story of courage, creativity, and independence.</p></div></section>
+      <section className="story-hero"><div className="story-hero-logo"><img src="/images/maitri-sisterhood-logo.png" alt="eSakhi — Handmade by women, made for you" /></div><div><span className="eyebrow">The people behind every piece</span><h1>From her hands<br />to your <em>heart.</em></h1><p>Every handmade product carries a story of courage, creativity, and independence.</p></div></section>
       <article className="story-article">
         <div className="story-article-aside"><span className="story-aside-mark">✿</span><span>Made together,<br />with care.</span></div>
         <div className="story-article-copy"><p className="story-lead">Meet Sita, a woman from a small town in Madhya Pradesh. Like many women in her community, she had creative skills but limited opportunities to earn an income of her own.</p><p>Her journey changed when she joined a Self-Help Group with other women in her community. Together, they began making beautiful bangles, jewellery, and traditional dupattas using their skills, patience, and creativity.</p><p>Initially, reaching customers beyond their local neighbourhood was difficult. Their products were made with care, but finding the right market was a challenge.</p><p>With the support of her group, Sita continued improving her craft and learning how to present and sell her products. Every order became a reason to feel proud, and every sale brought her one step closer to financial independence.</p><p>Today, her work represents more than handmade products. It represents the strength of women working together, supporting their families, preserving traditional skills, and building a brighter future.</p></div>
@@ -715,7 +858,7 @@ function SignInPage(): ReactNode {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const signInState = location.state as { from?: string; checkoutState?: unknown } | null;
-  if (user) return <div className="page-container narrow"><Notice tone="success">You are signed in as {user.name || user.phone}.</Notice><Link to={user.role === 'city_admin' ? '/city-admin' : user.role === 'admin' || user.role === 'staff' ? '/admin' : '/account'} className="button">Continue</Link></div>;
+  if (user) return <div className="page-container narrow"><Notice tone="success">You are signed in as {user.name || user.phone}.</Notice><Link to={workspacePathForRole(user.role)} className="button">Continue to your workspace</Link></div>;
   const submitPhone = async (event: FormEvent) => {
     event.preventDefault(); setLoading(true); setError('');
     try { await api.requestOtp(phone); setRequested(true); }
@@ -728,11 +871,11 @@ function SignInPage(): ReactNode {
       const session = await api.verifyOtp(phone, code);
       setSession(session.user, session.accessToken);
       await reloadUser();
-      navigate(signInState?.from || (session.user.role === 'super_admin' ? '/super-admin' : session.user.role === 'city_admin' ? '/city-admin' : session.user.role === 'admin' || session.user.role === 'staff' ? '/admin' : session.user.role === 'delivery_partner' ? '/delivery-partner' : session.user.role === 'seller' ? '/seller' : '/account'), { replace: true, state: signInState?.checkoutState });
+      navigate(signInState?.from || workspacePathForRole(session.user.role), { replace: true, state: signInState?.checkoutState });
     } catch (cause) { setError(displayError(cause)); }
     finally { setLoading(false); }
   };
-  return <div className="auth-layout"><div className="auth-art"><img src="/images/esakhi-emblem.png" alt="" /><span>Handmade by women,<br />made for you.</span></div><section className="auth-card"><span className="eyebrow">Welcome to eSakhi</span><h1>{requested ? 'Enter your code.' : 'A little care goes a long way.'}</h1><p>{requested ? 'Enter the six-digit verification code sent to your phone.' : 'Sign in with your Indian mobile number to see your orders and check out.'}</p>{error && <Notice tone="error">{error}</Notice>}{!requested ? <form onSubmit={(event) => void submitPhone(event)} className="stack-form"><label className="field"><span>Mobile number</span><input autoComplete="tel" inputMode="tel" required value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+91 98765 43210" /></label><button className="button" disabled={loading}>{loading ? 'Requesting…' : 'Send verification code'}</button></form> : <form onSubmit={(event) => void submitCode(event)} className="stack-form"><label className="field"><span>Six-digit code</span><input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="••••••" /></label><button className="button" disabled={loading}>{loading ? 'Verifying…' : 'Verify and continue'}</button><button className="text-button" type="button" onClick={() => { setRequested(false); setCode(''); }}>Use another number</button></form>}<small>New here? Your customer account is created securely after successful phone verification.</small></section></div>;
+  return <div className="auth-layout"><div className="auth-art"><img src="/images/maitri-sisterhood-logo.png" alt="" /><span>Handmade by women,<br />made for you.</span></div><section className="auth-card"><span className="eyebrow">Welcome to eSakhi</span><h1>{requested ? 'Enter your code.' : 'A little care goes a long way.'}</h1><p>{requested ? 'Enter the six-digit verification code sent to your phone.' : 'Sign in with your Indian mobile number to see your orders and check out.'}</p>{error && <Notice tone="error">{error}</Notice>}{!requested ? <form onSubmit={(event) => void submitPhone(event)} className="stack-form"><label className="field"><span>Mobile number</span><input autoComplete="tel" inputMode="tel" required value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+91 98765 43210" /></label><button className="button" disabled={loading}>{loading ? 'Requesting…' : 'Send verification code'}</button></form> : <form onSubmit={(event) => void submitCode(event)} className="stack-form"><label className="field"><span>Six-digit code</span><input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))} placeholder="••••••" /></label><button className="button" disabled={loading}>{loading ? 'Verifying…' : 'Verify and continue'}</button><button className="text-button" type="button" onClick={() => { setRequested(false); setCode(''); }}>Use another number</button></form>}<small>New here? Your customer account is created securely after successful phone verification.</small></section></div>;
 }
 
 function CartPage(): ReactNode {
@@ -750,11 +893,11 @@ function CartPage(): ReactNode {
     const fresh = currentProducts.data?.find((entry) => entry.key === productKey(line))?.product;
     return sum + (fresh?.pricePaise ?? line.product.pricePaise) * line.quantity;
   }, 0);
-  return <div className="page-container"><PageIntro eyebrow="Your selection" title="Your bag" description="Your total is confirmed by eSakhi when you place your order." />{!lines.length ? <EmptyState title="Your bag is waiting for something lovely"><Link to="/shop" className="button">Explore the collection</Link></EmptyState> : <div className="cart-layout"><div className="cart-list">{currentProducts.loading && <Loading label="Checking current product details…" />}{lines.map((line) => { const refreshed = currentProducts.data?.find((entry) => entry.key === productKey(line)); const displayProduct = refreshed?.product ?? line.product; const failed = Boolean(refreshed && !refreshed.product); const unavailable = line.unavailable; return <article key={productKey(line)} className="cart-item"><Link to={`/products/${displayProduct.slug}`} className="cart-thumb">{displayProduct.imageUrls[0] ? <img src={resolveProductImageUrl(displayProduct.imageUrls[0])} alt="" /> : <img src="/images/esakhi-emblem.png" alt="" />}</Link><div className="cart-item-info"><span className="product-category">{displayProduct.category}</span><Link to={`/products/${displayProduct.slug}`} className="product-name">{displayProduct.name}</Link><span>{formatMoney(displayProduct.pricePaise)}</span>{unavailable && <span className="stock-note unavailable">No longer available — remove to continue.</span>}{failed && !unavailable && <span className="stock-note unavailable">{refreshed?.error || 'Could not refresh product details.'}</span>}</div><div className="cart-quantity"><button onClick={() => line.quantity > 1 ? setQuantity(productKey(line), line.quantity - 1) : remove(productKey(line))} aria-label="Decrease quantity">−</button><span>{line.quantity}</span><button onClick={() => setQuantity(productKey(line), Math.min(99, line.quantity + 1))} aria-label="Increase quantity">+</button></div><strong>{formatMoney(displayProduct.pricePaise * line.quantity)}</strong><button className="remove-button" onClick={() => remove(productKey(line))} aria-label={`Remove ${displayProduct.name}`}>×</button></article>; })}</div><aside className="summary-card"><span className="eyebrow">Order summary</span><div><span>Estimated subtotal</span><strong>{formatMoney(subtotal)}</strong></div><small>Final price, delivery fee, stock and payment options are checked by the server at checkout.</small>{currentProducts.data?.some((entry) => !entry.product) && <Notice tone="error">Refresh current product details or remove unavailable items before continuing.</Notice>}{currentProducts.data?.some((entry) => !entry.product) && <button className="button button-outline" onClick={() => void currentProducts.reload()}>Retry product check</button>}<Link aria-disabled={currentProducts.loading || currentProducts.data?.some((entry) => !entry.product)} onClick={(event) => { if (currentProducts.loading || currentProducts.data?.some((entry) => !entry.product)) event.preventDefault(); }} to="/checkout" className={`button button-full ${currentProducts.loading || currentProducts.data?.some((entry) => !entry.product) ? 'button-disabled' : ''}`}>Continue to checkout</Link><Link to="/shop" className="quiet-link">Continue shopping</Link></aside></div>}</div>;
+  return <div className="page-container"><PageIntro eyebrow="Your selection" title="Your bag" description="Your total is confirmed by eSakhi when you place your order." />{!lines.length ? <EmptyState title="Your bag is waiting for something lovely"><Link to="/shop" className="button">Explore the collection</Link></EmptyState> : <div className="cart-layout"><div className="cart-list">{currentProducts.loading && <Loading label="Checking current product details…" />}{lines.map((line) => { const refreshed = currentProducts.data?.find((entry) => entry.key === productKey(line)); const displayProduct = refreshed?.product ?? line.product; const failed = Boolean(refreshed && !refreshed.product); const unavailable = line.unavailable; return <article key={productKey(line)} className="cart-item"><Link to={`/products/${displayProduct.slug}`} className="cart-thumb">{displayProduct.imageUrls[0] ? <img src={resolveProductImageUrl(displayProduct.imageUrls[0])} alt="" /> : <img src="/images/maitri-sisterhood-logo.png" alt="" />}</Link><div className="cart-item-info"><span className="product-category">{displayProduct.category}</span><Link to={`/products/${displayProduct.slug}`} className="product-name">{displayProduct.name}</Link><span>{formatMoney(displayProduct.pricePaise)}</span>{unavailable && <span className="stock-note unavailable">No longer available — remove to continue.</span>}{failed && !unavailable && <span className="stock-note unavailable">{refreshed?.error || 'Could not refresh product details.'}</span>}</div><div className="cart-quantity"><button onClick={() => line.quantity > 1 ? setQuantity(productKey(line), line.quantity - 1) : remove(productKey(line))} aria-label="Decrease quantity">−</button><span>{line.quantity}</span><button onClick={() => setQuantity(productKey(line), Math.min(99, line.quantity + 1))} aria-label="Increase quantity">+</button></div><strong>{formatMoney(displayProduct.pricePaise * line.quantity)}</strong><button className="remove-button" onClick={() => remove(productKey(line))} aria-label={`Remove ${displayProduct.name}`}>×</button></article>; })}</div><aside className="summary-card"><span className="eyebrow">Order summary</span><div><span>Estimated subtotal</span><strong>{formatMoney(subtotal)}</strong></div><small>Final price, delivery fee, stock and payment options are checked by the server at checkout.</small>{currentProducts.data?.some((entry) => !entry.product) && <Notice tone="error">Refresh current product details or remove unavailable items before continuing.</Notice>}{currentProducts.data?.some((entry) => !entry.product) && <button className="button button-outline" onClick={() => void currentProducts.reload()}>Retry product check</button>}<Link aria-disabled={currentProducts.loading || currentProducts.data?.some((entry) => !entry.product)} onClick={(event) => { if (currentProducts.loading || currentProducts.data?.some((entry) => !entry.product)) event.preventDefault(); }} to="/checkout" className={`button button-full ${currentProducts.loading || currentProducts.data?.some((entry) => !entry.product) ? 'button-disabled' : ''}`}>Continue to checkout</Link><Link to="/shop" className="quiet-link">Continue shopping</Link></aside></div>}</div>;
 }
 
 function CheckoutPage(): ReactNode {
-  const { user } = useAuth();
+  const { user, reloadUser } = useAuth();
   const { lines, clear } = useCart();
   const location = useLocation();
   const navigate = useNavigate();
@@ -763,12 +906,24 @@ function CheckoutPage(): ReactNode {
   const service = useLoad(() => api.serviceArea());
   const [method, setMethod] = useState<'delivery' | 'pickup'>('delivery');
   const [payment, setPayment] = useState<'upi' | 'cash'>('upi');
-  const [values, setValues] = useState({ name: user?.name ?? '', phone: user?.phone ?? '', addressLine1: '', addressLine2: '', locality: '', postalCode: '' });
+  const [values, setValues] = useState({ name: user?.name ?? '' });
+  const [selectedAddressId, setSelectedAddressId] = useState(() => user?.savedAddresses?.find((address) => address.isDefault)?.id ?? user?.savedAddresses?.[0]?.id ?? '');
+  const [addressConfirmed, setAddressConfirmed] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID());
   const availablePayments = service.data?.paymentMethods;
+  const selectedAddress = user?.savedAddresses?.find((address) => address.id === selectedAddressId || address._id === selectedAddressId);
+  const addressIsServiceable = Boolean(selectedAddress && service.data?.serviceableLocalities?.some((locality) =>
+    locality.name.toLocaleLowerCase() === selectedAddress.locality.toLocaleLowerCase()
+      && locality.postalCodes.includes(selectedAddress.postalCode)));
   useEffect(() => { if (service.data?.pickupEnabled && !service.data.deliveryEnabled) setMethod('pickup'); }, [service.data]);
+  useEffect(() => {
+    if (!user || selectedAddressId && user.savedAddresses?.some((address) => (address.id ?? address._id) === selectedAddressId)) return;
+    const defaultAddress = user.savedAddresses?.find((address) => address.isDefault) ?? user.savedAddresses?.[0];
+    setSelectedAddressId(defaultAddress?.id ?? defaultAddress?._id ?? '');
+    setAddressConfirmed(false);
+  }, [selectedAddressId, user]);
   useEffect(() => {
     if (availablePayments?.upi) setPayment('upi');
     else if (availablePayments?.cash) setPayment('cash');
@@ -781,16 +936,43 @@ function CheckoutPage(): ReactNode {
     const payload: Record<string, unknown> = {
       idempotencyKey,
       customerName: values.name,
-      customerPhone: normalizeIndianPhone(values.phone),
+      customerPhone: normalizeIndianPhone(user.phone ?? ''),
       fulfilmentMethod: method,
       items: checkoutLines.map((line) => ({ productId: getId(line.product), ...(line.variantId ? { variantId: line.variantId } : {}), quantity: line.quantity })),
       paymentMethod: payment,
     };
-    if (method === 'delivery') payload.address = {
-      name: values.name, phone: normalizeIndianPhone(values.phone), addressLine1: values.addressLine1,
-      ...(values.addressLine2 ? { addressLine2: values.addressLine2 } : {}),
-      locality: values.locality, postalCode: values.postalCode,
-    };
+    if (method === 'delivery') {
+      if (!selectedAddress || !addressConfirmed || !addressIsServiceable) {
+        setError('Choose and confirm a saved address within a configured delivery locality and PIN code.');
+        setSubmitting(false);
+        return;
+      }
+      payload.address = {
+        name: selectedAddress.name,
+        phone: normalizeIndianPhone(selectedAddress.phone),
+        addressLine1: selectedAddress.addressLine1,
+        ...(selectedAddress.addressLine2 ? { addressLine2: selectedAddress.addressLine2 } : {}),
+        locality: selectedAddress.locality,
+        postalCode: selectedAddress.postalCode,
+        ...(selectedAddress.houseNumber ? { houseNumber: selectedAddress.houseNumber } : {}),
+        ...(selectedAddress.street ? { street: selectedAddress.street } : {}),
+        ...(selectedAddress.area ? { area: selectedAddress.area } : {}),
+        ...(selectedAddress.landmark ? { landmark: selectedAddress.landmark } : {}),
+        ...(selectedAddress.villageOrCity ? { villageOrCity: selectedAddress.villageOrCity } : {}),
+        ...(selectedAddress.district ? { district: selectedAddress.district } : {}),
+        ...(selectedAddress.city ? { city: selectedAddress.city } : {}),
+        ...(selectedAddress.state ? { state: selectedAddress.state } : {}),
+        ...(selectedAddress.latitude !== undefined && selectedAddress.latitude !== null && selectedAddress.longitude !== undefined && selectedAddress.longitude !== null
+          ? {
+            latitude: selectedAddress.latitude,
+            longitude: selectedAddress.longitude,
+            ...(selectedAddress.locationAccuracyMeters !== undefined && selectedAddress.locationAccuracyMeters !== null ? { locationAccuracyMeters: selectedAddress.locationAccuracyMeters } : {}),
+          }
+          : {}),
+        ...(selectedAddress.deliveryInstructions ? { deliveryInstructions: selectedAddress.deliveryInstructions } : {}),
+      };
+      if (selectedAddress.deliveryInstructions) payload.deliveryInstructions = selectedAddress.deliveryInstructions;
+    }
     try {
       const result = await api.createOrder(payload);
       if (!buyNowLine) clear();
@@ -799,7 +981,7 @@ function CheckoutPage(): ReactNode {
     } catch (cause) { setError(displayError(cause)); }
     finally { setSubmitting(false); }
   };
-  return <div className="page-container"><PageIntro eyebrow="Almost yours" title="A thoughtful order starts here" description="The server rechecks current stock, service options, and final totals when you place the order." />{service.error && <Notice tone="error">{service.error}</Notice>}{service.data && !service.data.configured && <Notice tone="error">Checkout is not configured yet. Please try again later.</Notice>}{service.data?.deliveryUnavailableReason && <Notice tone="error">Currently delivering only within Damoh, Madhya Pradesh. {service.data.deliveryUnavailableReason}</Notice>}{service.data?.configured && !availablePayments?.upi && !availablePayments?.cash && <Notice tone="error">No payment method is enabled for checkout yet.</Notice>}{service.data?.configured && <form className="checkout-layout" onSubmit={(event) => void submit(event)}><div className="checkout-form"><section className="form-section"><h2>Contact</h2><div className="form-grid"><label className="field"><span>Name</span><input required maxLength={120} value={values.name} onChange={(event) => set('name', event.target.value)} /></label><label className="field"><span>Indian mobile number</span><input required pattern="(\+91[6-9][0-9]{9}|[6-9][0-9]{9})" value={values.phone} onChange={(event) => set('phone', event.target.value)} /></label></div></section><section className="form-section"><h2>How would you like to receive it?</h2><div className="choice-row">{service.data.deliveryEnabled && <label className={method === 'delivery' ? 'choice selected' : 'choice'}><input type="radio" name="fulfilment" checked={method === 'delivery'} onChange={() => setMethod('delivery')} /><span><b>Local delivery</b><small>Currently delivering only within Damoh, Madhya Pradesh.</small></span></label>}{service.data.pickupEnabled && <label className={method === 'pickup' ? 'choice selected' : 'choice'}><input type="radio" name="fulfilment" checked={method === 'pickup'} onChange={() => setMethod('pickup')} /><span><b>Pickup</b><small>{service.data.pickupInstructions || 'Pickup details confirmed after your order'}</small></span></label>}</div></section>{method === 'delivery' && <section className="form-section"><h2>Delivery address</h2><div className="form-grid"><label className="field span-two"><span>Address line 1</span><input required value={values.addressLine1} onChange={(event) => set('addressLine1', event.target.value)} /></label><label className="field span-two"><span>Address line 2 (optional)</span><input value={values.addressLine2} onChange={(event) => set('addressLine2', event.target.value)} /></label><label className="field"><span>Locality</span><select required value={values.locality} onChange={(event) => set('locality', event.target.value)}><option value="">Choose locality</option>{(service.data.serviceableLocalities ?? []).map((locality) => <option key={locality.name} value={locality.name}>{locality.name} · {formatMoney(locality.deliveryFeePaise)}</option>)}</select></label><label className="field"><span>PIN code</span><input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={values.postalCode} onChange={(event) => set('postalCode', event.target.value)} /></label></div><small>City and state are validated by the configured service area. Your delivery phone must match your verified account.</small></section>}<section className="form-section"><h2>Payment method</h2><div className="choice-row">{availablePayments?.upi && <label className={payment === 'upi' ? 'choice selected' : 'choice'}><input type="radio" name="payment" checked={payment === 'upi'} onChange={() => setPayment('upi')} /><span><b>UPI</b><small>Instructions provided after placing the order</small></span></label>}{availablePayments?.cash && <label className={payment === 'cash' ? 'choice selected' : 'choice'}><input type="radio" name="payment" checked={payment === 'cash'} onChange={() => setPayment('cash')} /><span><b>Cash</b><small>Payment is manually confirmed</small></span></label>}</div></section>{error && <Notice tone="error">{error}</Notice>}<button className="button" disabled={submitting || service.loading || !service.data.configured || (!availablePayments?.upi && !availablePayments?.cash)}>{submitting ? 'Placing order…' : 'Place order'}</button></div><aside className="summary-card checkout-summary"><span className="eyebrow">Your items</span>{checkoutLines.map((line) => <div key={productKey(line)}><span>{line.product.name} × {line.quantity}</span><strong>{formatMoney(line.product.pricePaise * line.quantity)}</strong></div>)}<small>Totals are calculated and confirmed by eSakhi when the order is placed.</small></aside></form>}</div>;
+  return <div className="page-container"><PageIntro eyebrow="Almost yours" title="A thoughtful order starts here" description="The server rechecks current stock, service options, and final totals when you place the order." />{service.error && <Notice tone="error">{service.error}</Notice>}{service.data && !service.data.configured && <Notice tone="error">Checkout is not configured yet. Please try again later.</Notice>}{service.data?.deliveryUnavailableReason && <Notice tone="error">Currently delivering only within Damoh, Madhya Pradesh. {service.data.deliveryUnavailableReason}</Notice>}{service.data?.configured && !availablePayments?.upi && !availablePayments?.cash && <Notice tone="error">No payment method is enabled for checkout yet.</Notice>}{service.data?.configured && <form className="checkout-layout" onSubmit={(event) => void submit(event)}><div className="checkout-form"><section className="form-section"><h2>Contact</h2><div className="form-grid"><label className="field"><span>Your name</span><input required maxLength={120} value={values.name} onChange={(event) => set('name', event.target.value)} /></label><label className="field"><span>Verified mobile number</span><input value={user.phone ?? ''} readOnly /><small>Order updates are sent to your verified account number.</small></label></div></section><section className="form-section"><h2>How would you like to receive it?</h2><div className="choice-row">{service.data.deliveryEnabled && <label className={method === 'delivery' ? 'choice selected' : 'choice'}><input type="radio" name="fulfilment" checked={method === 'delivery'} onChange={() => setMethod('delivery')} /><span><b>Local delivery</b><small>Choose a configured delivery locality and PIN code.</small></span></label>}{service.data.pickupEnabled && <label className={method === 'pickup' ? 'choice selected' : 'choice'}><input type="radio" name="fulfilment" checked={method === 'pickup'} onChange={() => setMethod('pickup')} /><span><b>Pickup</b><small>{service.data.pickupInstructions || 'Pickup details confirmed after your order'}</small></span></label>}</div></section>{method === 'delivery' && <section className="form-section"><h2>Where should we deliver?</h2><p>Select a saved address or add a new one. The default address is preselected when available.</p><AddressBook addresses={user.savedAddresses ?? []} serviceLocalities={service.data.serviceableLocalities ?? []} customerName={user.name ?? ''} customerPhone={user.phone ?? ''} onChanged={reloadUser} selectedAddressId={selectedAddressId} onSelect={(address) => { setSelectedAddressId(address.id ?? address._id ?? ''); setAddressConfirmed(false); }} />{selectedAddress && <div className="checkout-address-confirmation"><div><strong>{selectedAddress.label || 'Delivery address'}</strong><p>{selectedAddress.formattedAddress || [selectedAddress.addressLine1, selectedAddress.area, selectedAddress.city, selectedAddress.state, selectedAddress.postalCode].filter(Boolean).join(', ')}</p><small>Recipient: {selectedAddress.name} · {selectedAddress.phone}</small>{selectedAddress.deliveryInstructions && <small>Instructions: {selectedAddress.deliveryInstructions}</small>}</div>{!addressIsServiceable && <Notice tone="error">This address is outside the configured service area. Delivery requires a matching configured locality and six-digit PIN; selecting a map pin cannot bypass this check.</Notice>}{!addressConfirmed && <button type="button" className="button button-outline" disabled={!addressIsServiceable} onClick={() => setAddressConfirmed(true)}>Confirm this delivery address</button>}{addressConfirmed && <Notice tone="success">Delivery address confirmed for this order.</Notice>}</div>}</section>}<section className="form-section"><h2>Payment method</h2><div className="choice-row">{availablePayments?.upi && <label className={payment === 'upi' ? 'choice selected' : 'choice'}><input type="radio" name="payment" checked={payment === 'upi'} onChange={() => setPayment('upi')} /><span><b>UPI</b><small>Instructions provided after placing the order</small></span></label>}{availablePayments?.cash && <label className={payment === 'cash' ? 'choice selected' : 'choice'}><input type="radio" name="payment" checked={payment === 'cash'} onChange={() => setPayment('cash')} /><span><b>Cash</b><small>Payment is manually confirmed</small></span></label>}</div></section>{error && <Notice tone="error">{error}</Notice>}<button className="button" disabled={submitting || service.loading || !service.data.configured || (!availablePayments?.upi && !availablePayments?.cash) || method === 'delivery' && (!selectedAddress || !addressIsServiceable || !addressConfirmed)}>{submitting ? 'Placing order…' : 'Place order'}</button></div><aside className="summary-card checkout-summary"><span className="eyebrow">Your items</span>{checkoutLines.map((line) => <div key={productKey(line)}><span>{line.product.name} × {line.quantity}</span><strong>{formatMoney(line.product.pricePaise * line.quantity)}</strong></div>)}<small>Totals are calculated and confirmed by eSakhi when the order is placed.</small></aside></form>}</div>;
 }
 
 function AccountPage(): ReactNode {
@@ -880,6 +1062,7 @@ function CustomerDashboardPage(): ReactNode {
 
 function AccountProfilePage(): ReactNode {
   const { user, reloadUser } = useAuth();
+  const service = useLoad(() => api.serviceArea(), [user?.id]);
   const [name, setName] = useState(user?.name ?? '');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -910,73 +1093,7 @@ function AccountProfilePage(): ReactNode {
       setError(displayError(cause));
     }
   };
-  return <div className="page-container narrow"><PageIntro eyebrow="Your account" title={`Hello${user.name ? `, ${user.name}` : ''}`} description="Manage your profile and find your past orders." />{user.role === 'customer' && <p><Link className="quiet-link" to="/account">← Back to your dashboard</Link></p>}<div className="account-role"><span className="status-dot" /> Signed in as {user.role}</div>{error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}<form className="stack-form panel" onSubmit={(event) => void submit(event)}><label className="field"><span>Your name</span><input maxLength={120} value={name} onChange={(event) => setName(event.target.value)} /></label><label className="field"><span>Verified phone</span><input value={user.phone ?? ''} disabled /></label><button className="button">Save profile</button></form>{user.role === 'customer' && <section className="panel push-notification-settings"><h2>Order notifications</h2><p>Get a browser notification when your order status changes. Notifications are optional and require browser permission.</p>{pushNotificationsConfigured ? <button className="button button-outline" onClick={() => void togglePush()}>{pushEnabled ? 'Disable on this device' : 'Enable order notifications'}</button> : <Notice>Push notifications are not configured for this app yet.</Notice>}</section>}<div className="account-links"><Link to="/orders" className="button button-outline">View order history</Link>{user.role === 'delivery_partner' && <Link to="/delivery-partner" className="button button-outline">Open delivery portal</Link>}{user.role === 'city_admin' && <Link to="/city-admin" className="button button-outline">Open City Admin dashboard</Link>}{(user.role === 'admin' || user.role === 'staff') && <Link to="/admin" className="button button-outline">Open workspace</Link>}</div><div id="saved-address"><AddressEditor onSaved={reloadUser} /></div></div>;
-}
-
-function AddressEditor({ onSaved }: { onSaved: () => Promise<void> }): ReactNode {
-  const { user } = useAuth();
-  const [saved, setSaved] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const [address, setAddress] = useState<Address>(() => user?.savedAddresses?.[0] ?? {
-    label: 'Primary',
-    name: user?.name ?? '',
-    phone: user?.phone ?? '',
-    addressLine1: '',
-    addressLine2: '',
-    locality: '',
-    city: 'Damoh',
-    state: 'Madhya Pradesh',
-    postalCode: '',
-  });
-  useEffect(() => {
-    const primaryAddress = user?.savedAddresses?.[0];
-    if (primaryAddress) {
-      setAddress(primaryAddress);
-      setSaved(true);
-    }
-  }, [user?.savedAddresses]);
-  const field = (key: keyof Address, value: string) => {
-    setSaved(false);
-    setAddress((previous) => ({ ...previous, [key]: value }));
-  };
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    setError('');
-    setSaved(false);
-    setSaving(true);
-    try {
-      const phone = normalizeIndianPhone(address.phone);
-      const savedAddress = {
-        ...address,
-        label: address.label?.trim() || 'Primary',
-        phone,
-      };
-      const existingAddresses = user?.savedAddresses ?? [];
-      const nextAddresses = savedAddress.id
-        ? existingAddresses.map((existing) => existing.id === savedAddress.id ? savedAddress : existing)
-        : [savedAddress, ...existingAddresses].slice(0, 10);
-      const updatedAddresses = await api.replaceAddresses(nextAddresses);
-      setAddress(updatedAddresses[0] ?? address);
-      await onSaved();
-      setSaved(true);
-    } catch (cause) {
-      setError(displayError(cause));
-    } finally {
-      setSaving(false);
-    }
-  };
-  return <details className="address-details" open><summary>Save primary delivery address</summary><p>This address is saved to your account for checkout. You can update it any time.</p>{error && <Notice tone="error">{error}</Notice>}{saved && <Notice tone="success">Primary address saved to your account.</Notice>}<form className="stack-form" onSubmit={(event) => void submit(event)}><div className="form-grid">
-    <label className="field"><span>Address label</span><input maxLength={40} value={address.label ?? 'Primary'} onChange={(event) => field('label', event.target.value)} /></label>
-    <label className="field"><span>Recipient name</span><input autoComplete="name" required maxLength={120} value={address.name} onChange={(event) => field('name', event.target.value)} /></label>
-    <label className="field"><span>Phone (+91)</span><input autoComplete="tel" inputMode="tel" required pattern="(\+91[6-9][0-9]{9}|[6-9][0-9]{9})" value={address.phone} onChange={(event) => field('phone', event.target.value)} /></label>
-    <label className="field"><span>House / flat number and street</span><input autoComplete="address-line1" required maxLength={200} value={address.addressLine1} onChange={(event) => field('addressLine1', event.target.value)} /></label>
-    <label className="field"><span>Landmark (optional)</span><input autoComplete="address-line2" maxLength={200} value={address.addressLine2 ?? ''} onChange={(event) => field('addressLine2', event.target.value)} /></label>
-    <label className="field"><span>Locality</span><input autoComplete="address-level3" required maxLength={100} value={address.locality} onChange={(event) => field('locality', event.target.value)} /></label>
-    <label className="field"><span>City</span><input autoComplete="address-level2" required maxLength={100} value={address.city} onChange={(event) => field('city', event.target.value)} /></label>
-    <label className="field"><span>State</span><input autoComplete="address-level1" required maxLength={100} value={address.state} onChange={(event) => field('state', event.target.value)} /></label>
-    <label className="field"><span>PIN code</span><input autoComplete="postal-code" inputMode="numeric" required pattern="[0-9]{6}" maxLength={6} value={address.postalCode} onChange={(event) => field('postalCode', event.target.value)} /></label>
-  </div><button className="button button-outline" disabled={saving}>{saving ? 'Saving address…' : 'Save primary address'}</button></form></details>;
+  return <div className="page-container narrow"><PageIntro eyebrow="Your account" title={`Hello${user.name ? `, ${user.name}` : ''}`} description="Manage your profile and find your past orders." />{user.role === 'customer' && <p><Link className="quiet-link" to="/account">← Back to your dashboard</Link></p>}<div className="account-role"><span className="status-dot" /> Signed in as {user.role}</div>{error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}<form className="stack-form panel" onSubmit={(event) => void submit(event)}><label className="field"><span>Your name</span><input maxLength={120} value={name} onChange={(event) => setName(event.target.value)} /></label><label className="field"><span>Verified phone</span><input value={user.phone ?? ''} disabled /></label><button className="button">Save profile</button></form>{user.role === 'customer' && <section className="panel push-notification-settings"><h2>Order notifications</h2><p>Get a browser notification when your order status changes. Notifications are optional and require browser permission.</p>{pushNotificationsConfigured ? <button className="button button-outline" onClick={() => void togglePush()}>{pushEnabled ? 'Disable on this device' : 'Enable order notifications'}</button> : <Notice>Push notifications are not configured for this app yet.</Notice>}</section>}{user.role === 'customer' && <section id="saved-address" className="panel saved-addresses-panel"><h2>Saved delivery addresses</h2>{service.error && <Notice tone="error">{service.error}</Notice>}{service.loading ? <Loading label="Loading delivery options…" /> : <AddressBook addresses={user.savedAddresses ?? []} serviceLocalities={service.data?.serviceableLocalities ?? []} customerName={user.name ?? ''} customerPhone={user.phone ?? ''} onChanged={reloadUser} />}</section>}<div className="account-links"><Link to="/orders" className="button button-outline">View order history</Link>{user.role === 'delivery_partner' && <Link to="/delivery-partner" className="button button-outline">Open delivery portal</Link>}{user.role === 'city_admin' && <Link to="/city-admin" className="button button-outline">Open City Admin dashboard</Link>}{(user.role === 'admin' || user.role === 'staff') && <Link to="/admin" className="button button-outline">Open workspace</Link>}</div></div>;
 }
 
 function SignInPrompt(): ReactNode {
@@ -998,6 +1115,7 @@ function OrdersPage(): ReactNode {
     };
   }, [result.reload, user]);
   if (!user) return <SignInPrompt />;
+  if (user.role === 'seller') return <Navigate to="/seller" replace />;
   return <div className="page-container"><PageIntro eyebrow="Your purchases" title="Order history" description="Follow your orders from confirmation through fulfilment." />{result.loading ? <Loading /> : result.error ? <Notice tone="error">{result.error}</Notice> : result.data?.data.length ? <><div className="order-list">{result.data.data.map((order) => <OrderCard key={order._id} order={order} to={`/orders/${order._id}`} />)}</div>{result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}</> : <EmptyState title="No orders yet"><Link to="/shop" className="button">Find your first piece</Link></EmptyState>}</div>;
 }
 
@@ -1007,14 +1125,27 @@ function OrderCard({ order, to }: { order: Order; to: string }): ReactNode {
 
 function orderStatusLabel(value: string, fulfilmentMethod?: Order['fulfilmentMethod']): string {
   const labels: Record<string, string> = {
-    placed: 'Placed',
-    accepted: 'Confirmed',
-    preparing: 'Packed',
-    ready_for_pickup: 'Ready for pickup',
-    out_for_delivery: 'Out for delivery',
+    placed: 'Order Confirmed',
+    order_confirmed: 'Order Confirmed',
+    accepted: 'Accepted',
+    preparing: 'Preparing',
+    ready_for_pickup: 'Ready for Pickup',
+    delivery_partner_assigned: 'Partner Assigned',
+    out_for_pickup: 'Out for Pickup',
+    picked_up: 'Picked Up',
+    out_for_delivery: 'Out for Delivery',
     delivered: 'Delivered',
     completed: fulfilmentMethod === 'delivery' ? 'Delivered' : 'Completed',
-    cancelled: 'Cancelled',
+    cancelled: 'Order Cancelled',
+    delivery_failed: 'Delivery Failed',
+    return_requested: 'Return Requested',
+    return_rejected: 'Return Rejected',
+    return_accepted: 'Return Accepted',
+    return_partner_assigned: 'Return Agent Assigned',
+    return_picked_up: 'Return Picked Up',
+    return_delivered_to_seller: 'Returned to Seller',
+    ready_for_refund: 'Ready for Refund',
+    refund_completed: 'Refund Completed',
   };
   return labels[value] ?? value.replaceAll('_', ' ');
 }
@@ -1022,6 +1153,17 @@ function orderStatusLabel(value: string, fulfilmentMethod?: Order['fulfilmentMet
 function StatusBadge({ value, fulfilmentMethod }: { value: string; fulfilmentMethod?: Order['fulfilmentMethod'] }): ReactNode {
   return <span className={`status-badge status-${value}`}>{orderStatusLabel(value, fulfilmentMethod)}</span>;
 }
+
+const DELIVERY_LIFECYCLE_STEPS: Array<{ key: string; label: string; aliases: string[]; description: string }> = [
+  { key: 'order_confirmed', label: 'Confirmed', aliases: ['placed', 'order_confirmed', 'accepted'], description: 'Order placed & confirmed with Seller' },
+  { key: 'preparing', label: 'Preparing', aliases: ['preparing'], description: 'Seller is preparing & packing your items' },
+  { key: 'ready_for_pickup', label: 'Ready for Pickup', aliases: ['ready_for_pickup'], description: 'Packed & awaiting Delivery Partner assignment' },
+  { key: 'delivery_partner_assigned', label: 'Partner Assigned', aliases: ['delivery_partner_assigned'], description: 'City Admin assigned a nearby Delivery Partner' },
+  { key: 'out_for_pickup', label: 'Out for Pickup', aliases: ['out_for_pickup'], description: 'Delivery Partner accepted & moving toward Seller' },
+  { key: 'picked_up', label: 'Picked Up', aliases: ['picked_up'], description: 'Package picked up from Seller shop' },
+  { key: 'out_for_delivery', label: 'Out for Delivery', aliases: ['out_for_delivery'], description: 'Delivery Partner is on the way to Customer' },
+  { key: 'delivered', label: 'Delivered', aliases: ['delivered', 'completed'], description: 'Package handed over & payment settled' },
+];
 
 function CustomerOrderPage(): ReactNode {
   const { id = '' } = useParams();
@@ -1032,7 +1174,7 @@ function CustomerOrderPage(): ReactNode {
   useEffect(() => {
     if (!user || !id) return;
     const refresh = () => void order.reload(false);
-    const timer = window.setInterval(refresh, 30_000);
+    const timer = window.setInterval(refresh, 5_000);
     window.addEventListener('focus', refresh);
     return () => {
       window.clearInterval(timer);
@@ -1044,10 +1186,23 @@ function CustomerOrderPage(): ReactNode {
   if (order.error || !order.data) return <div className="page-container"><Notice tone="error">{order.error || 'Order not found.'}</Notice></div>;
   const item = order.data;
   const paymentInstructions = (location.state as { paymentInstructions?: { method?: string; upiId?: string; qrImageUrl?: string; instructions?: string } } | null)?.paymentInstructions;
-  const canCancel = ['placed', 'accepted'].includes(item.fulfilmentStatus) && !item.cancellationRequest?.requestedAt;
+  const canCancel = ['placed', 'order_confirmed', 'accepted'].includes(item.fulfilmentStatus) && !item.cancellationRequest?.requestedAt;
   const history = item.statusHistory?.length
     ? item.statusHistory
     : [{ status: 'placed', changedAt: item.createdAt ?? '' }];
+  const currentStepIndex = DELIVERY_LIFECYCLE_STEPS.findIndex((step) => step.aliases.includes(item.fulfilmentStatus));
+  const partnerMovementLabel = item.fulfilmentStatus === 'delivery_partner_assigned'
+    ? `Partner ${item.deliveryPartner?.name ?? ''} assigned — awaiting partner acceptance`
+    : item.fulfilmentStatus === 'out_for_pickup'
+      ? `Moving toward Seller (${item.sellerPickup?.sellerName ?? 'Seller shop'}) for pickup`
+      : item.fulfilmentStatus === 'picked_up'
+        ? `Picked up from Seller (${item.sellerPickup?.sellerName ?? 'Seller shop'}) — preparing route to you`
+        : item.fulfilmentStatus === 'out_for_delivery'
+          ? `On the way to Customer (${item.address?.locality ?? 'your address'})`
+          : ['delivered', 'completed'].includes(item.fulfilmentStatus)
+            ? 'Delivered to Customer & payment settled'
+            : 'Seller is preparing your order for dispatch';
+
   const cancel = async () => {
     if (!window.confirm('Send a cancellation request for this order? The team must review it.')) return;
     setError('');
@@ -1057,13 +1212,90 @@ function CustomerOrderPage(): ReactNode {
   return (
     <div className="page-container">
       <div className="breadcrumbs"><Link to="/orders">Orders</Link><span>/</span>{item.orderReference}</div>
-      <PageIntro eyebrow="Order details" title={item.orderReference} description={item.createdAt ? `Placed ${new Date(item.createdAt).toLocaleString('en-IN')}` : undefined}>
+      <PageIntro eyebrow="Order details · Live sync enabled" title={item.orderReference} description={item.createdAt ? `Placed ${new Date(item.createdAt).toLocaleString('en-IN')}` : undefined}>
         <StatusBadge value={item.fulfilmentStatus} fulfilmentMethod={item.fulfilmentMethod} />
       </PageIntro>
       {error && <Notice tone="error">{error}</Notice>}
       {paymentInstructions && <Notice tone="success"><strong>Payment instructions ({paymentInstructions.method ?? item.paymentMethod})</strong><br />{paymentInstructions.upiId && <span>UPI ID: {paymentInstructions.upiId}<br /></span>}{paymentInstructions.instructions}{paymentInstructions.qrImageUrl && <p><img className="payment-qr" src={paymentInstructions.qrImageUrl} alt="UPI payment QR code" /></p>}</Notice>}
+      {item.fulfilmentMethod === 'delivery' && item.fulfilmentStatus !== 'cancelled' && (
+        <section className="panel" style={{ marginBottom: '1.25rem' }}>
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">LIVE DELIVERY TRACKER</span>
+              <h2>End-to-end order lifecycle</h2>
+            </div>
+            <button className="button button-outline" onClick={() => void order.reload()}>Refresh live status</button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(125px, 1fr))', gap: '0.6rem', margin: '1rem 0' }}>
+            {DELIVERY_LIFECYCLE_STEPS.map((step, index) => {
+              const reached = currentStepIndex >= index;
+              const isCurrent = currentStepIndex === index;
+              const historyMatch = [...history].reverse().find((h) => step.aliases.includes(h.status));
+              return (
+                <div
+                  key={step.key}
+                  style={{
+                    padding: '0.65rem 0.75rem',
+                    borderRadius: '12px',
+                    border: isCurrent ? '2px solid var(--brand, #6b215c)' : reached ? '1px solid rgba(29, 107, 67, 0.35)' : '1px solid rgba(120, 80, 100, 0.16)',
+                    background: isCurrent ? 'rgba(107, 33, 92, 0.08)' : reached ? 'rgba(29, 107, 67, 0.06)' : 'rgba(120, 80, 100, 0.03)',
+                  }}
+                >
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: reached ? 'var(--brand, #6b215c)' : 'var(--muted, #7a6874)' }}>
+                    {reached ? '✓ ' : `${index + 1}. `}{step.label}
+                  </div>
+                  <div style={{ fontSize: '0.73rem', color: 'var(--muted, #6a5864)', marginTop: '0.2rem' }}>{step.description}</div>
+                  {historyMatch?.changedAt && (
+                    <small style={{ display: 'block', marginTop: '0.25rem', fontSize: '0.7rem', color: 'var(--brand, #6b215c)' }}>
+                      {new Date(historyMatch.changedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                    </small>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: 'grid', gap: '0.75rem', padding: '0.9rem 1rem', borderRadius: '12px', background: 'var(--surface-subtle, #fdf8fb)', border: '1px solid rgba(107, 33, 92, 0.15)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+              <div>
+                <strong style={{ color: 'var(--brand, #6b215c)' }}>🛵 Live Partner Movement:</strong>{' '}
+                <span>{partnerMovementLabel}</span>
+              </div>
+              {item.deliveryPartner && (
+                <span style={{ fontSize: '0.88rem', fontWeight: 600 }}>
+                  Partner: {item.deliveryPartner.name} ({item.deliveryPartner.phoneE164})
+                  {item.deliveryPartner.distanceKm !== undefined && item.deliveryPartner.distanceKm !== null ? ` · ${item.deliveryPartner.distanceKm} km from Seller` : ''}
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.75rem', fontSize: '0.86rem' }}>
+              {item.sellerPickup && (
+                <div>
+                  <strong>Pickup Origin (Seller):</strong> {item.sellerPickup.sellerName}<br />
+                  <span>{item.sellerPickup.address}, {item.sellerPickup.city}</span>
+                  {item.sellerPickup.latitude !== undefined && item.sellerPickup.longitude !== undefined && (
+                    <small style={{ display: 'block', color: 'var(--muted, #6a5864)' }}>
+                      GPS: {item.sellerPickup.latitude.toFixed(4)}, {item.sellerPickup.longitude.toFixed(4)}
+                    </small>
+                  )}
+                </div>
+              )}
+              {item.address && (
+                <div>
+                  <strong>Drop-off Destination (Customer):</strong> {item.address.name}<br />
+                  <span>{item.address.formattedAddress || `${item.address.addressLine1}, ${item.address.locality}, ${item.address.postalCode}`}</span>
+                  {item.address.latitude !== undefined && item.address.longitude !== undefined && (
+                    <small style={{ display: 'block', color: 'var(--muted, #6a5864)' }}>
+                      GPS: {item.address.latitude.toFixed(4)}, {item.address.longitude.toFixed(4)}
+                    </small>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
       <section className="panel order-timeline-panel">
-        <div className="panel-heading"><h2>Order progress</h2><button className="button button-outline" onClick={() => void order.reload()}>Refresh status</button></div>
+        <div className="panel-heading"><h2>Chronological status log</h2><button className="button button-outline" onClick={() => void order.reload()}>Refresh status</button></div>
         <ol className="order-timeline">
           {history.map((entry, index) => (
             <li className="order-timeline-entry" key={`${entry.status}-${entry.changedAt}-${index}`}>
@@ -1081,6 +1313,7 @@ function CustomerOrderPage(): ReactNode {
           {canCancel && <button className="button button-outline" onClick={() => void cancel()}>Request cancellation</button>}
         </aside>
       </div>
+      <CustomerReturnAndCancelPanel order={item} onOrderUpdated={(updated) => order.setData(updated)} />
     </div>
   );
 }
@@ -1201,7 +1434,7 @@ function SuperAdminLayout({ children }: { children: ReactNode }): ReactNode {
       {mobileOpen && <button className="super-admin-backdrop" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
       <aside className={`super-admin-sidebar${mobileOpen ? ' is-open' : ''}`}>
         <Link to="/super-admin" className="super-admin-brand">
-          <img src="/images/esakhi-emblem.png" alt="" />
+          <img src="/images/maitri-sisterhood-logo.png" alt="" />
           <span>eSakhi<small>Super Admin Portal</small></span>
         </Link>
         <nav className="super-admin-nav" aria-label="Super Admin navigation">
@@ -1303,25 +1536,55 @@ function SuperAdminModulePage({
   );
 }
 
+const indianStatesAndTerritories = [
+  'Andaman and Nicobar Islands', 'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chandigarh',
+  'Chhattisgarh', 'Dadra and Nagar Haveli and Daman and Diu', 'Delhi', 'Goa', 'Gujarat', 'Haryana',
+  'Himachal Pradesh', 'Jammu and Kashmir', 'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh', 'Lakshadweep',
+  'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Puducherry',
+  'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand',
+  'West Bengal',
+];
+
 function SuperAdminCitiesPage(): ReactNode {
   const settingsResult = useLoad(() => api.settings(), []);
   const citiesResult = useLoad(() => api.superAdminCities(), []);
+  const placesResult = useLoad(() => import('./data/indiaPopulatedPlaces.json').then((module) => module.default), []);
   const [city, setCity] = useState('');
+  const [state, setState] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    if (settingsResult.data?.city) setCity(settingsResult.data.city);
+    if (settingsResult.data) {
+      setCity(settingsResult.data.city);
+      setState(settingsResult.data.state);
+    }
   }, [settingsResult.data]);
+
+  const cityOptions = Array.from(new Set([
+    ...(placesResult.data ?? []).filter((place) => place.state === state).map((place) => place.city),
+    ...(state === settingsResult.data?.state && settingsResult.data?.city && !(placesResult.data ?? []).some((place) => place.city.toLocaleLowerCase() === settingsResult.data?.city.toLocaleLowerCase())
+      ? [settingsResult.data.city]
+      : []),
+  ])).sort((left, right) => left.localeCompare(right));
+  const selectedCityIsListedForState = (placesResult.data ?? []).some((place) =>
+    place.state === state && place.city.toLocaleLowerCase() === city.toLocaleLowerCase(),
+  );
+  const selectedCityIsLegacyCurrentCity = Boolean(
+    placesResult.data && settingsResult.data &&
+    state === settingsResult.data.state && city === settingsResult.data.city &&
+    !placesResult.data.some((place) => place.city.toLocaleLowerCase() === city.toLocaleLowerCase()),
+  );
+  const canSaveCity = selectedCityIsListedForState || selectedCityIsLegacyCurrentCity;
 
   const saveCity = async (event: FormEvent) => {
     event.preventDefault();
-    if (!settingsResult.data) return;
+    if (!settingsResult.data || !canSaveCity) return;
     setSaving(true); setError(''); setMessage('');
     try {
-      await api.saveSettings({ ...settingsResult.data, city: city.trim() });
-      setMessage('Platform city updated successfully.');
+      await api.saveSettings({ ...settingsResult.data, city: city.trim(), state: state.trim() });
+      setMessage('Platform city and state updated successfully.');
       await settingsResult.reload(false);
       await citiesResult.reload(false);
     } catch (cause) {
@@ -1334,7 +1597,7 @@ function SuperAdminCitiesPage(): ReactNode {
   return (
     <div className="super-admin-page">
       <div className="super-admin-page-heading">
-        <div><p className="super-admin-eyebrow">Operations</p><h1>Cities & Service Zones</h1><p>Configure the active city and assign the current City Admin coverage for it.</p></div>
+        <div><p className="super-admin-eyebrow">Operations</p><h1>Cities & Service Zones</h1><p>Select the state first, then choose a city already present in platform records.</p></div>
       </div>
       {error && <Notice tone="error">{error}</Notice>}
       {message && <Notice tone="success">{message}</Notice>}
@@ -1346,10 +1609,19 @@ function SuperAdminCitiesPage(): ReactNode {
       </div>
       <div className="super-admin-lower-grid">
         <section className="super-admin-panel super-admin-recent-orders">
-          <div className="super-admin-panel-heading"><div><h2>City configuration</h2><p>Update the active platform city.</p></div></div>
+          <div className="super-admin-panel-heading"><div><h2>City configuration</h2><p>Update the active platform city and state.</p></div></div>
           <form className="stack-form" onSubmit={(event) => void saveCity(event)}>
-            <label className="field"><span>City name</span><input aria-label="City name" value={city} onChange={(event) => setCity(event.target.value)} /></label>
-            <button className="button" type="submit" disabled={saving || !settingsResult.data}>{saving ? 'Saving…' : 'Save city'}</button>
+            <label className="field"><span>State / Union Territory</span><select aria-label="State or Union Territory" required value={state} onChange={(event) => { setState(event.target.value); setCity(''); }}>
+              {!indianStatesAndTerritories.includes(state) && state && <option value={state}>{state}</option>}
+              {indianStatesAndTerritories.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select></label>
+            <label className="field"><span>City</span><select aria-label="City" required value={city} onChange={(event) => setCity(event.target.value)}>
+              <option value="">{placesResult.loading ? 'Loading cities…' : placesResult.error ? 'City list unavailable' : 'Select a city'}</option>
+              {cityOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select></label>
+            {placesResult.error && <div className="super-admin-error" role="alert">{placesResult.error}<button type="button" onClick={() => void placesResult.reload()}>Retry</button></div>}
+            <p className="super-admin-data-note">Place names: <a href="https://www.geonames.org/" target="_blank" rel="noreferrer">GeoNames cities15000</a>, CC BY 4.0 (places above 15,000 population or administrative seats). This list does not define service coverage.</p>
+            <button className="button" type="submit" disabled={saving || !settingsResult.data || !city.trim() || !state || !canSaveCity}>{saving ? 'Saving…' : 'Save city details'}</button>
           </form>
         </section>
       </div>
@@ -1582,7 +1854,7 @@ function SuperAdminSellerDetailPage(): ReactNode {
       <section className="super-admin-panel super-admin-order-directory">
         <div className="super-admin-panel-heading"><div><h2>Seller products</h2><p>Inventory records linked to this seller.</p></div></div>
         {productsResult.error && <div className="super-admin-error" role="alert">{productsResult.error}<button onClick={() => void productsResult.reload()}>Retry</button></div>}
-        {productsResult.loading ? <Loading label="Loading seller products…" /> : productsResult.data?.data.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th></tr></thead><tbody>{productsResult.data.data.map((product) => <tr key={product._id}><td>{product.name}</td><td>{product.category}</td><td>{formatMoney(product.pricePaise)}</td><td>{product.variants?.length ? product.variants.reduce((total, variant) => total + variant.stock, 0) : product.stock}</td><td><StatusBadge value={product.isActive ? 'active' : product.isArchived ? 'archived' : 'inactive'} /></td></tr>)}</tbody></table></div> : <div className="super-admin-empty">No products are linked to this seller.</div>}
+        {productsResult.loading ? <Loading label="Loading seller products…" /> : productsResult.data?.data.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th></tr></thead><tbody>{productsResult.data.data.map((product) => <tr key={product._id}><td>{product.name}</td><td>{product.categoryName}<small>{product.subcategoryName}</small></td><td>{formatMoney(product.pricePaise)}</td><td>{product.variants?.length ? product.variants.reduce((total, variant) => total + variant.stock, 0) : product.stock}</td><td><StatusBadge value={product.isActive ? 'active' : product.isArchived ? 'archived' : 'inactive'} /></td></tr>)}</tbody></table></div> : <div className="super-admin-empty">No products are linked to this seller.</div>}
         {productsResult.data && productsResult.data.pagination.totalPages > 1 && <Pagination page={page} pages={productsResult.data.pagination.totalPages} onChange={setPage} />}
       </section>
     </div>
@@ -1590,8 +1862,14 @@ function SuperAdminSellerDetailPage(): ReactNode {
 }
 
 function SuperAdminProductsPage(): ReactNode {
+  const categories = useLoad(() => api.categories());
   const [page, setPage] = useState(1);
-  const result = useLoad(() => api.adminProducts(new URLSearchParams({ page: String(page), limit: '20', archived: 'false' })), [page]);
+  const [categoryId, setCategoryId] = useState('');
+  const [subcategoryId, setSubcategoryId] = useState('');
+  const query = new URLSearchParams({ page: String(page), limit: '20', archived: 'false' });
+  if (categoryId) query.set('categoryId', categoryId);
+  if (subcategoryId) query.set('subcategoryId', subcategoryId);
+  const result = useLoad(() => api.adminProducts(query), [page, categoryId, subcategoryId]);
 
   return (
     <div className="super-admin-page">
@@ -1606,7 +1884,10 @@ function SuperAdminProductsPage(): ReactNode {
       </div>
       <section className="super-admin-panel super-admin-recent-orders">
         <div className="super-admin-panel-heading"><div><h2>Product inventory</h2><p>Product metadata and stock visibility for the marketplace.</p></div></div>
-        {result.loading ? <Loading label="Loading products…" /> : result.data?.data.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Product</th><th>Seller</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th></tr></thead><tbody>{result.data.data.map((product) => <tr key={product._id}><td><Link to={`/super-admin/products/${product._id}`}>{product.name}</Link></td><td>{product.sellerId ? <Link to={`/super-admin/sellers/${product.sellerId}`}>{product.sellerId.slice(-6)}</Link> : 'Unassigned'}</td><td>{product.category}</td><td>{formatMoney(product.pricePaise)}</td><td>{product.variants?.length ? product.variants.reduce((sum, variant) => sum + variant.stock, 0) : product.stock}</td><td><StatusBadge value={product.isActive ? 'active' : product.isArchived ? 'archived' : 'inactive'} /></td></tr>)}</tbody></table></div> : <div className="super-admin-empty">No products have been added to the catalog yet.</div>}
+        {result.error && <div className="super-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+        {categories.error && <div className="super-admin-error" role="alert">{categories.error}<button onClick={() => void categories.reload()}>Retry categories</button></div>}
+        <div className="admin-toolbar"><select aria-label="Filter products by main category" value={categoryId} onChange={(event) => { setPage(1); setCategoryId(event.target.value); setSubcategoryId(''); }}><option value="">All categories</option>{(categories.data ?? []).map((category) => <option key={category.categoryId} value={category.categoryId}>{category.categoryName}</option>)}</select><select aria-label="Filter products by subcategory" value={subcategoryId} disabled={!categoryId} onChange={(event) => { setPage(1); setSubcategoryId(event.target.value); }}><option value="">All subcategories</option>{(categories.data?.find((category) => category.categoryId === categoryId)?.subcategories ?? []).map((subcategory) => <option key={subcategory.subcategoryId} value={subcategory.subcategoryId}>{subcategory.subcategoryName}</option>)}</select></div>
+        {result.loading ? <Loading label="Loading products…" /> : result.data?.data.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Product</th><th>Seller</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th></tr></thead><tbody>{result.data.data.map((product) => <tr key={product._id}><td><Link to={`/super-admin/products/${product._id}`}>{product.name}</Link></td><td>{product.sellerId ? <Link to={`/super-admin/sellers/${product.sellerId}`}>{product.sellerId.slice(-6)}</Link> : 'Unassigned'}</td><td>{product.categoryName}<small>{product.subcategoryName}</small></td><td>{formatMoney(product.pricePaise)}</td><td>{product.variants?.length ? product.variants.reduce((sum, variant) => sum + variant.stock, 0) : product.stock}</td><td><StatusBadge value={product.isActive ? 'active' : product.isArchived ? 'archived' : 'inactive'} /></td></tr>)}</tbody></table></div> : !result.error && <div className="super-admin-empty">No products have been added to the catalog yet.</div>}
         {result.data && result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}
       </section>
     </div>
@@ -1622,7 +1903,7 @@ function SuperAdminProductDetailPage(): ReactNode {
   const stock = product.variants?.length ? product.variants.reduce((total, variant) => total + variant.stock, 0) : product.stock;
   return (
     <div className="super-admin-page">
-      <div className="super-admin-page-heading"><div><p className="super-admin-eyebrow"><Link to="/super-admin/products">Products & Inventory</Link> / Product</p><h1>{product.name}</h1><p>{product.category} · product ID {product._id}</p></div></div>
+      <div className="super-admin-page-heading"><div><p className="super-admin-eyebrow"><Link to="/super-admin/products">Products & Inventory</Link> / Product</p><h1>{product.name}</h1><p>{product.categoryName} · {product.subcategoryName} · product ID {product._id}</p></div></div>
       <div className="super-admin-metrics">
         <SuperAdminMetric label="Price" value={formatMoney(product.pricePaise)} icon="payments" />
         <SuperAdminMetric label="Stock" value={stock} icon="products" detail={`Low-stock threshold: ${product.lowStockThreshold}`} />
@@ -1635,7 +1916,7 @@ function SuperAdminProductDetailPage(): ReactNode {
           <div><dt>Seller</dt><dd>{product.sellerId ? <Link to={`/super-admin/sellers/${product.sellerId}`}>{product.sellerId}</Link> : 'Not assigned'}</dd></div>
           <div><dt>Product ID</dt><dd><code>{product._id}</code></dd></div>
           <div><dt>Slug</dt><dd>{product.slug}</dd></div>
-          <div><dt>Category</dt><dd>{product.category}</dd></div>
+          <div><dt>Category</dt><dd>{product.categoryName} · {product.subcategoryName}</dd></div>
           <div><dt>Description</dt><dd>{product.description}</dd></div>
         </dl>
       </section>
@@ -1793,18 +2074,16 @@ function SuperAdminCustomerDetailPage(): ReactNode {
 
 function SuperAdminSupportPage(): ReactNode {
   return (
-    <SuperAdminModulePage
-      eyebrow="Operations"
-      title="Support & Disputes"
-      description="Track active support cases, dispute workflow, and service issues across the marketplace."
-      metrics={[
-        { label: 'Open Cases', value: '0', detail: 'Awaiting triage', icon: 'support' },
-        { label: 'Priority', value: '0', detail: 'High-priority cases', icon: 'orders' },
-        { label: 'Assignments', value: '0', detail: 'Cases assigned to staff', icon: 'administrators' },
-        { label: 'Resolved Today', value: '0', detail: 'Closed in the current day', icon: 'overview' },
-      ]}
-      note="Support records should tie back to the original order, customer, seller, or partner without exposing private notes to unintended roles."
-    />
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading">
+        <div>
+          <p className="super-admin-eyebrow">Operations</p>
+          <h1>Support, Return Disputes & Refunds</h1>
+          <p>Track return disputes, 1-click customer refund disbursements, and monthly penalty deductions across the marketplace.</p>
+        </div>
+      </div>
+      <SuperAdminRefundsAndSettlementsView />
+    </div>
   );
 }
 
@@ -1834,52 +2113,46 @@ function SuperAdminPaymentsPage(): ReactNode {
 
 function SuperAdminRefundsPage(): ReactNode {
   return (
-    <SuperAdminModulePage
-      eyebrow="Finance"
-      title="Refunds"
-      description="Track refund requests, decision status, and payment-backout processing for approved order cases."
-      metrics={[
-        { label: 'Refund Requests', value: '0', detail: 'Open cases', icon: 'refunds' },
-        { label: 'Approved', value: '0', detail: 'Approved in the current cycle', icon: 'overview' },
-        { label: 'Processing', value: '0', detail: 'In progress', icon: 'payments' },
-        { label: 'Rejected', value: '0', detail: 'Needs reasoned closure', icon: 'security' },
-      ]}
-      note="Refund workflows remain independent from general payment status and should respect approved business policy before execution."
-    />
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading">
+        <div>
+          <p className="super-admin-eyebrow">Finance</p>
+          <h1>1-Click Refunds & Dispute Escalations</h1>
+          <p>Disburse refunds directly to linked Customer Bank Accounts for READY_FOR_REFUND orders and manage penalty ledgers.</p>
+        </div>
+      </div>
+      <SuperAdminRefundsAndSettlementsView />
+    </div>
   );
 }
 
 function SuperAdminSettlementsPage(): ReactNode {
   return (
-    <SuperAdminModulePage
-      eyebrow="Finance"
-      title="Seller Settlements"
-      description="Review shop earnings, withheld balances, and settlement liabilities by seller or SHG."
-      metrics={[
-        { label: 'Seller Liabilities', value: '₹0', detail: 'Outstanding settlement amount', icon: 'settlements' },
-        { label: 'Settled This Period', value: '₹0', detail: 'Paid to sellers', icon: 'payments' },
-        { label: 'Pending Review', value: '0', detail: 'Requires admin check', icon: 'support' },
-        { label: 'Approved SHGs', value: '0', detail: 'Eligible seller accounts', icon: 'sellers' },
-      ]}
-      note="Seller settlements should reflect approved business rules and may be withheld until verification or required compliance steps are completed."
-    />
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading">
+        <div>
+          <p className="super-admin-eyebrow">Finance</p>
+          <h1>Seller Monthly Settlements & Penalty Deductions</h1>
+          <p>Review Gross Monthly Payout − Accumulated Penalty Deductions = Final Net Monthly Settlement by seller or SHG.</p>
+        </div>
+      </div>
+      <SuperAdminRefundsAndSettlementsView />
+    </div>
   );
 }
 
 function SuperAdminPayoutsPage(): ReactNode {
   return (
-    <SuperAdminModulePage
-      eyebrow="Finance"
-      title="Delivery Partner Payouts"
-      description="Track partner earnings, payout readiness, and awaiting-disbursement records for delivery work."
-      metrics={[
-        { label: 'Due Payouts', value: '₹0', detail: 'Pending partner disbursements', icon: 'payouts' },
-        { label: 'Approved', value: '₹0', detail: 'Ready for payout', icon: 'overview' },
-        { label: 'Processing', value: '0', detail: 'In disbursement queue', icon: 'payments' },
-        { label: 'Exceptions', value: '0', detail: 'Manual review required', icon: 'support' },
-      ]}
-      note="Payout liability must be tracked separately from order totals and should exclude amounts not yet approved or verified."
-    />
+    <div className="super-admin-page">
+      <div className="super-admin-page-heading">
+        <div>
+          <p className="super-admin-eyebrow">Finance</p>
+          <h1>Delivery Partner Payouts & Transit Penalty Ledger</h1>
+          <p>Track partner delivery earnings, transit damage penalty deductions, and monthly pay slip settlement balances.</p>
+        </div>
+      </div>
+      <SuperAdminRefundsAndSettlementsView />
+    </div>
   );
 }
 
@@ -1917,12 +2190,10 @@ function SuperAdminSettingsPage(): ReactNode {
 function SuperAdminRolesPage(): ReactNode {
   const rows: ReactNode[][] = [
     ['Super Admin', 'Platform-wide', 'Global operations and platform configuration', <Link key="access" to="/super-admin">Open workspace</Link>],
-    ['Admin', 'Marketplace-wide', 'Admin APIs for orders, customers, catalogue, and settings', <Link key="access" to="/admin">Admin workspace</Link>],
     ['City Admin', 'Assigned city', 'City-scoped order operations; cannot grant broader roles', <Link key="access" to="/super-admin/city-administrators">City Admin directory</Link>],
     ['Seller', 'Own account', 'Own products and seller order items', <Link key="access" to="/super-admin/sellers">Seller directory</Link>],
     ['Delivery Partner', 'Own assignments', 'Assigned delivery updates and history', <Link key="access" to="/super-admin/delivery-partners">Partner directory</Link>],
     ['Customer', 'Own account', 'Own profile, addresses, and orders', <Link key="access" to="/super-admin/customers">Customer directory</Link>],
-    ['Staff', 'Admin workspace', 'Limited by staff-enabled setting and route-level policy', <Link key="access" to="/super-admin/settings">Platform settings</Link>],
   ];
   return (
     <div className="super-admin-page">
@@ -1971,6 +2242,7 @@ function SuperAdminSecurityPage(): ReactNode {
 function SuperAdminOverviewPage(): ReactNode {
   const [days, setDays] = useState(30);
   const result = useLoad(() => api.superAdminOverview(days), [days]);
+  useRefreshOnFocus(result.reload);
   const overview = result.data;
   const metrics = overview?.metrics;
 
@@ -2024,7 +2296,8 @@ function SuperAdminOverviewPage(): ReactNode {
               </div>
             </section>
           </div>
-          <p className="super-admin-data-note">Order value is a sum of non-cancelled order totals; it is not platform revenue, verified collections, or a settlement balance. Cities, seller records, refunds, payouts, and support cases are not yet available in the backend.</p>
+          <SuperAdminRefundsAndSettlementsView />
+          <p className="super-admin-data-note">Order value is a sum of non-cancelled order totals; it is not platform revenue, verified collections, or a settlement balance.</p>
         </>
       ) : null}
     </div>
@@ -2040,13 +2313,15 @@ function SuperAdminOrdersPage(): ReactNode {
   if (queryText.trim()) query.set('q', queryText.trim());
   if (paymentStatus) query.set('paymentStatus', paymentStatus);
   const result = useLoad(() => api.superAdminOrders(query), [page, queryText, paymentStatus]);
+  useRefreshOnFocus(result.reload);
 
   return (
     <div className="super-admin-page">
       <div className="super-admin-page-heading">
-        <div><p className="super-admin-eyebrow">Operations</p><h1>Orders & Assignments</h1><p>Read-only order records and current payment and fulfilment states.</p></div>
+        <div><p className="super-admin-eyebrow">Operations</p><h1>Orders & Assignments</h1><p>Read-only order records, 1-click refund queue, and current payment and fulfilment states.</p></div>
       </div>
       {result.error && <div className="super-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+      <SuperAdminRefundsAndSettlementsView />
       <section className="super-admin-panel super-admin-order-directory">
         <div className="super-admin-order-tools">
           <label className="super-admin-search"><span aria-hidden="true">⌕</span><input aria-label="Search order reference or customer" placeholder="Search order or customer" value={queryText} onChange={(event) => { setPage(1); setQueryText(event.target.value); }} /></label>
@@ -2064,6 +2339,7 @@ function SuperAdminOrdersPage(): ReactNode {
 function SuperAdminOrderDetailPage(): ReactNode {
   const { id = '' } = useParams();
   const result = useLoad(() => api.adminOrder(id), [id]);
+  useRefreshOnFocus(result.reload);
   const order = result.data;
   if (result.loading) return <div className="super-admin-page"><Loading label="Loading order details…" /></div>;
   if (!order) return <div className="super-admin-page"><Notice tone="error">{result.error || 'Order not found.'}</Notice><Link className="super-admin-text-link" to="/super-admin/orders">← Back to orders</Link></div>;
@@ -2078,13 +2354,16 @@ function SuperAdminOrderDetailPage(): ReactNode {
       </div>
       <div className="super-admin-detail-grid">
         <section className="super-admin-panel super-admin-profile-panel">
-          <div className="super-admin-panel-heading"><div><h2>Customer & destination</h2><p>Order-linked customer and delivery details.</p></div></div>
+          <div className="super-admin-panel-heading"><div><h2>Customer, Seller & Governance</h2><p>Read-only multi-role order participants and locations.</p></div></div>
           <dl className="super-admin-definition-list">
             <div><dt>Customer</dt><dd>{order.customerId ? <Link to={`/super-admin/customers/${order.customerId}`}>{order.customerName}</Link> : order.customerName}</dd></div>
-            <div><dt>Phone</dt><dd>{order.customerPhoneE164 || order.customerPhone || '—'}</dd></div>
+            <div><dt>Customer phone</dt><dd>{order.customerPhoneE164 || order.customerPhone || '—'}</dd></div>
+            <div><dt>Seller / SHG</dt><dd>{order.sellerPickup?.sellerId ? <Link to={`/super-admin/sellers/${order.sellerPickup.sellerId}`}>{order.sellerPickup.sellerName}</Link> : order.sellerPickup?.sellerName || '—'}</dd></div>
+            <div><dt>Seller pickup address</dt><dd>{order.sellerPickup ? `${order.sellerPickup.address}, ${order.sellerPickup.city}${order.sellerPickup.latitude !== undefined && order.sellerPickup.longitude !== undefined ? ` (${order.sellerPickup.latitude.toFixed(4)}, ${order.sellerPickup.longitude.toFixed(4)})` : ''}` : '—'}</dd></div>
             <div><dt>City</dt><dd>{order.address?.city ? <Link to={`/super-admin/cities/${encodeURIComponent(order.address.city)}`}>{order.address.city}</Link> : 'Pickup'}</dd></div>
+            <div><dt>City Admin responsible</dt><dd>{order.cityAdminDetails?.id ? <Link to={`/super-admin/city-admins/${order.cityAdminDetails.id}`}>{order.cityAdminDetails.name}</Link> : order.cityAdminDetails?.name || '—'}{order.cityAdminDetails?.phoneE164 ? ` · ${order.cityAdminDetails.phoneE164}` : ''}</dd></div>
             <div><dt>Locality</dt><dd>{order.address?.locality || '—'}</dd></div>
-            <div><dt>Delivery partner</dt><dd>{order.deliveryPartner?.userId ? <Link to={`/super-admin/delivery-partners/${order.deliveryPartner.userId}`}>{order.deliveryPartner.name}</Link> : order.deliveryPartner?.name || 'Not assigned'}</dd></div>
+            <div><dt>Delivery partner</dt><dd>{order.deliveryPartner?.userId ? <Link to={`/super-admin/delivery-partners/${order.deliveryPartner.userId}`}>{order.deliveryPartner.name}</Link> : order.deliveryPartner?.name || 'Not assigned'}{order.deliveryPartner?.distanceKm !== undefined && order.deliveryPartner?.distanceKm !== null ? ` (${order.deliveryPartner.distanceKm} km from Seller)` : ''}</dd></div>
           </dl>
         </section>
         <section className="super-admin-panel super-admin-profile-panel">
@@ -2194,7 +2473,8 @@ function SuperAdminOrdersChart({ data }: { data: Array<{ day: string; count: num
 function SuperAdminStatusBreakdown({ statuses }: { statuses: Array<{ status: string; count: number }> }): ReactNode {
   const total = statuses.reduce((sum, item) => sum + item.count, 0);
   const colors: Record<string, string> = {
-    placed: '#d99116', accepted: '#7351a6', preparing: '#ce6d3d', ready_for_pickup: '#3e81ae',
+    placed: '#d99116', order_confirmed: '#d99116', accepted: '#7351a6', preparing: '#ce6d3d', ready_for_pickup: '#3e81ae',
+    delivery_partner_assigned: '#2563eb', out_for_pickup: '#0891b2', picked_up: '#7c3aed',
     out_for_delivery: '#a43d83', delivered: '#21865b', completed: '#597e70', cancelled: '#c4c6ce', delivery_failed: '#d94b4b',
   };
   let offset = 0;
@@ -2217,17 +2497,28 @@ function SuperAdminOrderTable({ orders }: { orders: SuperAdminOrder[] }): ReactN
   return (
     <div className="super-admin-table-wrap">
       <table className="super-admin-table">
-        <thead><tr><th>Order</th><th>Customer</th><th>City</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Assigned partner</th></tr></thead>
+        <thead><tr><th>Order</th><th>Customer</th><th>Seller</th><th>City & Admin</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Assigned partner</th><th>Timestamps</th></tr></thead>
         <tbody>{orders.map((order) => (
           <tr key={order._id}>
-            <td><Link to={`/super-admin/orders/${order._id}`}>{order.orderReference}</Link><small>{new Date(order.createdAt).toLocaleDateString('en-IN')}</small></td>
+            <td><Link to={`/super-admin/orders/${order._id}`}>{order.orderReference}</Link><small>{order._id}</small></td>
             <td>{order.customerId ? <Link to={`/super-admin/customers/${order.customerId}`}>{order.customerName}</Link> : order.customerName}</td>
-            <td>{order.address?.city ? <Link to={`/super-admin/cities/${encodeURIComponent(order.address.city)}`}>{order.address.city}</Link> : 'Pickup'}</td>
+            <td>{order.sellerDetails?.sellerName || order.sellerPickup?.sellerName || '—'}<small>{order.sellerDetails?.phoneE164 || order.sellerPickup?.phoneE164 || ''}</small></td>
+            <td>
+              {order.address?.city ? <Link to={`/super-admin/cities/${encodeURIComponent(order.address.city)}`}>{order.address.city}</Link> : 'Pickup'}
+              <small>{order.cityAdminDetails?.name ? `Admin: ${order.cityAdminDetails.name}` : '—'}</small>
+            </td>
             <td className="super-admin-order-items">{order.items.map((item) => item.productName).slice(0, 2).join(', ')}{order.items.length > 2 ? ` +${order.items.length - 2}` : ''}</td>
             <td>{formatMoney(order.totalPaise)}</td>
             <td><span className="super-admin-payment">{order.paymentMethod.toUpperCase()}</span><small>{order.paymentStatus.replaceAll('_', ' ')}</small></td>
             <td><span className={`super-admin-status-badge status-${order.fulfilmentStatus}`}>{orderStatusLabel(order.fulfilmentStatus)}</span></td>
-            <td>{order.deliveryPartner?.userId ? <Link to={`/super-admin/delivery-partners/${order.deliveryPartner.userId}`}>{order.deliveryPartner.name}</Link> : order.deliveryPartner?.name || '—'}</td>
+            <td>
+              {order.deliveryPartner?.userId ? <Link to={`/super-admin/delivery-partners/${order.deliveryPartner.userId}`}>{order.deliveryPartner.name}</Link> : order.deliveryPartner?.name || '—'}
+              {order.deliveryPartner?.distanceKm !== undefined && order.deliveryPartner?.distanceKm !== null && <small>{order.deliveryPartner.distanceKm} km from Seller</small>}
+            </td>
+            <td>
+              <small>Placed: {new Date(order.createdAt).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</small>
+              {order.updatedAt && <small>Updated: {new Date(order.updatedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</small>}
+            </td>
           </tr>
         ))}</tbody>
       </table>
@@ -2257,11 +2548,11 @@ const cityAdminNavGroups = [
   {
     label: 'Local Operations',
     items: [
-      { label: 'My Service Zones', icon: 'cities' },
-      { label: 'Sellers & SHGs', icon: 'sellers' },
-      { label: 'Products & Inventory', icon: 'products' },
+      { label: 'My Service Zones', icon: 'cities', path: '/city-admin/service-zones' },
+      { label: 'Sellers & SHGs', icon: 'sellers', path: '/city-admin/sellers' },
+      { label: 'Products & Inventory', icon: 'products', path: '/city-admin/products' },
       { label: 'Orders & Assignments', icon: 'orders', path: '/city-admin/orders' },
-      { label: 'Delivery Partners', icon: 'delivery' },
+      { label: 'Delivery Partners', icon: 'delivery', path: '/city-admin/delivery-partners' },
       { label: 'Customers', icon: 'customers' },
       { label: 'Support & Disputes', icon: 'support' },
     ],
@@ -2271,12 +2562,126 @@ const cityAdminNavGroups = [
   { label: 'Account', items: [{ label: 'My Profile', icon: 'roles' }, { label: 'Notifications', icon: 'support' }] },
 ];
 
+function computeDistanceKm(
+  lat1?: number,
+  lon1?: number,
+  lat2?: number,
+  lon2?: number,
+): number | null {
+  if (
+    typeof lat1 !== 'number' || !Number.isFinite(lat1) ||
+    typeof lon1 !== 'number' || !Number.isFinite(lon1) ||
+    typeof lat2 !== 'number' || !Number.isFinite(lat2) ||
+    typeof lon2 !== 'number' || !Number.isFinite(lon2)
+  ) {
+    return null;
+  }
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c * 100) / 100;
+}
+
+function partnerAvailabilityBadge(partner: CityAdminDeliveryPartner): string {
+  if (!partner.isOnline || partner.availabilityStatus === 'offline') return 'OFFLINE';
+  if (partner.availabilityStatus === 'busy' || partner.activeDeliveries > 0) return 'ONLINE · ON DELIVERY';
+  return 'ONLINE & AVAILABLE';
+}
+
 function CityAdminLayout({ children }: { children: ReactNode }): ReactNode {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [mobileOpen, setMobileOpen] = useState(false);
   const displayName = user?.name || 'City Administrator';
+  const readyPickupQuery = useMemo(() => new URLSearchParams({ page: '1', limit: '20', fulfilmentStatus: 'ready_for_pickup', unassignedOnly: 'true' }), []);
+  const readyOrders = useLoad(() => api.cityAdminOrders(readyPickupQuery), [user?.id, user?.assignedCity]);
+  const readyPartners = useLoad(() => api.cityAdminDeliveryPartners(1, 100), [user?.id, user?.assignedCity]);
+  const [dismissedReadyIds, setDismissedReadyIds] = useState<string[]>([]);
+  const [manualPopupOpen, setManualPopupOpen] = useState(false);
+  const [selectedPartners, setSelectedPartners] = useState<Record<string, string>>({});
+  const [assigningOrderId, setAssigningOrderId] = useState('');
+  const [popupError, setPopupError] = useState('');
+  const [popupMessage, setPopupMessage] = useState('');
+
+  useEffect(() => {
+    const refreshReady = () => {
+      void readyOrders.reload(false);
+      void readyPartners.reload(false);
+    };
+    const timer = window.setInterval(refreshReady, 5_000);
+    window.addEventListener('focus', refreshReady);
+    window.addEventListener('city-admin-order-updated', refreshReady);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshReady);
+      window.removeEventListener('city-admin-order-updated', refreshReady);
+    };
+  }, [readyOrders.reload, readyPartners.reload]);
+
+  const unassignedReadyOrders = readyOrders.data?.data ?? [];
+  const hasNewReadyOrder = unassignedReadyOrders.some((order) => !dismissedReadyIds.includes(order._id));
+  const showReadyPopup = manualPopupOpen || hasNewReadyOrder;
+  const activeCityPartners = (readyPartners.data?.data ?? []).filter((partner) => partner.status === 'active');
+
+  function getEligiblePartnersForOrder(order: CityAdminOrder): Array<CityAdminDeliveryPartner & { computedDistanceKm: number | null }> {
+    const orderLocality = order.address?.locality ?? '';
+    const sellerLat = order.sellerPickup?.latitude ?? 23.8388;
+    const sellerLng = order.sellerPickup?.longitude ?? 79.4422;
+    return activeCityPartners
+      .filter((partner) =>
+        (!orderLocality || !partner.serviceableLocalities?.length || partner.serviceableLocalities.some((loc) => loc.toLocaleLowerCase() === orderLocality.toLocaleLowerCase()))
+        && partner.isOnline !== false
+        && partner.availabilityStatus === 'available',
+      )
+      .map((partner) => ({
+        ...partner,
+        computedDistanceKm: computeDistanceKm(
+          sellerLat,
+          sellerLng,
+          partner.currentLocation?.latitude,
+          partner.currentLocation?.longitude,
+        ) ?? partner.distanceKm ?? null,
+      }))
+      .sort((a, b) => (a.computedDistanceKm ?? 9999) - (b.computedDistanceKm ?? 9999));
+  }
+
+  async function assignPartnerFromPopup(order: CityAdminOrder): Promise<void> {
+    const eligibleForOrder = getEligiblePartnersForOrder(order);
+    const chosenPartnerId = selectedPartners[order._id] || eligibleForOrder[0]?._id || '';
+    if (!chosenPartnerId) {
+      setPopupError('Please select an ONLINE & AVAILABLE delivery partner to assign.');
+      return;
+    }
+    setAssigningOrderId(order._id);
+    setPopupError('');
+    setPopupMessage('');
+    try {
+      await api.assignCityAdminDeliveryPartner(order._id, { partnerId: chosenPartnerId });
+      const chosenPartner = eligibleForOrder.find((p) => p._id === chosenPartnerId);
+      const partnerName = chosenPartner?.name || 'Delivery Partner';
+      const distText = chosenPartner?.computedDistanceKm !== null && chosenPartner?.computedDistanceKm !== undefined
+        ? ` (${chosenPartner.computedDistanceKm} km from Seller)`
+        : '';
+      setPopupMessage(`Assigned ${partnerName}${distText} to order #${order.orderReference}! Status is now DELIVERY_PARTNER_ASSIGNED.`);
+      await Promise.all([readyOrders.reload(false), readyPartners.reload(false)]);
+      window.dispatchEvent(new Event('city-admin-order-updated'));
+    } catch (cause) {
+      setPopupError(displayError(cause));
+    } finally {
+      setAssigningOrderId('');
+    }
+  }
+
+  function closeReadyPopup(): void {
+    setManualPopupOpen(false);
+    setDismissedReadyIds(unassignedReadyOrders.map((order) => order._id));
+  }
 
   async function handleSignOut(): Promise<void> {
     await signOut();
@@ -2294,7 +2699,7 @@ function CityAdminLayout({ children }: { children: ReactNode }): ReactNode {
     <div className="city-admin-shell">
       {mobileOpen && <button className="city-admin-backdrop" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
       <aside className={`city-admin-sidebar${mobileOpen ? ' is-open' : ''}`}>
-        <Link to="/city-admin" className="city-admin-brand"><img src="/images/esakhi-emblem.png" alt="" /><span>eSakhi<small>CITY ADMIN</small></span></Link>
+        <Link to="/city-admin" className="city-admin-brand"><img src="/images/maitri-sisterhood-logo.png" alt="" /><span>eSakhi<small>CITY ADMIN</small></span></Link>
         <div className="city-admin-assigned-city"><span>ASSIGNED CITY</span><strong>{user?.assignedCity}</strong><small>City Admin scope</small></div>
         <nav className="city-admin-nav" aria-label="City Admin navigation">
           {cityAdminNavGroups.map((group) => (
@@ -2324,7 +2729,175 @@ function CityAdminLayout({ children }: { children: ReactNode }): ReactNode {
             <button className="city-admin-menu-toggle" onClick={() => setMobileOpen((open) => !open)} aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'}>☰</button>
             <form className="city-admin-search" onSubmit={submitSearch}><span aria-hidden="true">⌕</span><input aria-label="Search orders" placeholder="Search orders, customers…" value={search} onChange={(event) => setSearch(event.target.value)} /><kbd>⌘ K</kbd></form>
           </div>
-          <div className="city-admin-topbar-actions"><span className="city-admin-live-label"><i /> Live operations</span><button className="city-admin-notifications" type="button" disabled title="Notification center is not available yet" aria-label="Notifications are not available yet"><SuperAdminIcon name="support" /></button><Link to="/help" className="city-admin-help" aria-label="Help">?</Link><button className="city-admin-mobile-signout" onClick={() => void handleSignOut()}>Sign out</button></div>
+          <div className="city-admin-topbar-actions">
+            {unassignedReadyOrders.length > 0 && (
+              <button
+                type="button"
+                className="city-admin-primary-button"
+                onClick={() => { setPopupError(''); setPopupMessage(''); setManualPopupOpen(true); }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', padding: '0.45rem 0.85rem', fontSize: '0.85rem' }}
+              >
+                <span aria-hidden="true">🔔</span> Ready for Pickup ({unassignedReadyOrders.length}) — Assign Partner
+              </button>
+            )}
+            <span className="city-admin-live-label"><i /> Live operations</span>
+            <button
+              className="city-admin-notifications"
+              type="button"
+              onClick={() => { setPopupError(''); setPopupMessage(''); setManualPopupOpen(true); }}
+              title={unassignedReadyOrders.length ? `${unassignedReadyOrders.length} order(s) ready for pickup awaiting partner assignment` : 'Check orders ready for pickup'}
+              aria-label="Open Ready for Pickup partner assignment popup"
+            >
+              <SuperAdminIcon name="delivery" />
+            </button>
+            <Link to="/help" className="city-admin-help" aria-label="Help">?</Link>
+            <button className="city-admin-mobile-signout" onClick={() => void handleSignOut()}>Sign out</button>
+          </div>
+        {popupMessage && !showReadyPopup && (
+          <div style={{ margin: '1rem 1.5rem 0' }}>
+            <Notice tone="success">{popupMessage}</Notice>
+          </div>
+        )}
+        {showReadyPopup && (
+          <div
+            className="city-admin-ready-modal-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="city-admin-ready-popup-title"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 1200,
+              background: 'rgba(28, 16, 24, 0.58)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '1.25rem',
+            }}
+          >
+            <div
+              className="city-admin-panel city-admin-ready-modal"
+              style={{
+                width: '100%',
+                maxWidth: '680px',
+                maxHeight: '88vh',
+                overflowY: 'auto',
+                background: 'var(--surface, #fff)',
+                borderRadius: '18px',
+                padding: '1.5rem',
+                boxShadow: '0 24px 60px rgba(25, 10, 20, 0.28)',
+                border: '2px solid var(--brand, #6b215c)',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', marginBottom: '1rem' }}>
+                <div>
+                  <p className="city-admin-eyebrow" style={{ color: 'var(--brand, #6b215c)', fontWeight: 700 }}>🔔 SELLER READY FOR PICKUP NOTIFICATION</p>
+                  <h2 id="city-admin-ready-popup-title" style={{ margin: '0.25rem 0', fontSize: '1.35rem' }}>
+                    {unassignedReadyOrders.length
+                      ? `Order Ready for Pickup — Assign a Delivery Partner (${unassignedReadyOrders.length})`
+                      : 'All Ready-for-Pickup Orders Assigned'}
+                  </h2>
+                  <p style={{ margin: 0, color: 'var(--muted, #6a5864)', fontSize: '0.92rem' }}>
+                    The seller has packed and marked the order as <strong>Ready for pickup</strong>. Select and assign a suitable delivery partner below.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="city-admin-secondary-button"
+                  onClick={closeReadyPopup}
+                  aria-label="Close popup"
+                >
+                  Close ✕
+                </button>
+              </div>
+              {popupError && <div className="city-admin-error" role="alert" style={{ marginBottom: '0.85rem' }}>{popupError}</div>}
+              {popupMessage && <div style={{ marginBottom: '0.85rem' }}><Notice tone="success">{popupMessage}</Notice></div>}
+              {unassignedReadyOrders.length === 0 ? (
+                <div className="city-admin-empty">No orders are currently awaiting delivery partner assignment in Ready for Pickup status.</div>
+              ) : (
+                <div style={{ display: 'grid', gap: '1rem' }}>
+                  {unassignedReadyOrders.map((order) => {
+                    const orderLocality = order.address?.locality ?? '';
+                    const eligibleForOrder = getEligiblePartnersForOrder(order);
+                    const currentPartnerId = selectedPartners[order._id] ?? eligibleForOrder[0]?._id ?? '';
+                    return (
+                      <article
+                        key={order._id}
+                        style={{
+                          border: '1px solid var(--border, rgba(107, 33, 92, 0.2))',
+                          borderRadius: '14px',
+                          padding: '1.1rem',
+                          background: 'var(--surface-subtle, #fdf9fc)',
+                          display: 'grid',
+                          gap: '0.85rem',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+                          <div>
+                            <strong style={{ fontSize: '1.05rem' }}>#{order.orderReference}</strong>
+                            <span style={{ marginLeft: '0.6rem' }}><StatusBadge value={order.fulfilmentStatus} fulfilmentMethod="delivery" /></span>
+                          </div>
+                          <strong>{formatMoney(order.totalPaise)} ({order.paymentMethod === 'cash' ? 'COD' : 'UPI'})</strong>
+                        </div>
+                        <div style={{ display: 'grid', gap: '0.35rem', fontSize: '0.9rem' }}>
+                          <div><strong>Items:</strong> {order.items.map((item) => `${item.productName}${item.quantity ? ` × ${item.quantity}` : ''}`).join(', ')}</div>
+                          <div>
+                            <strong>Seller Pickup (Origin):</strong> {order.sellerPickup?.sellerName || Array.from(new Set(order.items.map((item) => item.sellerName).filter(Boolean))).join(', ') || 'Assigned Seller'}
+                            {order.sellerPickup?.address ? ` — ${order.sellerPickup.address}, ${order.sellerPickup.city}` : ''}
+                            {order.sellerPickup?.latitude !== undefined && order.sellerPickup?.longitude !== undefined ? ` (GPS: ${order.sellerPickup.latitude.toFixed(4)}, ${order.sellerPickup.longitude.toFixed(4)})` : ''}
+                          </div>
+                          <div><strong>Customer Drop-off (Destination):</strong> {order.customerName}{order.customerPhoneE164 ? ` · ${order.customerPhoneE164}` : ''} — {order.address?.formattedAddress || [order.address?.addressLine1, order.address?.locality, order.address?.city, order.address?.postalCode].filter(Boolean).join(', ') || 'Damoh'}{order.address?.latitude !== undefined && order.address?.longitude !== undefined ? ` (GPS: ${order.address.latitude.toFixed(4)}, ${order.address.longitude.toFixed(4)})` : ''}</div>
+                        </div>
+                        {eligibleForOrder.length > 0 ? (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end', paddingTop: '0.4rem' }}>
+                            <label className="field" style={{ flex: '1 1 280px', margin: 0 }}>
+                              <span style={{ fontWeight: 600 }}>Nearest ONLINE & AVAILABLE Partner ({orderLocality || user?.assignedCity})</span>
+                              <select
+                                aria-label={`Select delivery partner for order ${order.orderReference}`}
+                                value={currentPartnerId}
+                                onChange={(event) => setSelectedPartners((prev) => ({ ...prev, [order._id]: event.target.value }))}
+                              >
+                                {eligibleForOrder.map((partner, idx) => (
+                                  <option key={partner._id} value={partner._id}>
+                                    {idx === 0 ? '★ Nearest: ' : ''}{partner.name || 'Delivery Partner'} · {partner.computedDistanceKm !== null ? `${partner.computedDistanceKm} km from Seller` : 'In city'} · ONLINE & AVAILABLE · {partner.phoneE164}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <button
+                              type="button"
+                              className="city-admin-primary-button"
+                              disabled={assigningOrderId === order._id || !currentPartnerId}
+                              onClick={() => void assignPartnerFromPopup(order)}
+                            >
+                              {assigningOrderId === order._id ? 'Assigning…' : 'Assign Delivery Partner'}
+                            </button>
+                            <Link
+                              to={`/city-admin/orders/${order._id}`}
+                              className="city-admin-secondary-button"
+                              onClick={closeReadyPopup}
+                            >
+                              View Order Details
+                            </Link>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
+                            <span style={{ color: 'var(--danger, #a12626)', fontSize: '0.9rem' }}>
+                              No ONLINE & AVAILABLE delivery partner is currently free in {orderLocality || user?.assignedCity}.
+                            </span>
+                            <Link to="/city-admin/delivery-partners" className="city-admin-secondary-button" onClick={closeReadyPopup}>
+                              Check Partner Availability →
+                            </Link>
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         </header>
         {children}
       </main>
@@ -2334,8 +2907,18 @@ function CityAdminLayout({ children }: { children: ReactNode }): ReactNode {
 
 function CityAdminDashboardPage(): ReactNode {
   const result = useLoad(() => api.cityAdminDashboard());
+  const partners = useLoad(() => api.cityAdminDeliveryPartners(1, 100), []);
   useRefreshOnFocus(result.reload);
+  useRefreshOnFocus(partners.reload);
   const dashboard = result.data;
+  useEffect(() => {
+    const refresh = () => {
+      void result.reload(false);
+      void partners.reload(false);
+    };
+    window.addEventListener('city-admin-order-updated', refresh);
+    return () => window.removeEventListener('city-admin-order-updated', refresh);
+  }, [result.reload, partners.reload]);
   const metrics = dashboard?.metrics;
 
   return (
@@ -2347,14 +2930,23 @@ function CityAdminDashboardPage(): ReactNode {
       {result.error && <div className="city-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
       {result.loading ? <Loading label="Loading city operations…" /> : dashboard && metrics ? (
         <>
+          <CityAdminDisputeArbitrationPanel
+            orders={dashboard.recentOrders}
+            partners={partners.data?.data ?? []}
+            onRefresh={() => {
+              void result.reload(false);
+              void partners.reload(false);
+              window.dispatchEvent(new Event('city-admin-order-updated'));
+            }}
+          />
           <div className="city-admin-metrics">
-            <CityAdminMetric label="Today’s Orders" value={metrics.todayOrders} icon="orders" />
-            <CityAdminMetric label="Awaiting Assignment" value={metrics.awaitingAssignment} icon="delivery" alert />
-            <CityAdminMetric label="Out for Delivery" value={metrics.outForDelivery} icon="providers" />
-            <CityAdminMetric label="Delivered Today" value={metrics.deliveredToday} icon="overview" />
+            <CityAdminMetric label="Today’s Orders" value={metrics.todayOrders} icon="orders" to="/city-admin/orders" />
+            <CityAdminMetric label="Awaiting Assignment" value={metrics.awaitingAssignment} icon="delivery" alert to="/city-admin/orders?unassignedOnly=true" />
+            <CityAdminMetric label="Out for Delivery" value={metrics.outForDelivery} icon="providers" to="/city-admin/orders?fulfilmentStatus=out_for_delivery" />
+            <CityAdminMetric label="Delivered Today" value={metrics.deliveredToday} icon="overview" to="/city-admin/orders?fulfilmentStatus=delivered" />
             <CityAdminMetric label="Active Partners" value="Unavailable" icon="delivery" unavailable />
             <CityAdminMetric label="Partner Applications" value="Unavailable" icon="administrators" unavailable />
-            <CityAdminMetric label="Sellers Awaiting Review" value="Unavailable" icon="sellers" unavailable />
+            <CityAdminMetric label="Sellers Awaiting Review" value={metrics.sellerApplicationsToReview} icon="sellers" alert={metrics.sellerApplicationsToReview > 0} />
             <CityAdminMetric label="Open Support Tickets" value="Unavailable" icon="support" unavailable />
           </div>
           <div className="city-admin-insight-grid">
@@ -2367,6 +2959,7 @@ function CityAdminDashboardPage(): ReactNode {
               <SuperAdminStatusBreakdown statuses={dashboard.ordersByStatus} />
             </section>
           </div>
+          <CityAdminLiveFleetOverview orders={dashboard.recentOrders} />
           <div className="city-admin-lower-grid">
             <section className="city-admin-panel city-admin-recent">
               <div className="city-admin-panel-heading"><div><h2>Recent orders</h2><p>Latest marketplace orders in {dashboard.city}</p></div><Link to="/city-admin/orders">View all <span aria-hidden="true">→</span></Link></div>
@@ -2377,7 +2970,7 @@ function CityAdminDashboardPage(): ReactNode {
               {dashboard.assignmentExceptions.length ? <div className="city-admin-exceptions">{dashboard.assignmentExceptions.map((exception) => (
                 <div className="city-admin-exception" key={exception._id}>
                   <span className="city-admin-exception-mark">!</span>
-                  <span><strong>#{exception.orderReference} · Awaiting assignment</strong><small>{exception.address?.locality ?? 'Locality not recorded'} · Created {formatElapsed(exception.createdAt)} ago</small></span>
+                  <span><Link to={`/city-admin/orders/${exception._id}`}><strong>#{exception.orderReference} · {exception.fulfilmentStatus === 'ready_for_pickup' ? 'Ready for pickup — Assign partner' : 'Awaiting assignment'}</strong></Link><small>{exception.address?.locality ?? 'Locality not recorded'} · Created {formatElapsed(exception.createdAt)} ago</small></span>
                 </div>
               ))}</div> : <div className="city-admin-empty">No unassigned delivery orders need attention.</div>}
               <div className="city-admin-queue-summary">
@@ -2393,34 +2986,120 @@ function CityAdminDashboardPage(): ReactNode {
   );
 }
 
+function CityAdminServiceZonesPage(): ReactNode {
+  const result = useLoad(() => api.cityAdminServiceZones());
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [requestText, setRequestText] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  async function submitChangeRequest(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const request = await api.requestCityAdminServiceZoneChange(requestText.trim());
+      setMessage(`Change request submitted for ${request.city}. Request ID: ${request.id}.`);
+      setRequestText('');
+      setRequestOpen(false);
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="city-admin-page">
+      <div className="city-admin-page-heading">
+        <div><p className="city-admin-eyebrow">Local operations</p><h1>My Service Zones</h1><p>Read-only coverage details for {result.data?.city ?? 'your assigned city'}.</p></div>
+        <button className="city-admin-secondary-button" type="button" onClick={() => setRequestOpen((open) => !open)}>Request change</button>
+      </div>
+      {result.error && <div className="city-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+      {error && <div className="city-admin-error" role="alert">{error}</div>}
+      {message && <Notice tone="success">{message}</Notice>}
+      {requestOpen && <form className="city-admin-panel city-admin-zone-request" onSubmit={(event) => void submitChangeRequest(event)}>
+        <div className="city-admin-panel-heading"><div><h2>Request a service-zone change</h2><p>Your request is sent for review. It will not change service rules automatically.</p></div></div>
+        <label className="field"><span>Describe the requested change</span><textarea required minLength={10} maxLength={1000} rows={4} value={requestText} onChange={(event) => setRequestText(event.target.value)} placeholder="Include the locality or PIN code and the change requested." /></label>
+        <div className="city-admin-zone-request-actions"><button className="city-admin-secondary-button" type="button" disabled={saving} onClick={() => setRequestOpen(false)}>Cancel</button><button className="city-admin-primary-button" type="submit" disabled={saving}>{saving ? 'Submitting…' : 'Submit request'}</button></div>
+      </form>}
+      <section className="city-admin-panel city-admin-order-directory">
+        <div className="city-admin-panel-heading"><div><h2>Configured coverage</h2><p>{result.data?.state ? `${result.data.state} · ` : ''}{result.data?.city ?? 'Assigned city'}</p></div>{result.data?.configured && <span className="city-admin-period">Read only</span>}</div>
+        {result.loading ? <Loading label="Loading service zones…" /> : result.data?.configured ? result.data.zones.length ? <div className="city-admin-table-wrap"><table className="city-admin-table"><thead><tr><th>Zone</th><th>Covered localities</th><th>PIN codes</th><th>Delivery fee</th><th>Eligible partners</th><th>Active deliveries</th><th>Status</th></tr></thead><tbody>{result.data.zones.map((zone) => <tr key={zone.name}><td><strong>{zone.name}</strong></td><td>{zone.coveredLocalities.join(', ')}</td><td>{zone.postalCodes.join(', ')}</td><td>{zone.deliveryFeePaise === undefined ? 'Not configured' : formatMoney(zone.deliveryFeePaise)}</td><td>{zone.eligiblePartnerCount === null ? 'Not tracked' : zone.eligiblePartnerCount}</td><td>{zone.activeDeliveryCount}</td><td><StatusBadge value={zone.status} /></td></tr>)}</tbody></table></div> : <div className="city-admin-empty">No serviceable localities are configured for {result.data.city}.</div> : <div className="city-admin-empty">Service zones are not configured for {result.data?.city ?? 'your assigned city'}. Other cities’ settings are not shown.</div>}
+      </section>
+      <p className="city-admin-data-note">The current backend stores one platform city with locality and PIN-code coverage. Partner eligibility by zone is not recorded.</p>
+    </div>
+  );
+}
+
 function CityAdminOrdersPage(): ReactNode {
   const [searchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [queryText, setQueryText] = useState(() => searchParams.get('q') ?? '');
   const [status, setStatus] = useState(() => searchParams.get('fulfilmentStatus') ?? '');
   const [paymentStatus, setPaymentStatus] = useState(() => searchParams.get('paymentStatus') ?? '');
+  const [sellerId, setSellerId] = useState(() => searchParams.get('sellerId') ?? '');
+  const [deliveryPartnerId, setDeliveryPartnerId] = useState(() => searchParams.get('deliveryPartnerId') ?? '');
+  const [from, setFrom] = useState(() => searchParams.get('from') ?? '');
+  const [to, setTo] = useState(() => searchParams.get('to') ?? '');
   const unassignedOnly = searchParams.get('unassignedOnly') === 'true';
   const query = new URLSearchParams({ page: String(page), limit: '20' });
   if (queryText.trim()) query.set('q', queryText.trim());
   if (status) query.set('fulfilmentStatus', status);
   if (paymentStatus) query.set('paymentStatus', paymentStatus);
+  if (sellerId) query.set('sellerId', sellerId);
+  if (deliveryPartnerId) query.set('deliveryPartnerId', deliveryPartnerId);
+  if (from) query.set('from', new Date(`${from}T00:00:00`).toISOString());
+  if (to) query.set('to', new Date(`${to}T23:59:59.999`).toISOString());
   if (unassignedOnly) query.set('unassignedOnly', 'true');
-  const result = useLoad(() => api.cityAdminOrders(query), [page, queryText, status, paymentStatus, unassignedOnly]);
+  const result = useLoad(() => api.cityAdminOrders(query), [page, queryText, status, paymentStatus, sellerId, deliveryPartnerId, from, to, unassignedOnly]);
+  const sellers = useLoad(() => api.cityAdminSellers(new URLSearchParams({ page: '1', limit: '100' })), []);
+  useEffect(() => {
+    const refresh = () => void result.reload(false);
+    window.addEventListener('city-admin-order-updated', refresh);
+    return () => window.removeEventListener('city-admin-order-updated', refresh);
+  }, [result.reload]);
+  const partners = useLoad(() => api.cityAdminDeliveryPartners(1, 100), []);
+  useEffect(() => {
+    const refresh = () => {
+      void partners.reload(false);
+    };
+    window.addEventListener('city-admin-order-updated', refresh);
+    return () => window.removeEventListener('city-admin-order-updated', refresh);
+  }, [partners.reload]);
 
   return (
     <div className="city-admin-page">
-      <div className="city-admin-page-heading"><div><p className="city-admin-eyebrow">Local operations</p><h1>Orders & Assignments</h1><p>Read-only orders placed for your assigned city. Other cities are excluded by the backend.</p></div></div>
+      <div className="city-admin-page-heading"><div><p className="city-admin-eyebrow">Local operations</p><h1>Orders & Assignments</h1><p>Orders for your assigned city, with authorized partner assignment and return dispute arbitration actions.</p></div></div>
       {result.error && <div className="city-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+      {result.data?.data && (
+        <CityAdminDisputeArbitrationPanel
+          orders={result.data.data}
+          partners={partners.data?.data ?? []}
+          onRefresh={() => {
+            void result.reload(false);
+            void partners.reload(false);
+            window.dispatchEvent(new Event('city-admin-order-updated'));
+          }}
+        />
+      )}
+      {result.data?.data && <CityAdminLiveFleetOverview orders={result.data.data} />}
       <section className="city-admin-panel city-admin-order-directory">
         {unassignedOnly && <div className="city-admin-filter-note">Showing delivery orders awaiting a partner. <Link to="/city-admin/orders">Clear filter</Link></div>}
         <div className="city-admin-order-tools">
           <label className="city-admin-search-field"><span aria-hidden="true">⌕</span><input aria-label="Search order reference or customer" placeholder="Search order or customer" value={queryText} onChange={(event) => { setPage(1); setQueryText(event.target.value); }} /></label>
           <select aria-label="Filter by fulfilment status" value={status} onChange={(event) => { setPage(1); setStatus(event.target.value); }}>
-            <option value="">All fulfilment states</option><option value="placed">Placed</option><option value="accepted">Accepted</option><option value="preparing">Preparing</option><option value="ready_for_pickup">Ready for pickup</option><option value="out_for_delivery">Out for delivery</option><option value="delivered">Delivered</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option><option value="delivery_failed">Delivery failed</option>
+            <option value="">All fulfilment states</option><option value="placed">Order Confirmed</option><option value="preparing">Preparing</option><option value="ready_for_pickup">Ready for pickup</option><option value="delivery_partner_assigned">Partner Assigned</option><option value="out_for_pickup">Out for Pickup</option><option value="picked_up">Picked Up</option><option value="out_for_delivery">Out for delivery</option><option value="delivered">Delivered</option><option value="completed">Completed</option><option value="return_requested">Return Requested</option><option value="return_accepted">Return Accepted</option><option value="return_partner_assigned">Return Partner Assigned</option><option value="return_picked_up">Return Picked Up</option><option value="return_delivered_to_seller">Returned to Seller</option><option value="ready_for_refund">Ready for Refund</option><option value="refund_completed">Refund Completed</option><option value="cancelled">Cancelled</option><option value="delivery_failed">Delivery failed</option>
           </select>
           <select aria-label="Filter by payment status" value={paymentStatus} onChange={(event) => { setPage(1); setPaymentStatus(event.target.value); }}>
             <option value="">All payment states</option><option value="pending_verification">Awaiting review</option><option value="confirmed">Confirmed</option><option value="rejected">Rejected</option>
           </select>
+          <select aria-label="Filter by seller" value={sellerId} onChange={(event) => { setPage(1); setSellerId(event.target.value); }}><option value="">All city sellers</option>{(sellers.data?.data ?? []).map((seller) => <option key={seller._id} value={seller._id}>{seller.name || seller.phoneE164}</option>)}</select>
+          <select aria-label="Filter by delivery partner" value={deliveryPartnerId} onChange={(event) => { setPage(1); setDeliveryPartnerId(event.target.value); }}><option value="">All delivery partners</option>{(partners.data?.data ?? []).map((partner) => <option key={partner._id} value={partner._id}>{partner.name || partner.phoneE164}</option>)}</select>
+          <label className="city-admin-date-filter"><span>From</span><input aria-label="Orders from date" type="date" value={from} onChange={(event) => { setPage(1); setFrom(event.target.value); }} /></label>
+          <label className="city-admin-date-filter"><span>To</span><input aria-label="Orders to date" type="date" value={to} onChange={(event) => { setPage(1); setTo(event.target.value); }} /></label>
         </div>
         {result.loading ? <Loading label="Loading city orders…" /> : result.data?.data.length ? <CityAdminOrderTable orders={result.data.data} /> : <div className="city-admin-empty">No city orders match these filters.</div>}
         {result.data && result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}
@@ -2429,26 +3108,150 @@ function CityAdminOrdersPage(): ReactNode {
   );
 }
 
-function CityAdminMetric({ label, value, icon, alert = false, unavailable = false }: { label: string; value: number | string; icon: string; alert?: boolean; unavailable?: boolean }): ReactNode {
-  return <article className={`city-admin-metric${alert ? ' is-alert' : ''}${unavailable ? ' is-unavailable' : ''}`}><div><span>{label}</span><SuperAdminIcon name={icon} /></div><strong>{typeof value === 'number' ? value.toLocaleString('en-IN') : value}</strong><small>{unavailable ? 'Not tracked by city scope' : alert ? 'Needs attention' : 'Live city-scoped data'}</small></article>;
+function CityAdminMetric({ label, value, icon, alert = false, unavailable = false, to }: { label: string; value: number | string; icon: string; alert?: boolean; unavailable?: boolean; to?: string }): ReactNode {
+  const className = `city-admin-metric${alert ? ' is-alert' : ''}${unavailable ? ' is-unavailable' : ''}${to ? ' is-link' : ''}`;
+  const content = <><div><span>{label}</span><SuperAdminIcon name={icon} /></div><strong>{typeof value === 'number' ? value.toLocaleString('en-IN') : value}</strong><small>{unavailable ? 'Not tracked by city scope' : alert ? 'Needs attention' : 'Live city-scoped data'}</small></>;
+  return to ? <Link to={to} className={className} aria-label={`${label}: ${value}. Open related city orders.`}>{content}</Link> : <article className={className}>{content}</article>;
 }
 
 function CityAdminOrderTable({ orders }: { orders: CityAdminOrder[] }): ReactNode {
   return (
     <div className="city-admin-table-wrap"><table className="city-admin-table">
-      <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Partner</th><th>Created</th></tr></thead>
+      <thead><tr><th>Order</th><th>Customer</th><th>Seller</th><th>Items</th><th>Total</th><th>Payment</th><th>Checkpoint Status</th><th>Partner & Proximity</th><th>Created</th></tr></thead>
       <tbody>{orders.map((order) => <tr key={order._id}>
-        <td><strong>#{order.orderReference}</strong><small>{order.address?.locality ?? 'Pickup order'}</small></td>
+        <td><Link to={`/city-admin/orders/${order._id}`}><strong>#{order.orderReference}</strong></Link><small>{order.address?.locality ?? 'Pickup order'}</small></td>
         <td>{order.customerName}</td>
+        <td>{order.sellerPickup?.sellerName || Array.from(new Set(order.items.map((item) => item.sellerName).filter((name): name is string => Boolean(name)))).join(', ') || 'Seller not linked'}</td>
         <td className="city-admin-items">{order.items.map((item) => item.productName).slice(0, 2).join(', ')}{order.items.length > 2 ? ` +${order.items.length - 2}` : ''}</td>
         <td>{formatMoney(order.totalPaise)}</td>
         <td><span className={`city-admin-payment ${order.paymentStatus}`}>{order.paymentMethod === 'cash' ? 'COD' : 'UPI'}</span><small>{order.paymentStatus.replaceAll('_', ' ')}</small></td>
         <td><span className={`super-admin-status-badge status-${order.fulfilmentStatus}`}>{orderStatusLabel(order.fulfilmentStatus)}</span></td>
-        <td>{order.deliveryPartner?.name ?? 'Unassigned'}</td>
+        <td>
+          {order.deliveryPartner?.name ? (
+            <div>
+              <strong>{order.deliveryPartner.name}</strong>
+              {order.deliveryPartner.distanceKm !== undefined && order.deliveryPartner.distanceKm !== null && <small>{order.deliveryPartner.distanceKm} km from Seller</small>}
+            </div>
+          ) : (order.fulfilmentMethod === 'pickup' ? 'Pickup' : <Link to={`/city-admin/orders/${order._id}`} className="text-button"><strong>{order.fulfilmentStatus === 'ready_for_pickup' ? 'Assign partner (Ready) →' : 'View / Assign →'}</strong></Link>)}
+        </td>
         <td>{new Date(order.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</td>
       </tr>)}</tbody>
     </table></div>
   );
+}
+
+function CityAdminOrderDetailPage(): ReactNode {
+  const { id = '' } = useParams();
+  const order = useLoad(() => api.cityAdminOrder(id), [id]);
+  const partners = useLoad(() => api.cityAdminDeliveryPartners(1, 100, { orderId: id }), [id]);
+  const [partnerId, setPartnerId] = useState('');
+  const [reassignmentReason, setReassignmentReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  useRefreshOnFocus(order.reload);
+  useRefreshOnFocus(partners.reload);
+
+  const orderLocality = order.data?.address?.locality ?? '';
+  const eligiblePartners = (partners.data?.data ?? []).filter((partner) =>
+    partner.status === 'active'
+    && (!orderLocality || !partner.serviceableLocalities?.length || partner.serviceableLocalities.some((locality) => locality.toLocaleLowerCase() === orderLocality.toLocaleLowerCase()))
+    && partner.isOnline !== false
+    && (partner.availabilityStatus === 'available' || partner._id === order.data?.deliveryPartner?.userId),
+  );
+  const assignmentAllowed = order.data && order.data.fulfilmentMethod === 'delivery'
+    && ['ready_for_pickup', 'delivery_partner_assigned', 'out_for_pickup', 'picked_up', 'out_for_delivery', 'delivery_failed'].includes(order.data.fulfilmentStatus)
+    && (!order.data.deliveryPartner || order.data.fulfilmentStatus === 'delivery_failed');
+  const needsReassignmentReason = Boolean(order.data?.deliveryPartner);
+
+  useEffect(() => {
+    setPartnerId(order.data?.deliveryPartner?.userId || eligiblePartners[0]?._id || '');
+  }, [order.data?.deliveryPartner?.userId, eligiblePartners.length]);
+
+  async function assignPartner(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!order.data || !partnerId || !assignmentAllowed) return;
+    if (needsReassignmentReason && reassignmentReason.trim().length < 10) return;
+    const action = needsReassignmentReason ? 'Reassign delivery partner' : 'Assign delivery partner';
+    if (!window.confirm(`${action} for order ${order.data.orderReference}?`)) return;
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      await api.assignCityAdminDeliveryPartner(id, {
+        partnerId,
+        ...(reassignmentReason.trim() ? { reassignmentReason: reassignmentReason.trim() } : {}),
+      });
+      setMessage(needsReassignmentReason ? 'Delivery partner reassigned.' : 'Delivery partner assigned (Status: Partner Assigned).');
+      setReassignmentReason('');
+      await Promise.all([order.reload(), partners.reload(false)]);
+      window.dispatchEvent(new Event('city-admin-order-updated'));
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (order.loading) return <div className="city-admin-page"><Loading label="Loading city order…" /></div>;
+  if (!order.data) return <div className="city-admin-page"><Notice tone="error">{order.error || 'Order not found in your assigned city.'}</Notice><Link to="/city-admin/orders" className="city-admin-secondary-button">Back to orders</Link></div>;
+  const item = order.data;
+
+  return <div className="city-admin-page">
+    <div className="breadcrumbs"><Link to="/city-admin/orders">Orders & Assignments</Link><span>/</span>{item.orderReference}</div>
+    <div className="city-admin-page-heading"><div><p className="city-admin-eyebrow">City order · {item.address?.city ?? 'City unavailable'}</p><h1>{item.orderReference}</h1><p>{item.customerName} · {item.address?.locality ?? 'Pickup order'} · {item.createdAt ? new Date(item.createdAt).toLocaleString('en-IN') : 'Date unavailable'}</p></div><StatusBadge value={item.fulfilmentStatus} /></div>
+    {error && <div className="city-admin-error" role="alert">{error}</div>}{message && <Notice tone="success">{message}</Notice>}
+    <CityAdminDisputeArbitrationPanel
+      orders={[item]}
+      partners={partners.data?.data ?? []}
+      onRefresh={() => {
+        void order.reload(false);
+        void partners.reload(false);
+        window.dispatchEvent(new Event('city-admin-order-updated'));
+      }}
+    />
+    {item.fulfilmentMethod === 'delivery' && (
+      <div style={{ marginBottom: '1.25rem' }}>
+        <CityAdminLiveTracker
+          orderId={item._id}
+          orderStatus={item.fulfilmentStatus}
+          hasPartner={Boolean(item.deliveryPartner)}
+          onOrderDelivered={() => void order.reload(false)}
+        />
+      </div>
+    )}
+    <div className="city-admin-lower-grid">
+      <section className="city-admin-panel">
+        <div className="city-admin-panel-heading"><div><h2>Items & sellers</h2><p>Order snapshots and assigned city sellers</p></div></div>
+        <div className="city-admin-table-wrap"><table className="city-admin-table"><thead><tr><th>Product</th><th>Seller</th><th>Qty</th><th>Line total</th></tr></thead><tbody>{item.items.map((line, index) => <tr key={`${line.productId}-${index}`}><td>{line.productName}</td><td>{line.sellerName || item.sellerPickup?.sellerName || 'Seller not linked to this city'}</td><td>{line.quantity}</td><td>{formatMoney(line.lineTotalPaise)}</td></tr>)}</tbody></table></div>
+        <div className="city-admin-order-summary"><span>Subtotal <strong>{formatMoney(item.subtotalPaise)}</strong></span><span>Delivery <strong>{formatMoney(item.deliveryFeePaise)}</strong></span><span>Total <strong>{formatMoney(item.totalPaise)}</strong></span></div>
+      </section>
+      <section className="city-admin-panel">
+        <div className="city-admin-panel-heading"><div><h2>Pickup & Drop-off GPS Locations</h2><p>Seller origin and Customer destination</p></div></div>
+        <dl className="city-admin-order-details">
+          <div><dt>Payment</dt><dd>{item.paymentMethod.toUpperCase()} · <StatusBadge value={item.paymentStatus} /></dd></div>
+          <div><dt>Fulfilment</dt><dd>{item.fulfilmentMethod} · <StatusBadge value={item.fulfilmentStatus} /></dd></div>
+          <div><dt>Seller Pickup (Origin)</dt><dd>{item.sellerPickup ? <><strong>{item.sellerPickup.sellerName}</strong>{item.sellerPickup.phoneE164 ? ` · ${item.sellerPickup.phoneE164}` : ''}<br />{item.sellerPickup.address}, {item.sellerPickup.city}{item.sellerPickup.latitude !== undefined && item.sellerPickup.longitude !== undefined && <><br /><small>GPS: {item.sellerPickup.latitude.toFixed(4)}, {item.sellerPickup.longitude.toFixed(4)}</small></>}</> : 'Seller pickup info recorded'}</dd></div>
+          <div><dt>Customer Drop-off</dt><dd>{item.address ? <>{item.address.formattedAddress || [item.address.addressLine1, item.address.addressLine2, item.address.area, item.address.landmark, item.address.villageOrCity || item.address.city, item.address.district, item.address.state, item.address.postalCode].filter(Boolean).join(', ')}<br />Recipient: {item.address.name} · {item.address.phoneE164}{item.address.latitude !== undefined && item.address.longitude !== undefined && <><br /><small>GPS: {item.address.latitude.toFixed(4)}, {item.address.longitude.toFixed(4)} · </small><a href={`https://www.google.com/maps/dir/?api=1&destination=${item.address.latitude},${item.address.longitude}`} target="_blank" rel="noreferrer">Open delivery pin in Maps ↗</a></>}</> : 'Pickup order'}</dd></div>
+        </dl>
+      </section>
+    </div>
+    <section className="city-admin-panel city-admin-assignment-panel">
+      <div className="city-admin-panel-heading"><div><h2>Delivery Partner Assignment (Proximity & Availability)</h2><p>Filtered by: 1. Proximity (Nearest to Seller GPS) · 2. Availability (ONLINE & AVAILABLE). Note: Preparation stages (Preparing / Ready for Pickup) are controlled exclusively by the Seller.</p></div></div>
+      {item.deliveryPartner && <div className="city-admin-current-assignment"><strong>Currently assigned</strong><span>{item.deliveryPartner.name} · {item.deliveryPartner.phoneE164}{item.deliveryPartner.distanceKm !== undefined && item.deliveryPartner.distanceKm !== null ? ` · ${item.deliveryPartner.distanceKm} km from Seller` : ''}</span></div>}
+      {assignmentAllowed ? <form className="city-admin-zone-request" onSubmit={(event) => void assignPartner(event)}>
+        {partners.error && <div className="city-admin-error" role="alert">{partners.error}<button type="button" onClick={() => void partners.reload()}>Retry</button></div>}
+        {eligiblePartners.length ? <label className="field"><span>Eligible ONLINE & AVAILABLE partner (sorted nearest to Seller)</span><select required value={partnerId} onChange={(event) => setPartnerId(event.target.value)}><option value="">Select a partner</option>{eligiblePartners.map((partner, idx) => <option key={partner._id} value={partner._id}>{idx === 0 ? '★ Nearest: ' : ''}{partner.name || 'Delivery Partner'} · {partner.distanceKm !== null && partner.distanceKm !== undefined ? `${partner.distanceKm} km from Seller` : 'In city'} · {partnerAvailabilityBadge(partner)} · {partner.phoneE164}</option>)}</select></label> : <div className="city-admin-empty">No ONLINE & AVAILABLE partner covers this locality right now.</div>}
+        {needsReassignmentReason && <label className="field"><span>Reason for reassignment (required)</span><textarea required minLength={10} maxLength={1000} rows={3} value={reassignmentReason} onChange={(event) => setReassignmentReason(event.target.value)} /></label>}
+        <div className="city-admin-zone-request-actions"><button className="city-admin-primary-button" type="submit" disabled={saving || !partnerId || (needsReassignmentReason && reassignmentReason.trim().length < 10)}>{saving ? 'Saving…' : needsReassignmentReason ? 'Reassign partner' : 'Assign partner'}</button></div>
+      </form> : !item.deliveryPartner && <div className="city-admin-empty">{['placed', 'order_confirmed', 'accepted', 'preparing'].includes(item.fulfilmentStatus) ? 'Awaiting Seller to pack items and mark order READY_FOR_PICKUP before partner assignment.' : 'No assignment action is available for this order status.'}</div>}
+      {item.deliveryPartnerHistory?.length ? <div className="city-admin-assignment-history"><h3>Assignment history</h3>{item.deliveryPartnerHistory.map((entry, index) => <p key={`${entry.userId ?? entry.phoneE164}-${index}`}>{entry.name} · {entry.phoneE164} · {new Date(entry.assignedAt).toLocaleString('en-IN')} to {new Date(entry.unassignedAt).toLocaleString('en-IN')}{entry.changeReason ? ` · ${entry.changeReason}` : ''}</p>)}</div> : null}
+    </section>
+    <section className="city-admin-panel city-admin-assignment-panel"><div className="city-admin-panel-heading"><div><h2>Order activity</h2><p>Recorded fulfilment and payment events</p></div></div><div className="city-admin-timeline">
+      {[...(item.statusHistory ?? []).map((entry) => ({ kind: 'Order', status: entry.status, createdAt: entry.changedAt, note: entry.note })), ...(item.paymentEvents ?? []).map((entry) => ({ kind: 'Payment', status: entry.status, createdAt: entry.createdAt, note: entry.note }))].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()).map((entry, index) => <div key={`${entry.kind}-${entry.createdAt}-${index}`}><strong>{entry.kind}: {orderStatusLabel(entry.status)}</strong><small>{new Date(entry.createdAt).toLocaleString('en-IN')}{entry.note ? ` · ${entry.note}` : ''}</small></div>)}
+      {!item.statusHistory?.length && !item.paymentEvents?.length && <div className="city-admin-empty">No order events recorded.</div>}
+    </div></section>
+  </div>;
 }
 
 function formatElapsed(timestamp: string): string {
@@ -2461,20 +3264,25 @@ function AdminGate({ children, adminOnly = false }: { children: ReactNode; admin
   const location = useLocation();
   if (!ready) return <div className="page-container"><Loading label="Checking your session…" /></div>;
   if (!user) return <div className="page-container narrow"><PageIntro eyebrow="Protected workspace" title="Please sign in" description="Use your authorized eSakhi account to continue." /><Link to="/sign-in" state={{ from: location.pathname }} className="button">Sign in</Link></div>;
-  if (adminOnly && user.role !== 'admin') return <div className="page-container narrow"><Notice tone="error">This workspace action requires an administrator account.</Notice><Link to="/admin" className="button button-outline">Back to workspace</Link></div>;
-  if (!adminOnly && user.role !== 'admin' && user.role !== 'staff') return <div className="page-container narrow"><Notice tone="error">Your account does not have workspace access.</Notice></div>;
+  if (adminOnly && user.role !== 'admin' && user.role !== 'super_admin') return <div className="page-container narrow"><Notice tone="error">This workspace action requires an administrator account.</Notice><Link to="/admin" className="button button-outline">Back to workspace</Link></div>;
+  if (!adminOnly && user.role !== 'admin' && user.role !== 'staff' && user.role !== 'super_admin') return <div className="page-container narrow"><Notice tone="error">Your account does not have workspace access.</Notice></div>;
   return <AdminLayout>{children}</AdminLayout>;
 }
 
 function AdminLayout({ children }: { children: ReactNode }): ReactNode {
   const { user } = useAuth();
-  const admin = user?.role === 'admin';
-  return <div className="admin-shell"><aside className="admin-sidebar"><Link to="/admin" className="admin-brand"><img src="/images/esakhi-emblem.png" alt="" /><span>eSakhi<br /><small>Maker workspace</small></span></Link><span className="sidebar-label">WORKSPACE</span><nav className="admin-nav"><NavLink to="/admin" end>Overview</NavLink><NavLink to="/admin/products">Products</NavLink>{admin && <NavLink to="/admin/inventory">Inventory</NavLink>}<NavLink to="/admin/orders">Orders</NavLink>{admin && <NavLink to="/admin/delivery-partners">Delivery Partners</NavLink>}{admin && <NavLink to="/admin/customers">Customers</NavLink>}{admin && <NavLink to="/admin/settings">Store settings</NavLink>}<NavLink to="/admin/system">API status</NavLink></nav><div className="sidebar-user"><span className="avatar">{(user?.name || 'E').slice(0, 1).toUpperCase()}</span><span><strong>{user?.name || user?.phone}</strong><small>{user?.role}</small></span></div></aside><section className="admin-content">{children}</section></div>;
+  const admin = user?.role === 'admin' || user?.role === 'super_admin';
+  return <div className="admin-shell"><aside className="admin-sidebar"><Link to="/admin" className="admin-brand"><img src="/images/maitri-sisterhood-logo.png" alt="" /><span>eSakhi<br /><small>Maker workspace</small></span></Link><span className="sidebar-label">WORKSPACE</span><nav className="admin-nav"><NavLink to="/admin" end>Overview</NavLink><NavLink to="/admin/products">Products</NavLink>{admin && <NavLink to="/admin/inventory">Inventory</NavLink>}<NavLink to="/admin/orders">Orders</NavLink>{admin && <NavLink to="/admin/delivery-partners">Delivery Partners</NavLink>}{admin && <NavLink to="/admin/customers">Customers</NavLink>}{admin && <NavLink to="/admin/settings">Store settings</NavLink>}<NavLink to="/admin/system">API status</NavLink></nav><div className="sidebar-user"><span className="avatar">{(user?.name || 'E').slice(0, 1).toUpperCase()}</span><span><strong>{user?.name || user?.phone}</strong><small>{user?.role}</small></span></div></aside><section className="admin-content">{children}</section></div>;
 }
 
 function AdminDashboardPage(): ReactNode {
   const result = useLoad(() => api.dashboard());
   const dashboard = result.data;
+  useEffect(() => {
+    const refresh = () => void result.reload(false);
+    window.addEventListener('city-admin-order-updated', refresh);
+    return () => window.removeEventListener('city-admin-order-updated', refresh);
+  }, [result.reload]);
   return <div className="admin-page"><PageIntro eyebrow="Maker workspace" title="Good work starts with a clear view." description="Live operational data from your eSakhi store." />{result.error && <Notice tone="error">{result.error}</Notice>}{result.loading ? <Loading /> : dashboard && <><div className="metric-grid"><Metric label="Orders needing action" value={dashboard.ordersNeedingAction} /><Metric label="Payments to review" value={dashboard.pendingPayments} /><Metric label="Low-stock items" value={dashboard.lowStockItems} /></div><div className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">Latest activity</span><h2>Recent orders</h2></div><Link to="/admin/orders" className="quiet-link">Open orders →</Link></div>{dashboard.recentOrders.length ? <div className="admin-table-wrap"><table><thead><tr><th>Order</th><th>Customer</th><th>Total</th><th>Payment</th><th>Fulfilment</th></tr></thead><tbody>{dashboard.recentOrders.map((order) => <tr key={order._id}><td><Link to={`/admin/orders/${order._id}`}>{order.orderReference}</Link></td><td>{order.customerName}</td><td>{formatMoney(order.totalPaise)}</td><td><StatusBadge value={order.paymentStatus} /></td><td><StatusBadge value={order.fulfilmentStatus} /></td></tr>)}</tbody></table></div> : <EmptyState title="No orders to show yet">New orders will appear here when customers check out.</EmptyState>}</div></>}{result.error && <button className="button button-outline" onClick={() => void result.reload()}>Retry</button>}</div>;
 }
 
@@ -2483,17 +3291,22 @@ function Metric({ label, value }: { label: string; value: number }): ReactNode {
 }
 
 function AdminProductsPage(): ReactNode {
+  const categories = useLoad(() => api.categories());
   const [queryText, setQueryText] = useState('');
   const [active, setActive] = useState('');
+  const [categoryId, setCategoryId] = useState('');
+  const [subcategoryId, setSubcategoryId] = useState('');
   const [page, setPage] = useState(1);
   const [editor, setEditor] = useState<Product | null | false>(false);
   const query = new URLSearchParams({ page: String(page), limit: '20', archived: 'false' });
   if (queryText.trim()) query.set('q', queryText.trim());
   if (active) query.set('active', active);
-  const products = useLoad(() => api.adminProducts(query), [page, queryText, active]);
+  if (categoryId) query.set('categoryId', categoryId);
+  if (subcategoryId) query.set('subcategoryId', subcategoryId);
+  const products = useLoad(() => api.adminProducts(query), [page, queryText, active, categoryId, subcategoryId]);
   const { user } = useAuth();
   const refresh = () => void products.reload();
-  return <div className="admin-page"><PageIntro eyebrow="Your collection" title="Product catalogue" description="Product details and prices are managed by the store. Stock is adjusted separately." />{products.error && <Notice tone="error">{products.error}</Notice>}<div className="admin-toolbar"><label className="search-field"><span className="sr-only">Search products</span><input placeholder="Search products" value={queryText} onChange={(event) => { setPage(1); setQueryText(event.target.value); }} /><span>⌕</span></label><select aria-label="Filter by active status" value={active} onChange={(event) => { setPage(1); setActive(event.target.value); }}><option value="">All active states</option><option value="true">Active</option><option value="false">Inactive</option></select>{user?.role === 'admin' && <button className="button" onClick={() => setEditor(null)}>Add product +</button>}</div>{products.loading ? <Loading /> : products.data?.data.length ? <div className="admin-table-wrap"><table><thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Visibility</th><th>Actions</th></tr></thead><tbody>{products.data.data.map((item) => <tr key={getId(item)}><td><div className="table-product">{item.imageUrls?.[0] ? <img src={resolveProductImageUrl(item.imageUrls[0])} alt="" /> : <span className="table-image-placeholder">✿</span>}<span><strong>{item.name}</strong><small>{item.slug}</small></span></div></td><td>{item.category}</td><td>{formatMoney(item.pricePaise)}</td><td>{item.variants?.length ? `${item.variants.length} options` : item.stock}</td><td><StatusBadge value={item.isActive ? 'active' : 'inactive'} />{user?.role === 'admin' && <button className="text-button danger-text" aria-label={`Delete ${item.name}`} onClick={() => void archive(item, refresh)}>Delete</button>}</td><td className="table-actions">{user?.role === 'admin' ? <button className="text-button" onClick={() => setEditor(item)}>Edit</button> : <span>Read only</span>}</td></tr>)}</tbody></table></div> : !products.loading && <EmptyState title="No products match these filters" />}{products.data?.pagination.totalPages && products.data.pagination.totalPages > 1 && <Pagination page={page} pages={products.data.pagination.totalPages} onChange={setPage} />}{editor !== false && <ProductEditor product={editor} onClose={() => setEditor(false)} onSaved={refresh} />}</div>;
+  return <div className="admin-page"><PageIntro eyebrow="Your collection" title="Product catalogue" description="Product details and prices are managed by the store. Stock is adjusted separately." />{products.error && <Notice tone="error">{products.error}</Notice>}{categories.error && <Notice tone="error">{categories.error}</Notice>}<div className="admin-toolbar"><label className="search-field"><span className="sr-only">Search products</span><input placeholder="Search products" value={queryText} onChange={(event) => { setPage(1); setQueryText(event.target.value); }} /><span>⌕</span></label><select aria-label="Filter by main category" value={categoryId} onChange={(event) => { setPage(1); setCategoryId(event.target.value); setSubcategoryId(''); }}><option value="">All categories</option>{(categories.data ?? []).map((category) => <option key={category.categoryId} value={category.categoryId}>{category.categoryName}</option>)}</select><select aria-label="Filter by subcategory" value={subcategoryId} disabled={!categoryId} onChange={(event) => { setPage(1); setSubcategoryId(event.target.value); }}><option value="">All subcategories</option>{(categories.data?.find((category) => category.categoryId === categoryId)?.subcategories ?? []).map((subcategory) => <option key={subcategory.subcategoryId} value={subcategory.subcategoryId}>{subcategory.subcategoryName}</option>)}</select><select aria-label="Filter by active status" value={active} onChange={(event) => { setPage(1); setActive(event.target.value); }}><option value="">All active states</option><option value="true">Active</option><option value="false">Inactive</option></select>{user?.role === 'admin' && <button className="button" onClick={() => setEditor(null)}>Add product +</button>}</div>{products.loading ? <Loading /> : products.data?.data.length ? <div className="admin-table-wrap"><table><thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Visibility</th><th>Actions</th></tr></thead><tbody>{products.data.data.map((item) => <tr key={getId(item)}><td><div className="table-product">{item.imageUrls?.[0] ? <img src={resolveProductImageUrl(item.imageUrls[0])} alt="" /> : <span className="table-image-placeholder">✿</span>}<span><strong>{item.name}</strong><small>{item.slug}</small></span></div></td><td>{item.categoryName}<small>{item.subcategoryName}</small></td><td>{formatMoney(item.pricePaise)}</td><td>{item.variants?.length ? `${item.variants.length} options` : item.stock}</td><td><StatusBadge value={item.isActive ? 'active' : 'inactive'} />{user?.role === 'admin' && <button className="text-button danger-text" aria-label={`Delete ${item.name}`} onClick={() => void archive(item, refresh)}>Delete</button>}</td><td className="table-actions">{user?.role === 'admin' ? <button className="text-button" onClick={() => setEditor(item)}>Edit</button> : <span>Read only</span>}</td></tr>)}</tbody></table></div> : !products.loading && <EmptyState title="No products match these filters" />}{products.data?.pagination.totalPages && products.data.pagination.totalPages > 1 && <Pagination page={page} pages={products.data.pagination.totalPages} onChange={setPage} />}{editor !== false && <ProductEditor product={editor} onClose={() => setEditor(false)} onSaved={refresh} />}</div>;
 }
 
 async function archive(product: Product, refresh: () => void): Promise<void> {
@@ -2510,7 +3323,9 @@ function ProductEditor({ product, onClose, onSaved }: { product: Product | null;
     name: product?.name ?? '',
     slug: product?.slug ?? '',
     description: product?.description ?? '',
-    category: product?.category ?? 'Bangles',
+    categoryId: product?.categoryId ?? 'home-and-living',
+    subcategoryId: product?.subcategoryId ?? 'home-textiles',
+    productType: product?.productType ?? '',
     price: product ? String(product.pricePaise / 100) : '',
     images: product?.imageUrls ?? [],
     stock: String(product?.stock ?? 0),
@@ -2519,6 +3334,8 @@ function ProductEditor({ product, onClose, onSaved }: { product: Product | null;
   });
   const [files, setFiles] = useState<File[]>([]);
   const update = (key: keyof typeof form, value: string | boolean) => setForm((current) => ({ ...current, [key]: value }));
+  const selectedCategory = categories.data?.find((category) => category.categoryId === form.categoryId);
+  const selectedSubcategory = selectedCategory?.subcategories.find((subcategory) => subcategory.subcategoryId === form.subcategoryId);
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setSaving(true); setError('');
     try {
@@ -2528,7 +3345,8 @@ function ProductEditor({ product, onClose, onSaved }: { product: Product | null;
         imageUrls.push(uploaded.imageUrl);
       }
       const payload: Record<string, unknown> = {
-        name: form.name, slug: form.slug, description: form.description, category: form.category,
+        name: form.name, slug: form.slug, description: form.description,
+        categoryId: form.categoryId, subcategoryId: form.subcategoryId, productType: form.productType,
         pricePaise: Math.round(Number(form.price) * 100),
         imageUrls,
         lowStockThreshold: Number(form.lowStockThreshold), isActive: form.isActive,
@@ -2555,12 +3373,45 @@ function ProductEditor({ product, onClose, onSaved }: { product: Product | null;
     setError('');
     setFiles((current) => [...current, ...selected]);
   };
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="product-editor-title"><div className="modal-heading"><h2 id="product-editor-title">{product ? 'Edit product' : 'Add a product'}</h2><button className="close-button" onClick={onClose} aria-label="Close">×</button></div><p>Choose up to 10 JPEG, PNG, or WebP images (5 MB max each). Stock changes use Inventory.</p>{error && <Notice tone="error">{error}</Notice>}{categories.error && <Notice tone="error">{categories.error}</Notice>}<form className="stack-form" onSubmit={(event) => void submit(event)}><div className="form-grid"><label className="field"><span>Product name</span><input required maxLength={160} value={form.name} onChange={(event) => update('name', event.target.value)} /></label><label className="field"><span>URL slug</span><input required pattern="[a-z0-9]+(-[a-z0-9]+)*" value={form.slug} onChange={(event) => update('slug', event.target.value)} /></label><label className="field"><span>Category</span><select required value={form.category} onChange={(event) => update('category', event.target.value)}>{!categories.data?.includes(form.category) && <option value={form.category}>{form.category}</option>}{(categories.data ?? []).map((category) => <option key={category} value={category}>{category}</option>)}</select></label><label className="field"><span>Price (INR)</span><input required type="number" min="0.01" step="0.01" value={form.price} onChange={(event) => update('price', event.target.value)} /></label><label className="field"><span>Low stock threshold</span><input type="number" min="0" value={form.lowStockThreshold} onChange={(event) => update('lowStockThreshold', event.target.value)} /></label>{!product && <label className="field"><span>Initial stock</span><input type="number" min="0" value={form.stock} onChange={(event) => update('stock', event.target.value)} /></label>}<label className="field span-two"><span>Description</span><textarea required maxLength={5000} rows={4} value={form.description} onChange={(event) => update('description', event.target.value)} /></label><div className="field span-two"><span>Product images</span><input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={chooseImages} disabled={saving || form.images.length + files.length >= 10} /><div className="image-upload-list">{form.images.map((image) => <div className="image-upload-item" key={image}><img src={resolveProductImageUrl(image)} alt="" /><span>{image.split('/').pop()}</span><button type="button" className="text-button danger-text" onClick={() => setForm((current) => ({ ...current, images: current.images.filter((item) => item !== image) }))} disabled={saving}>Remove</button></div>)}{files.map((file, index) => <div className="image-upload-item" key={`${file.name}-${index}`}><span>{file.name}</span><button type="button" className="text-button danger-text" onClick={() => setFiles((current) => current.filter((_, fileIndex) => fileIndex !== index))} disabled={saving}>Remove</button></div>)}</div></div><label className="checkbox-field span-two"><input type="checkbox" checked={form.isActive} onChange={(event) => update('isActive', event.target.checked)} /><span>Visible in public catalogue</span></label></div><div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button" disabled={saving || categories.loading || !categories.data?.length}>{saving ? 'Uploading and saving…' : 'Save product'}</button></div></form></section></div>;
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="product-editor-title">
+      <div className="modal-heading"><h2 id="product-editor-title">{product ? 'Edit product' : 'Add a product'}</h2><button className="close-button" onClick={onClose} aria-label="Close">×</button></div>
+      <p>Choose up to 10 JPEG, PNG, or WebP images (5 MB max each). Stock changes use Inventory.</p>
+      {error && <Notice tone="error">{error}</Notice>}
+      {categories.error && <Notice tone="error">{categories.error}</Notice>}
+      <form className="stack-form" onSubmit={(event) => void submit(event)}>
+        <div className="form-grid">
+          <label className="field"><span>Product name</span><input required maxLength={160} value={form.name} onChange={(event) => update('name', event.target.value)} /></label>
+          <label className="field"><span>URL slug</span><input required pattern="[a-z0-9]+(-[a-z0-9]+)*" value={form.slug} onChange={(event) => update('slug', event.target.value)} /></label>
+          <label className="field"><span>Main category</span><select required value={form.categoryId} onChange={(event) => {
+            const nextCategory = categories.data?.find((category) => category.categoryId === event.target.value);
+            setForm((current) => ({ ...current, categoryId: event.target.value, subcategoryId: nextCategory?.subcategories[0]?.subcategoryId ?? '', productType: '' }));
+          }}>{(categories.data ?? []).map((category) => <option key={category.categoryId} value={category.categoryId}>{category.categoryName}</option>)}</select></label>
+          <label className="field"><span>Subcategory</span><select required value={form.subcategoryId} onChange={(event) => setForm((current) => ({ ...current, subcategoryId: event.target.value, productType: '' }))}>{(selectedCategory?.subcategories ?? []).map((subcategory) => <option key={subcategory.subcategoryId} value={subcategory.subcategoryId}>{subcategory.subcategoryName}</option>)}</select></label>
+          <label className="field span-two"><span>Product type</span><input required list="admin-product-types" value={form.productType} onChange={(event) => update('productType', event.target.value)} /><datalist id="admin-product-types">{(selectedSubcategory?.productTypes ?? []).filter((item) => item.classificationStatus === 'classified').map((item) => <option key={item.productTypeId} value={item.productType} />)}</datalist></label>
+          <label className="field"><span>Price (INR)</span><input required type="number" min="0.01" step="0.01" value={form.price} onChange={(event) => update('price', event.target.value)} /></label>
+          <label className="field"><span>Low stock threshold</span><input type="number" min="0" value={form.lowStockThreshold} onChange={(event) => update('lowStockThreshold', event.target.value)} /></label>
+          {!product && <label className="field"><span>Initial stock</span><input type="number" min="0" value={form.stock} onChange={(event) => update('stock', event.target.value)} /></label>}
+          <label className="field span-two"><span>Description</span><textarea required maxLength={5000} rows={4} value={form.description} onChange={(event) => update('description', event.target.value)} /></label>
+          <div className="field span-two"><span>Product images</span><input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={chooseImages} disabled={saving || form.images.length + files.length >= 10} /><div className="image-upload-list">{form.images.map((image) => <div className="image-upload-item" key={image}><img src={resolveProductImageUrl(image)} alt="" /><span>{image.split('/').pop()}</span><button type="button" className="text-button danger-text" onClick={() => setForm((current) => ({ ...current, images: current.images.filter((item) => item !== image) }))} disabled={saving}>Remove</button></div>)}{files.map((file, index) => <div className="image-upload-item" key={`${file.name}-${index}`}><span>{file.name}</span><button type="button" className="text-button danger-text" onClick={() => setFiles((current) => current.filter((_, fileIndex) => fileIndex !== index))} disabled={saving}>Remove</button></div>)}</div></div>
+          <label className="checkbox-field span-two"><input type="checkbox" checked={form.isActive} onChange={(event) => update('isActive', event.target.checked)} /><span>Visible in public catalogue</span></label>
+        </div>
+        {form.categoryId === 'food-items' && <Notice>Food listings stay unpublished until the seller's FSSAI details have been verified.</Notice>}
+        <div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button" disabled={saving || categories.loading || !categories.data?.length}>{saving ? 'Uploading and saving…' : 'Save product'}</button></div>
+      </form>
+    </section>
+  </div>;
 }
 
 function AdminInventoryPage(): ReactNode {
+  const categories = useLoad(() => api.categories());
   const [page, setPage] = useState(1);
-  const products = useLoad(() => api.adminProducts(new URLSearchParams({ page: String(page), limit: '100', archived: 'false' })), [page]);
+  const [categoryId, setCategoryId] = useState('');
+  const [subcategoryId, setSubcategoryId] = useState('');
+  const query = new URLSearchParams({ page: String(page), limit: '100', archived: 'false' });
+  if (categoryId) query.set('categoryId', categoryId);
+  if (subcategoryId) query.set('subcategoryId', subcategoryId);
+  const products = useLoad(() => api.adminProducts(query), [page, categoryId, subcategoryId]);
   const [selection, setSelection] = useState('');
   const [quantityChange, setQuantityChange] = useState('');
   const [reason, setReason] = useState('');
@@ -2579,7 +3430,7 @@ function AdminInventoryPage(): ReactNode {
     } catch (cause) { setError(displayError(cause)); }
     finally { setSaving(false); }
   };
-  return <div className="admin-page"><PageIntro eyebrow="Stock control" title="Inventory" description="Every adjustment is recorded with a reason. Product edit screens do not change stock." />{products.error && <Notice tone="error">{products.error}</Notice>}{products.loading ? <Loading /> : <><div className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">Current inventory</span><h2>Stock at a glance</h2></div></div>{products.data?.data.length ? <div className="admin-table-wrap"><table><thead><tr><th>Product</th><th>Stock</th><th>Low stock at</th><th>Variants</th></tr></thead><tbody>{products.data.data.map((product) => <tr key={getId(product)}><td>{product.name}</td><td>{product.variants.length ? 'By option' : product.stock}</td><td>{product.lowStockThreshold}</td><td>{product.variants.length || '—'}</td></tr>)}</tbody></table></div> : <EmptyState title="No products in inventory" />}{products.data?.pagination.totalPages && products.data.pagination.totalPages > 1 && <Pagination page={page} pages={products.data.pagination.totalPages} onChange={setPage} />}</div><form className="panel stock-form" onSubmit={(event) => void submit(event)}><span className="eyebrow">Record a change</span><h2>Adjust stock</h2>{error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}<div className="form-grid"><label className="field span-two"><span>Product (current page)</span><select required value={selection} onChange={(event) => { setSelection(event.target.value); setVariantId(''); }}><option value="">Choose a product</option>{(products.data?.data ?? []).map((product) => <option key={getId(product)} value={getId(product)}>{product.name}</option>)}</select></label>{Boolean(selected?.variants.length) && <label className="field span-two"><span>Variant</span><select required value={variantId} onChange={(event) => setVariantId(event.target.value)}><option value="">Choose option</option>{selected?.variants.map((variant) => <option key={variant._id} value={variant._id}>{Object.values(variant.attributes).join(' · ') || variant.sku}</option>)}</select></label>}<label className="field"><span>Quantity change (+/-)</span><input required type="number" min="-100000" max="100000" value={quantityChange} onChange={(event) => setQuantityChange(event.target.value)} /></label><label className="field"><span>Reason</span><input required maxLength={300} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Restock, correction…" /></label></div><button className="button" disabled={saving || !selection}>{saving ? 'Recording…' : 'Record adjustment'}</button></form></>}</div>;
+  return <div className="admin-page"><PageIntro eyebrow="Stock control" title="Inventory" description="Every adjustment is recorded with a reason. Product edit screens do not change stock." />{products.error && <Notice tone="error">{products.error}</Notice>}{categories.error && <Notice tone="error">{categories.error}</Notice>}<div className="admin-toolbar"><select aria-label="Filter inventory by main category" value={categoryId} onChange={(event) => { setPage(1); setCategoryId(event.target.value); setSubcategoryId(''); }}><option value="">All categories</option>{(categories.data ?? []).map((category) => <option key={category.categoryId} value={category.categoryId}>{category.categoryName}</option>)}</select><select aria-label="Filter inventory by subcategory" value={subcategoryId} disabled={!categoryId} onChange={(event) => { setPage(1); setSubcategoryId(event.target.value); }}><option value="">All subcategories</option>{(categories.data?.find((category) => category.categoryId === categoryId)?.subcategories ?? []).map((subcategory) => <option key={subcategory.subcategoryId} value={subcategory.subcategoryId}>{subcategory.subcategoryName}</option>)}</select></div>{products.loading ? <Loading /> : <><div className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">Current inventory</span><h2>Stock at a glance</h2></div></div>{products.data?.data.length ? <div className="admin-table-wrap"><table><thead><tr><th>Product</th><th>Category</th><th>Stock</th><th>Low stock at</th><th>Variants</th></tr></thead><tbody>{products.data.data.map((product) => <tr key={getId(product)}><td>{product.name}</td><td>{product.categoryName}<small>{product.subcategoryName}</small></td><td>{product.variants.length ? 'By option' : product.stock}</td><td>{product.lowStockThreshold}</td><td>{product.variants.length || '—'}</td></tr>)}</tbody></table></div> : <EmptyState title="No products in inventory" />}{products.data?.pagination.totalPages && products.data.pagination.totalPages > 1 && <Pagination page={page} pages={products.data.pagination.totalPages} onChange={setPage} />}</div><form className="panel stock-form" onSubmit={(event) => void submit(event)}><span className="eyebrow">Record a change</span><h2>Adjust stock</h2>{error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}<div className="form-grid"><label className="field span-two"><span>Product (current page)</span><select required value={selection} onChange={(event) => { setSelection(event.target.value); setVariantId(''); }}><option value="">Choose a product</option>{(products.data?.data ?? []).map((product) => <option key={getId(product)} value={getId(product)}>{product.name}</option>)}</select></label>{Boolean(selected?.variants.length) && <label className="field span-two"><span>Variant</span><select required value={variantId} onChange={(event) => setVariantId(event.target.value)}><option value="">Choose option</option>{selected?.variants.map((variant) => <option key={variant._id} value={variant._id}>{Object.values(variant.attributes).join(' · ') || variant.sku}</option>)}</select></label>}<label className="field"><span>Quantity change (+/-)</span><input required type="number" min="-100000" max="100000" value={quantityChange} onChange={(event) => setQuantityChange(event.target.value)} /></label><label className="field"><span>Reason</span><input required maxLength={300} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Restock, correction…" /></label></div><button className="button" disabled={saving || !selection}>{saving ? 'Recording…' : 'Record adjustment'}</button></form></>}</div>;
 }
 
 function AdminOrdersPage(): ReactNode {
@@ -2654,7 +3505,7 @@ function AdminOrderPage(): ReactNode {
   const [cancellationNote, setCancellationNote] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const admin = user?.role === 'admin';
+  const admin = user?.role === 'admin' || user?.role === 'super_admin';
   const partners = useLoad(() => admin
     ? api.deliveryPartners(partnerPage, 100)
     : Promise.resolve({ data: [], pagination: { page: 1, limit: 100, total: 0, totalPages: 0 } }), [admin, partnerPage]);
@@ -2874,6 +3725,532 @@ function AdminDeliveryPartnerPage(): ReactNode {
   </div>;
 }
 
+function SellerRegistrationPage(): ReactNode {
+  const categories = useLoad(() => api.categories());
+  const [submitted, setSubmitted] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    shgName: '',
+    representative: '',
+    phone: '',
+    city: 'Damoh',
+    address: '',
+    categoryId: 'womens-apparel-accessories',
+    subcategoryId: 'jewellery-accessories',
+    productType: '',
+    fssaiRegistrationNumber: '',
+  });
+
+  function updateField(field: keyof typeof form, value: string): void {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  const selectedCategory = categories.data?.find((category) => category.categoryId === form.categoryId);
+  const selectedSubcategory = selectedCategory?.subcategories.find((subcategory) => subcategory.subcategoryId === form.subcategoryId);
+  const isFoodSeller = form.categoryId === 'food-items';
+
+  async function submitApplication(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setError('');
+    setSubmitted('');
+    setSaving(true);
+    try {
+      const { fssaiRegistrationNumber, ...application } = form;
+      const result = await api.submitSellerApplication({
+        ...application,
+        ...(isFoodSeller ? { fssaiRegistrationNumber } : {}),
+      });
+      setSubmitted(result.message);
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="page-container narrow">
+      <div className="page-intro">
+        <div>
+          <span className="eyebrow">Seller onboarding</span>
+          <h1>Start as a new seller</h1>
+        </div>
+        <Link to="/seller" className="button button-outline">Back to seller portal</Link>
+      </div>
+      <section className="panel seller-application-card">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">SHG application</span>
+            <h2>Basic seller profile</h2>
+          </div>
+        </div>
+        <div className="panel-body compact-form">
+          {submitted && <Notice tone="success">{submitted}</Notice>}
+          {error && <Notice tone="error">{error}</Notice>}
+          {categories.error && <div className="section-state"><Notice tone="error">{categories.error}</Notice><button type="button" className="button button-outline" onClick={() => void categories.reload()}>Retry categories</button></div>}
+          <form className="stack-form" onSubmit={(event) => void submitApplication(event)}>
+            <label className="field"><span>SHG or seller name</span><input required value={form.shgName} onChange={(event) => updateField('shgName', event.target.value)} placeholder="Example: Sakhi Craft Collective" /></label>
+            <label className="field"><span>Authorized representative</span><input required value={form.representative} onChange={(event) => updateField('representative', event.target.value)} placeholder="Full name" /></label>
+            <label className="field"><span>Phone number</span><input required type="tel" inputMode="tel" pattern="(\\+91)?[6-9][0-9]{9}" title="Enter a valid 10-digit Indian mobile number, optionally with +91." maxLength={13} value={form.phone} onChange={(event) => updateField('phone', event.target.value)} placeholder="+919876543210" /></label>
+            <div className="form-grid two-up">
+              <label className="field"><span>City</span><select value={form.city} onChange={(event) => updateField('city', event.target.value)}><option>Damoh</option></select></label>
+              <label className="field"><span>Main category</span><select required disabled={categories.loading || !categories.data?.length} value={form.categoryId} onChange={(event) => {
+                const nextCategory = categories.data?.find((category) => category.categoryId === event.target.value);
+                setForm((current) => ({ ...current, categoryId: event.target.value, subcategoryId: nextCategory?.subcategories[0]?.subcategoryId ?? '', productType: '', fssaiRegistrationNumber: '' }));
+              }}>{(categories.data ?? []).map((category) => <option key={category.categoryId} value={category.categoryId}>{category.categoryName}</option>)}</select></label>
+            </div>
+            <label className="field"><span>Subcategory</span><select required disabled={!selectedCategory} value={form.subcategoryId} onChange={(event) => {
+              setForm((current) => ({ ...current, subcategoryId: event.target.value, productType: '' }));
+            }}>{(selectedCategory?.subcategories ?? []).map((subcategory) => <option key={subcategory.subcategoryId} value={subcategory.subcategoryId}>{subcategory.subcategoryName}</option>)}</select></label>
+            <label className="field"><span>Primary product type</span><input required list="seller-application-product-types" value={form.productType} onChange={(event) => updateField('productType', event.target.value)} placeholder="Describe the product type" /><datalist id="seller-application-product-types">{(selectedSubcategory?.productTypes ?? []).map((type) => <option key={type.productTypeId} value={type.productType} />)}</datalist></label>
+            {isFoodSeller && <label className="field"><span>FSSAI registration or licence number</span><input required inputMode="numeric" pattern="[0-9]{14}" maxLength={14} value={form.fssaiRegistrationNumber} onChange={(event) => updateField('fssaiRegistrationNumber', event.target.value)} placeholder="14-digit number" /><small>Food seller access and food listings stay blocked until a City Admin verifies this number.</small></label>}
+            <label className="field"><span>Registered address</span><textarea required rows={4} value={form.address} onChange={(event) => updateField('address', event.target.value)} placeholder="Street, locality, village, city" /></label>
+            <Notice>Only product-relevant information is requested here. GST, HSN, and tax choices are reviewed by the City Admin after approval, not by the seller at onboarding.</Notice>
+            <button type="submit" className="button button-full" disabled={saving || categories.loading || !categories.data?.length}>{saving ? 'Submitting…' : 'Submit seller application'}</button>
+          </form>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function CityAdminSellerApplicationsPage(): ReactNode {
+  const [tab, setTab] = useState<'applications' | 'sellers'>('applications');
+  const [status, setStatus] = useState('pending');
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [verifiedFssai, setVerifiedFssai] = useState<Record<string, boolean>>({});
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const query = new URLSearchParams({ page: '1', limit: '50', status });
+  const result = useLoad(() => api.cityAdminSellerApplications(query), [status]);
+
+  async function review(applicationId: string, decision: 'approved' | 'rejected' | 'needs_info', fssaiDecision?: 'verified'): Promise<void> {
+    setError('');
+    setMessage('');
+    try {
+      await api.reviewSellerApplication(applicationId, decision, notes[applicationId]?.trim(), fssaiDecision);
+      setMessage(decision === 'approved' ? 'Application approved and seller account access granted.' : decision === 'rejected' ? 'Application rejected.' : 'Application returned for more information.');
+      await result.reload();
+    } catch (cause) {
+      setError(displayError(cause));
+    }
+  }
+
+  return (
+    <div className="city-admin-page">
+      <div className="city-admin-page-heading"><div><p className="city-admin-eyebrow">Seller onboarding</p><h1>Sellers & SHGs</h1><p>Review applications for your assigned city. Seller access is granted only after approval.</p></div></div>
+      {error && <div className="city-admin-error" role="alert">{error}</div>}
+      {message && <Notice tone="success">{message}</Notice>}
+      <div className="city-admin-tabs" role="tablist" aria-label="Seller views">
+        <button type="button" role="tab" aria-selected={tab === 'applications'} className={tab === 'applications' ? 'active' : ''} onClick={() => setTab('applications')}>Applications</button>
+        <button type="button" role="tab" aria-selected={tab === 'sellers'} className={tab === 'sellers' ? 'active' : ''} onClick={() => setTab('sellers')}>Approved sellers</button>
+      </div>
+      {tab === 'sellers' ? <CityAdminSellerDirectory /> : <>
+      <section className="city-admin-panel city-admin-order-directory">
+        <div className="city-admin-order-tools">
+          <select aria-label="Filter seller applications by status" value={status} onChange={(event) => setStatus(event.target.value)}>
+            <option value="pending">Awaiting review</option><option value="needs_info">Needs more information</option><option value="approved">Approved</option><option value="rejected">Rejected</option>
+          </select>
+        </div>
+        {result.loading ? <Loading label="Loading seller applications…" /> : result.data?.data.length ? <div className="city-admin-review-grid">
+          {result.data.data.map((application) => <article key={application._id} className="city-admin-review-card panel">
+            <div className="panel-heading"><div><span className="eyebrow">{application.city} · {new Date(application.createdAt).toLocaleDateString('en-IN')}</span><h2>{application.shgName}</h2></div><span className={`status-pill status-${application.status.replaceAll('_', '-')}`}>{application.status.replaceAll('_', ' ')}</span></div>
+            <div className="panel-body">
+              <dl className="review-field-grid">
+                <div><dt>Representative</dt><dd>{application.representative}</dd></div>
+                <div><dt>Phone</dt><dd><a href={`tel:${application.phoneE164}`}>{application.phoneE164}</a></dd></div>
+                <div><dt>Primary product type</dt><dd>{application.primaryProductType}</dd></div>
+                <div><dt>Category</dt><dd>{application.primaryCategoryName || 'Not recorded'}{application.primarySubcategoryName ? ` · ${application.primarySubcategoryName}` : ''}</dd></div>
+                {application.primaryCategoryId === 'food-items' && <div><dt>FSSAI registration / licence</dt><dd>{application.fssaiRegistrationNumber || 'Not provided'} · {application.fssaiStatus.replaceAll('_', ' ')}</dd></div>}
+                <div><dt>Registered address</dt><dd>{application.registeredAddress}</dd></div>
+                {application.reviewNote && <div><dt>Previous review note</dt><dd>{application.reviewNote}</dd></div>}
+              </dl>
+              {application.status === 'pending' || application.status === 'needs_info' ? <>
+                <label className="field"><span>Review note (required to reject)</span><textarea rows={2} maxLength={1000} value={notes[application._id] ?? ''} onChange={(event) => setNotes((current) => ({ ...current, [application._id]: event.target.value }))} /></label>
+                {application.primaryCategoryId === 'food-items' && <label className="checkbox-field"><input type="checkbox" checked={verifiedFssai[application._id] ?? false} onChange={(event) => setVerifiedFssai((current) => ({ ...current, [application._id]: event.target.checked }))} /><span>I reviewed the submitted FSSAI details and confirm they are verified.</span></label>}
+                <div className="button-row review-actions">
+                  <button type="button" className="button" disabled={application.primaryCategoryId === 'food-items' && !(verifiedFssai[application._id] ?? false)} onClick={() => void review(application._id, 'approved', application.primaryCategoryId === 'food-items' ? 'verified' : undefined)}>Approve seller</button>
+                  <button type="button" className="button button-outline" onClick={() => void review(application._id, 'needs_info')}>Request information</button>
+                  <button type="button" className="button button-light" disabled={!notes[application._id]?.trim()} onClick={() => void review(application._id, 'rejected')}>Reject</button>
+                </div>
+              </> : application.reviewedAt && <p className="city-admin-data-note">Reviewed {new Date(application.reviewedAt).toLocaleString('en-IN')}</p>}
+            </div>
+          </article>)}
+        </div> : <div className="city-admin-empty">No seller applications in this queue.</div>}
+      </section>
+      </>}
+    </div>
+  );
+}
+
+function CityAdminSellerDirectory(): ReactNode {
+  const { user } = useAuth();
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
+  const query = new URLSearchParams({ page: String(page), limit: '20' });
+  if (search.trim()) query.set('q', search.trim());
+  const result = useLoad(() => api.cityAdminSellers(query), [page, search]);
+  useRefreshOnFocus(result.reload);
+
+  return <section className="city-admin-panel city-admin-order-directory">
+    <div className="city-admin-order-tools">
+      <label className="city-admin-search-field"><span aria-hidden="true">⌕</span><input aria-label="Search city sellers" placeholder="Search seller or phone" value={search} onChange={(event) => { setPage(1); setSearch(event.target.value); }} /></label>
+    </div>
+    {result.error && <div className="city-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+    {result.loading ? <Loading label="Loading city sellers…" /> : result.error ? null : result.data?.data.length ? <div className="city-admin-table-wrap"><table className="city-admin-table"><thead><tr><th>Seller / SHG</th><th>Contact</th><th>Categories</th><th>Products</th><th>Orders</th><th>Verification</th><th>Account</th></tr></thead><tbody>{result.data.data.map((seller) => <tr key={seller._id}>
+      <td><strong>{seller.name || 'Seller'}</strong></td>
+      <td><a href={`tel:${seller.phoneE164}`}>{seller.phoneE164}</a>{seller.email && <small>{seller.email}</small>}</td>
+      <td>{seller.productCategories.join(', ') || 'No listed products'}</td>
+      <td>{seller.productCount}</td>
+      <td>{seller.orderCount}</td>
+      <td>Not tracked</td>
+      <td><StatusBadge value={seller.status} /></td>
+    </tr>)}</tbody></table></div> : <div className="city-admin-empty">No approved sellers are assigned to {user?.assignedCity ?? 'this city'} yet.</div>}
+    {result.data && result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}
+  </section>;
+}
+
+type SellerProductDraft = {
+  categoryId: string;
+  subcategoryId: string;
+  productType: string;
+  name: string;
+  slug: string;
+  slugEdited: boolean;
+  description: string;
+  price: string;
+  stock: string;
+  lowStockThreshold: string;
+  imageUrl: string;
+};
+
+function readSellerProductDraft(key: string): SellerProductDraft | null {
+  try {
+    const saved = window.localStorage.getItem(key);
+    if (!saved) return null;
+    const parsed: unknown = JSON.parse(saved);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const value = parsed as Partial<SellerProductDraft>;
+    const fields: Array<keyof SellerProductDraft> = ['categoryId', 'subcategoryId', 'productType', 'name', 'slug', 'description', 'price', 'stock', 'lowStockThreshold', 'imageUrl'];
+    if (!fields.every((field) => typeof value[field] === 'string')) return null;
+    return { ...value, slugEdited: value.slugEdited === true } as SellerProductDraft;
+  } catch (cause) {
+    console.warn('Could not restore the saved seller product draft.', cause);
+    return null;
+  }
+}
+
+function SellerCatalogueListingPage({ onCancel, onSubmitted, onDraftSaved }: { onCancel: () => void; onSubmitted: () => void; onDraftSaved?: (draft: SellerProductDraft | null) => void }): ReactNode {
+  const { user } = useAuth();
+  const categories = useLoad(() => api.categories());
+  const draftKey = `esakhi.seller.productDraft:${user?.id ?? 'seller'}`;
+  const [draft] = useState(() => readSellerProductDraft(draftKey));
+  const [categoryId, setCategoryId] = useState(draft?.categoryId ?? 'womens-apparel-accessories');
+  const [subcategoryId, setSubcategoryId] = useState(draft?.subcategoryId ?? 'jewellery-accessories');
+  const [productType, setProductType] = useState(draft?.productType ?? '');
+  const [name, setName] = useState(draft?.name ?? '');
+  const [slug, setSlug] = useState(draft?.slug ?? '');
+  const [slugEdited, setSlugEdited] = useState(draft?.slugEdited ?? false);
+  const [description, setDescription] = useState(draft?.description ?? '');
+  const [price, setPrice] = useState(draft?.price ?? '');
+  const [stock, setStock] = useState(draft?.stock ?? '');
+  const [lowStockThreshold, setLowStockThreshold] = useState(draft?.lowStockThreshold ?? '5');
+  const [imageUrl, setImageUrl] = useState(draft?.imageUrl ?? '');
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [saved, setSaved] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const selectedCategory = categories.data?.find((category) => category.categoryId === categoryId);
+  const selectedSubcategory = selectedCategory?.subcategories.find((subcategory) => subcategory.subcategoryId === subcategoryId);
+  const slugFromName = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+  useEffect(() => {
+    if (!categories.data?.length) return;
+    const validCategory = categories.data.find((category) => category.categoryId === categoryId) ?? categories.data[0];
+    if (validCategory.categoryId !== categoryId) setCategoryId(validCategory.categoryId);
+    if (!validCategory.subcategories.some((subcategory) => subcategory.subcategoryId === subcategoryId)) {
+      setSubcategoryId(validCategory.subcategories[0]?.subcategoryId ?? '');
+    }
+  }, [categories.data, categoryId, subcategoryId]);
+
+  const currentDraft: SellerProductDraft = {
+    categoryId, subcategoryId, productType, name, slug, slugEdited,
+    description, price, stock, lowStockThreshold, imageUrl,
+  };
+
+  function saveDraft(): void {
+    setError('');
+    try {
+      window.localStorage.setItem(draftKey, JSON.stringify(currentDraft));
+      onDraftSaved?.(currentDraft);
+      setSaved('Draft saved on this device. It will be available when you return on this browser.');
+    } catch (cause) {
+      setError(displayError(cause));
+    }
+  }
+
+  async function uploadImage(file: File): Promise<void> {
+    setUploadingImage(true);
+    setError('');
+    setSaved('');
+    try {
+      const uploaded = await api.uploadSellerProductImage(file);
+      setImageUrl(uploaded.imageUrl);
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      setUploadingImage(false);
+    }
+  }
+
+  async function submitProduct(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    setSaved('');
+    try {
+      await api.createSellerProduct({
+        name: name.trim(),
+        slug: slug.trim() || slugFromName(name),
+        description: description.trim(),
+        categoryId,
+        subcategoryId,
+        productType: productType.trim(),
+        pricePaise: Math.round(Number(price) * 100),
+        stock: Number(stock),
+        lowStockThreshold: Number(lowStockThreshold),
+        ...(imageUrl.trim() ? { imageUrls: [imageUrl.trim()] } : {}),
+      });
+      setSaved('Your product was submitted for City Admin review and is not yet published.');
+      try {
+        window.localStorage.removeItem(draftKey);
+        onDraftSaved?.(null);
+      } catch (cause) {
+        console.warn('Could not remove the submitted seller product draft.', cause);
+      }
+      onSubmitted();
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="seller-panel seller-product-editor">
+      <div className="seller-panel-heading"><div><h2>Product details</h2><p>Products are published after City Admin review.</p></div><button className="seller-secondary-action" type="button" onClick={onCancel}>Cancel</button></div>
+      <div className="seller-product-editor-body">
+          {saved && <Notice tone="success">{saved}</Notice>}
+          {error && <Notice tone="error">{error}</Notice>}
+          {categories.error && <div className="seller-panel-state"><Notice tone="error">{categories.error}</Notice><button type="button" className="seller-secondary-action" onClick={() => void categories.reload()}>Retry categories</button></div>}
+          <form className="seller-product-form" onSubmit={(event) => void submitProduct(event)}>
+            <div className="form-grid two-up">
+              <label className="field"><span>Main category</span><select required disabled={categories.loading || !categories.data?.length} value={categoryId} onChange={(event) => {
+                const nextCategory = categories.data?.find((category) => category.categoryId === event.target.value);
+                setCategoryId(event.target.value);
+                setSubcategoryId(nextCategory?.subcategories[0]?.subcategoryId ?? '');
+                setProductType('');
+              }}>{(categories.data ?? []).map((category) => <option key={category.categoryId} value={category.categoryId}>{category.categoryName}</option>)}</select></label>
+              <label className="field"><span>Subcategory</span><select required disabled={!selectedCategory} value={subcategoryId} onChange={(event) => { setSubcategoryId(event.target.value); setProductType(''); }}>{(selectedCategory?.subcategories ?? []).map((subcategory) => <option key={subcategory.subcategoryId} value={subcategory.subcategoryId}>{subcategory.subcategoryName}</option>)}</select></label>
+            </div>
+            <label className="field"><span>Product type</span><input required list="seller-product-types" value={productType} onChange={(event) => setProductType(event.target.value)} placeholder="Describe the product type" /><datalist id="seller-product-types">{(selectedSubcategory?.productTypes ?? []).map((type) => <option key={type.productTypeId} value={type.productType} />)}</datalist></label>
+            <label className="field"><span>Product name</span><input required maxLength={160} value={name} onChange={(event) => { setName(event.target.value); if (!slugEdited) setSlug(slugFromName(event.target.value)); }} /></label>
+            <label className="field"><span>Product page address</span><input required maxLength={180} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value={slug} onChange={(event) => { setSlugEdited(true); setSlug(event.target.value); }} /><small>Use lowercase letters, numbers, and hyphens.</small></label>
+            <label className="field"><span>Description</span><textarea required minLength={1} maxLength={5000} rows={4} value={description} onChange={(event) => setDescription(event.target.value)} /></label>
+            <div className="seller-image-upload">
+              <label className="field"><span>Product image</span><input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploadingImage} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file); event.currentTarget.value = ''; }} /><small>JPEG, PNG, or WebP. Maximum file size: 5 MB.</small></label>
+              {imageUrl && <div className="seller-image-preview"><img src={resolveProductImageUrl(imageUrl)} alt="Product preview" /><div><strong>Image ready</strong><button type="button" className="seller-secondary-action" onClick={() => setImageUrl('')}>Remove image</button></div></div>}
+              {uploadingImage && <Loading label="Uploading product image…" />}
+            </div>
+            <div className="form-grid two-up">
+              <label className="field"><span>Price (₹)</span><input required type="number" min="0.01" max="1000000" step="0.01" value={price} onChange={(event) => setPrice(event.target.value)} /></label>
+              <label className="field"><span>Available stock</span><input required type="number" min="0" max="100000" step="1" value={stock} onChange={(event) => setStock(event.target.value)} /></label>
+              <label className="field"><span>Low-stock alert at</span><input required type="number" min="0" max="100000" step="1" value={lowStockThreshold} onChange={(event) => setLowStockThreshold(event.target.value)} /><small>We’ll flag stock at or below this number.</small></label>
+            </div>
+            {categoryId === 'food-items' && <Notice>Food listings require an approved seller account with verified FSSAI details. Listings remain unpublished until City Admin approval.</Notice>}
+            {saved && <Notice tone="success">{saved}</Notice>}
+            {error && <Notice tone="error">{error}</Notice>}
+            <div className="seller-product-form-actions"><button type="button" className="seller-secondary-action" onClick={saveDraft} disabled={saving || uploadingImage}>Save draft on this device</button><button type="submit" className="seller-primary-action" disabled={saving || uploadingImage || categories.loading || !categories.data?.length}>{saving ? 'Submitting…' : 'Submit for approval'}</button></div>
+          </form>
+      </div>
+    </section>
+  );
+}
+
+function CityAdminProductReviewPage(): ReactNode {
+  const categories = useLoad(() => api.categories());
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
+  const [categoryId, setCategoryId] = useState('');
+  const [subcategoryId, setSubcategoryId] = useState('');
+  const [approvalStatus, setApprovalStatus] = useState('');
+  const [sellerId, setSellerId] = useState('');
+  const [stockStatus, setStockStatus] = useState('all');
+  const [listingStatus, setListingStatus] = useState('all');
+  const [flaggingProductId, setFlaggingProductId] = useState('');
+  const [flagReason, setFlagReason] = useState('');
+  const [reviewingProductId, setReviewingProductId] = useState('');
+  const [reviewCategoryId, setReviewCategoryId] = useState('');
+  const [reviewSubcategoryId, setReviewSubcategoryId] = useState('');
+  const [reviewProductType, setReviewProductType] = useState('');
+  const [reviewNote, setReviewNote] = useState('');
+  const [savingFlag, setSavingFlag] = useState(false);
+  const [savingReview, setSavingReview] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const query = new URLSearchParams({ page: String(page), limit: '20', stockStatus, listingStatus });
+  if (search.trim()) query.set('q', search.trim());
+  if (categoryId) query.set('categoryId', categoryId);
+  if (subcategoryId) query.set('subcategoryId', subcategoryId);
+  if (approvalStatus) query.set('approvalStatus', approvalStatus);
+  if (sellerId) query.set('sellerId', sellerId);
+  const result = useLoad(() => api.cityAdminProducts(query), [page, search, categoryId, subcategoryId, approvalStatus, sellerId, stockStatus, listingStatus]);
+  const sellersResult = useLoad(() => api.cityAdminSellers(new URLSearchParams({ page: '1', limit: '100' })), []);
+  const selectedCategory = categories.data?.find((category) => category.categoryId === reviewCategoryId);
+  const selectedSubcategory = selectedCategory?.subcategories.find((subcategory) => subcategory.subcategoryId === reviewSubcategoryId);
+  useRefreshOnFocus(result.reload);
+
+  async function submitFlag(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (!flaggingProductId) return;
+    setSavingFlag(true);
+    setError('');
+    setMessage('');
+    try {
+      await api.flagCityAdminProduct(flaggingProductId, flagReason.trim());
+      setMessage('Listing concern recorded and sent for review. Price, stock, and listing status were not changed.');
+      setFlaggingProductId('');
+      setFlagReason('');
+      await result.reload();
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      setSavingFlag(false);
+    }
+  }
+
+  function beginProductReview(product: CityAdminProduct): void {
+    if (reviewingProductId === product._id) {
+      setReviewingProductId('');
+      return;
+    }
+    const category = categories.data?.find((item) => item.categoryId === product.categoryId) ?? categories.data?.[0];
+    const subcategory = category?.subcategories.find((item) => item.subcategoryId === product.subcategoryId) ?? category?.subcategories[0];
+    setError('');
+    setMessage('');
+    setFlaggingProductId('');
+    setReviewingProductId(product._id);
+    setReviewCategoryId(category?.categoryId ?? '');
+    setReviewSubcategoryId(subcategory?.subcategoryId ?? '');
+    setReviewProductType(product.productType || product.name);
+    setReviewNote('');
+  }
+
+  async function quickApproveProduct(product: CityAdminProduct): Promise<void> {
+    setSavingReview(true);
+    setError('');
+    setMessage('');
+    try {
+      await api.reviewCityAdminProduct(product._id, {
+        decision: 'approved',
+        ...(product.categoryId && product.subcategoryId && product.productType ? {
+          categoryId: product.categoryId,
+          subcategoryId: product.subcategoryId,
+          productType: product.productType,
+        } : {}),
+      });
+      setMessage(`"${product.name}" has been approved and published.`);
+      if (reviewingProductId === product._id) setReviewingProductId('');
+      await result.reload(false);
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      setSavingReview(false);
+    }
+  }
+
+  async function reviewProduct(decision: 'approved' | 'rejected'): Promise<void> {
+    if (!reviewingProductId) return;
+    setSavingReview(true);
+    setError('');
+    setMessage('');
+    try {
+      await api.reviewCityAdminProduct(reviewingProductId, {
+        decision,
+        ...(reviewNote.trim() ? { note: reviewNote.trim() } : {}),
+        categoryId: reviewCategoryId,
+        subcategoryId: reviewSubcategoryId,
+        productType: reviewProductType.trim(),
+      });
+      setMessage(decision === 'approved' ? 'Product classification saved and listing approved.' : 'Product classification saved and listing rejected.');
+      setReviewingProductId('');
+      await result.reload(false);
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      setSavingReview(false);
+    }
+  }
+
+  return (
+    <div className="city-admin-page">
+      <div className="city-admin-page-heading"><div><p className="city-admin-eyebrow">Local operations</p><h1>Products & Inventory</h1><p>Review listings from sellers assigned to your city. Price and inventory remain seller-owned.</p></div></div>
+      {error && <div className="city-admin-error" role="alert">{error}</div>}
+      {message && <Notice tone="success">{message}</Notice>}
+      {categories.error && <div className="city-admin-error" role="alert">Category master unavailable: {categories.error}<button onClick={() => void categories.reload()}>Retry</button></div>}
+      <section className="city-admin-panel city-admin-order-directory">
+        <div className="city-admin-order-tools city-admin-product-tools">
+          <label className="city-admin-search-field"><span aria-hidden="true">⌕</span><input aria-label="Search products" placeholder="Search product name" value={search} onChange={(event) => { setPage(1); setSearch(event.target.value); }} /></label>
+          <select aria-label="Filter by main category" value={categoryId} onChange={(event) => { setPage(1); setCategoryId(event.target.value); setSubcategoryId(''); }}><option value="">All categories</option>{(categories.data ?? []).map((category) => <option key={category.categoryId} value={category.categoryId}>{category.categoryName}</option>)}</select>
+          <select aria-label="Filter by subcategory" value={subcategoryId} disabled={!categoryId} onChange={(event) => { setPage(1); setSubcategoryId(event.target.value); }}><option value="">All subcategories</option>{(categories.data?.find((category) => category.categoryId === categoryId)?.subcategories ?? []).map((subcategory) => <option key={subcategory.subcategoryId} value={subcategory.subcategoryId}>{subcategory.subcategoryName}</option>)}</select>
+          <select aria-label="Filter by approval status" value={approvalStatus} onChange={(event) => { setPage(1); setApprovalStatus(event.target.value); }}><option value="">All approval states</option><option value="pending">Awaiting review</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select>
+          <select aria-label="Filter by seller" value={sellerId} onChange={(event) => { setPage(1); setSellerId(event.target.value); }}><option value="">All city sellers</option>{(sellersResult.data?.data ?? []).map((seller) => <option key={seller._id} value={seller._id}>{seller.name || seller.phoneE164}</option>)}</select>
+          <select aria-label="Filter by stock" value={stockStatus} onChange={(event) => { setPage(1); setStockStatus(event.target.value); }}><option value="all">All stock</option><option value="low_stock">Low stock</option><option value="out_of_stock">Out of stock</option></select>
+          <select aria-label="Filter by listing status" value={listingStatus} onChange={(event) => { setPage(1); setListingStatus(event.target.value); }}><option value="all">All listing states</option><option value="active">Active</option><option value="inactive">Inactive</option><option value="archived">Archived</option></select>
+        </div>
+        {sellersResult.error && <div className="city-admin-error" role="alert">Seller filter unavailable: {sellersResult.error}<button onClick={() => void sellersResult.reload()}>Retry</button></div>}
+        {result.error && <div className="city-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+        {result.loading ? <Loading label="Loading city products…" /> : result.error ? null : result.data?.data.length ? <div className="city-admin-table-wrap"><table className="city-admin-table"><thead><tr><th>Product</th><th>Seller</th><th>Category</th><th>Price</th><th>Available</th><th>Reserved</th><th>Classification / compliance</th><th>Approval</th><th>Listing</th><th>Flags</th><th>Action</th></tr></thead><tbody>{result.data.data.map((product) => <Fragment key={product._id}>
+          <tr>
+            <td><strong>{product.name}</strong></td><td>{product.sellerName}</td><td>{product.categoryName || product.category || 'Uncategorized'}<small>{product.subcategoryName || 'Needs classification'}</small></td><td>{formatMoney(product.pricePaise)}</td><td>{product.availableStock}</td><td>{product.reservedStock}</td><td>{product.classificationStatus.replaceAll('_', ' ')}<small>{product.isFoodProduct ? `Food · FSSAI ${product.foodComplianceStatus.replaceAll('_', ' ')}` : product.productType}</small></td><td><StatusBadge value={product.approvalStatus} /></td><td><StatusBadge value={product.isArchived ? 'archived' : product.isActive ? 'active' : 'inactive'} /></td><td>{product.openFlagCount ?? 0}</td>
+            <td>
+              <div className="seller-table-actions">
+                {product.approvalStatus !== 'approved' && product.classificationStatus === 'classified' && (!product.isFoodProduct || product.foodComplianceStatus === 'verified') && (
+                  <button type="button" className="text-button" disabled={savingReview} onClick={() => void quickApproveProduct(product)}>Approve</button>
+                )}
+                <button type="button" className="text-button" disabled={!categories.data?.length} onClick={() => beginProductReview(product)}>{reviewingProductId === product._id ? 'Close review' : 'Review'}</button>
+                <button type="button" className="text-button" onClick={() => { setError(''); setMessage(''); setReviewingProductId(''); setFlaggingProductId(flaggingProductId === product._id ? '' : product._id); setFlagReason(''); }}>{flaggingProductId === product._id ? 'Close flag' : product.openFlagCount ? 'Add flag' : 'Flag listing'}</button>
+              </div>
+            </td>
+          </tr>
+          {flaggingProductId === product._id && <tr><td colSpan={11}><form className="city-admin-panel city-admin-zone-request" onSubmit={(event) => void submitFlag(event)}>
+            <div className="city-admin-panel-heading"><div><h2>Flag listing: {product.name}</h2><p>Report a concern for review. This does not change the seller’s listing or inventory.</p></div></div>
+            <label className="field"><span>Reason</span><textarea required minLength={10} maxLength={1000} rows={3} value={flagReason} onChange={(event) => setFlagReason(event.target.value)} placeholder="Describe the listing concern (at least 10 characters)" /></label>
+            <div className="city-admin-zone-request-actions"><button className="city-admin-secondary-button" type="button" disabled={savingFlag} onClick={() => setFlaggingProductId('')}>Cancel</button><button className="city-admin-primary-button" type="submit" disabled={savingFlag || flagReason.trim().length < 10}>{savingFlag ? 'Submitting…' : 'Submit flag'}</button></div>
+          </form></td></tr>}
+          {reviewingProductId === product._id && <tr><td colSpan={11}><section className="city-admin-panel city-admin-zone-request">
+            <div className="city-admin-panel-heading"><div><h2>Classify and review: {product.name}</h2><p>Confirm the category and product type before approving a listing. Food listings require a verified FSSAI seller application.</p></div></div>
+            <div className="form-grid two-up">
+              <label className="field"><span>Main category</span><select required value={reviewCategoryId} onChange={(event) => {
+                const nextCategory = categories.data?.find((category) => category.categoryId === event.target.value);
+                setReviewCategoryId(event.target.value);
+                setReviewSubcategoryId(nextCategory?.subcategories[0]?.subcategoryId ?? '');
+              }}>{(categories.data ?? []).map((category) => <option key={category.categoryId} value={category.categoryId}>{category.categoryName}</option>)}</select></label>
+              <label className="field"><span>Subcategory</span><select required value={reviewSubcategoryId} onChange={(event) => setReviewSubcategoryId(event.target.value)}>{(selectedCategory?.subcategories ?? []).map((subcategory) => <option key={subcategory.subcategoryId} value={subcategory.subcategoryId}>{subcategory.subcategoryName}</option>)}</select></label>
+            </div>
+            <label className="field"><span>Product type / classification</span><input required list="city-admin-product-types" value={reviewProductType} onChange={(event) => setReviewProductType(event.target.value)} /><datalist id="city-admin-product-types">{(selectedSubcategory?.productTypes ?? []).map((type) => <option key={type.productTypeId} value={type.productType} />)}</datalist></label>
+            <label className="field"><span>Review note (required to reject)</span><textarea rows={2} maxLength={1000} value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} placeholder="Add an optional approval note or required rejection reason" /></label>
+            <div className="city-admin-zone-request-actions"><button className="city-admin-secondary-button" type="button" disabled={savingReview} onClick={() => setReviewingProductId('')}>Cancel</button><button className="city-admin-secondary-button" type="button" disabled={savingReview || !reviewNote.trim()} onClick={() => void reviewProduct('rejected')}>{savingReview ? 'Saving…' : 'Reject listing'}</button><button className="city-admin-primary-button" type="button" disabled={savingReview || !reviewCategoryId || !reviewSubcategoryId || !reviewProductType.trim()} onClick={() => void reviewProduct('approved')}>{savingReview ? 'Saving…' : 'Approve & publish'}</button></div>
+          </section></td></tr>}
+        </Fragment>)}</tbody></table></div> : <div className="city-admin-empty">No products from sellers assigned to this city match these filters.</div>}
+        {result.data && result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}
+      </section>
+      <p className="city-admin-data-note">Reserved stock is calculated from active, unexpired unconfirmed order reservations. Food products cannot be published without verified FSSAI seller details.</p>
+    </div>
+  );
+}
+
 function SellerGate({ children }: { children: ReactNode }): ReactNode {
   const { user, ready } = useAuth();
   const location = useLocation();
@@ -2883,74 +4260,368 @@ function SellerGate({ children }: { children: ReactNode }): ReactNode {
   return children;
 }
 
-function SellerPortalPage(): ReactNode {
+function SellerSalesTrendChart({ rows }: { rows: SellerDashboard['salesTrend'] }): ReactNode {
+  const maxSales = Math.max(...rows.map((row) => row.totalPaise), 1);
+  return <div className="seller-chart-wrap">
+    <svg className="seller-sales-chart" viewBox="0 0 600 190" role="img" aria-label="Confirmed paid product sales over the last six months">
+      {[0, 1, 2].map((line) => <line key={line} x1="30" x2="590" y1={25 + line * 48} y2={25 + line * 48} className="seller-chart-gridline" />)}
+      {rows.map((row, index) => {
+        const height = row.totalPaise === 0 ? 3 : Math.max(6, (row.totalPaise / maxSales) * 112);
+        const x = 54 + index * 91;
+        const y = 166 - height;
+        return <g key={`${row.month}-${index}`}>
+          <title>{row.month}: {formatMoney(row.totalPaise)}</title>
+          <rect x={x} y={y} width="42" height={height} rx="7" className="seller-chart-bar" />
+          <text x={x + 21} y="183" textAnchor="middle" className="seller-chart-label">{row.month}</text>
+        </g>;
+      })}
+    </svg>
+    {!rows.some((row) => row.totalPaise > 0) && <p className="seller-chart-empty">Confirmed paid sales will appear here when you receive your first order.</p>}
+  </div>;
+}
+
+function SellerProfileView({ profile, onSaved }: { profile: NonNullable<SellerDashboard['storeProfile']> | null; onSaved: () => Promise<void> }): ReactNode {
+  const [shgName, setShgName] = useState(profile?.shgName ?? '');
+  const [representative, setRepresentative] = useState(profile?.representative ?? '');
+  const [registeredAddress, setRegisteredAddress] = useState(profile?.registeredAddress ?? '');
+  const [storeDescription, setStoreDescription] = useState(profile?.storeDescription ?? '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  if (!profile) return <section className="seller-panel"><Notice tone="error">We couldn’t find an approved store profile. Contact eSakhi support to resolve your seller account.</Notice></section>;
+
+  const save = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      await api.updateSellerProfile({ shgName: shgName.trim(), representative: representative.trim(), registeredAddress: registeredAddress.trim(), storeDescription: storeDescription.trim() });
+      setMessage('Your store profile has been saved.');
+      await onSaved();
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <section className="seller-panel seller-store-profile">
+    <div className="seller-panel-heading"><div><h2>My Store Profile</h2><p>Keep your shop information up to date for customers and the eSakhi team.</p></div><span className="seller-verified-pill">✓ Seller approved</span></div>
+    <form className="seller-profile-form" onSubmit={(event) => void save(event)}>
+      {message && <Notice tone="success">{message}</Notice>}
+      {error && <Notice tone="error">{error}</Notice>}
+      <label><span>Store or SHG name</span><input required minLength={2} maxLength={160} value={shgName} onChange={(event) => setShgName(event.target.value)} /></label>
+      <label><span>Contact person</span><input required minLength={2} maxLength={120} value={representative} onChange={(event) => setRepresentative(event.target.value)} /></label>
+      <label className="seller-profile-wide"><span>About your store</span><textarea rows={4} maxLength={1000} value={storeDescription} onChange={(event) => setStoreDescription(event.target.value)} placeholder="Tell customers about your work and the people behind it." /></label>
+      <label className="seller-profile-wide"><span>Pickup / registered address</span><textarea required minLength={5} maxLength={500} rows={2} value={registeredAddress} onChange={(event) => setRegisteredAddress(event.target.value)} /></label>
+      <div className="seller-profile-readonly"><span><small>Phone</small><strong>{profile.phoneE164}</strong></span><span><small>Email</small><strong>{profile.email || 'Not added to your account'}</strong></span><span><small>Assigned city</small><strong>{profile.assignedCity || profile.city}</strong></span><span><small>Service zones</small><strong>{profile.serviceableLocalities.length ? profile.serviceableLocalities.join(', ') : 'Not assigned'}</strong></span><span><small>Main category</small><strong>{profile.primaryCategoryName ?? 'Under review'}</strong></span><span><small>FSSAI status</small><strong>{profile.fssaiStatus.replaceAll('_', ' ')}</strong></span></div>
+      <Notice>Phone, email, city, service zones, category, and verification are managed by eSakhi. Contact support to request changes to these details.</Notice>
+      <div className="seller-profile-actions"><button className="seller-primary-action" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save store profile'}</button><Link className="seller-secondary-action" to="/help">Get help</Link></div>
+    </form>
+  </section>;
+}
+
+function SellerInventoryHistoryPanel({ productId }: { productId: string }): ReactNode {
+  const history = useLoad(() => api.sellerInventoryHistory(productId), [productId]);
+  return <div className="seller-history-panel">
+    <strong>Stock update history</strong>
+    {history.loading ? <Loading label="Loading stock history…" /> : history.error ? <Notice tone="error">{history.error}</Notice> : history.data?.data.length ? history.data.data.map((entry: SellerInventoryAdjustment) => <div key={entry._id}><span className={entry.quantityChange > 0 ? 'is-increase' : 'is-decrease'}>{entry.quantityChange > 0 ? '+' : ''}{entry.quantityChange} units</span><span>{entry.reason}</span><small>{new Date(entry.createdAt).toLocaleString('en-IN')}</small></div>) : <small>No stock adjustments have been recorded for this product.</small>}
+  </div>;
+}
+
+function SellerUnavailablePanel({ title, description }: { title: string; description: string }): ReactNode {
+  return <section className="seller-panel seller-unavailable-panel">
+    <div className="seller-unavailable-icon" aria-hidden="true">✦</div>
+    <h2>{title}</h2><p>{description}</p>
+    <p className="seller-unavailable-note">This information is not tracked by the current seller system. No estimates or amounts are shown here.</p>
+    <Link className="seller-secondary-action" to="/help">Contact eSakhi support</Link>
+  </section>;
+}
+
+function SellerPortalPage({ initialView = 'overview' }: { initialView?: 'overview' | 'products' | 'inventory' | 'orders' | 'profile' | 'new_product' }): ReactNode {
   const { user, signOut } = useAuth();
-  const [view, setView] = useState<'overview' | 'products' | 'orders' | 'profile'>('overview');
+  const [view, setView] = useState<'overview' | 'products' | 'inventory' | 'orders' | 'profile' | 'new_product' | 'finance' | 'payments' | 'reviews' | 'support' | 'notifications' | 'settings' | 'help'>(initialView);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const draftKey = `esakhi.seller.productDraft:${user?.id ?? 'seller'}`;
+  const [savedDraft, setSavedDraft] = useState<SellerProductDraft | null>(() => readSellerProductDraft(draftKey));
+  useEffect(() => {
+    setSavedDraft(readSellerProductDraft(draftKey));
+  }, [draftKey]);
+  const discardDraft = () => {
+    try { window.localStorage.removeItem(draftKey); } catch { /* ignore */ }
+    setSavedDraft(null);
+  };
   const dashboard = useLoad(() => api.sellerDashboard(), [user?.id]);
-  const products = useLoad(() => api.sellerProducts(1, 100), [user?.id]);
-  const orders = useLoad(() => api.sellerOrders(1, 100), [user?.id]);
+  const [productPage, setProductPage] = useState(1);
+  const [productSearch, setProductSearch] = useState('');
+  const [productApprovalStatus, setProductApprovalStatus] = useState('');
+  const [productStockStatus, setProductStockStatus] = useState(initialView === 'inventory' ? 'low_stock' : 'all');
+  const products = useLoad(() => {
+    const query = new URLSearchParams({ page: String(productPage), limit: '20' });
+    if (productSearch.trim()) query.set('q', productSearch.trim());
+    if (productApprovalStatus) query.set('approvalStatus', productApprovalStatus);
+    if (productStockStatus !== 'all') query.set('stockStatus', productStockStatus);
+    return api.sellerProducts(query);
+  }, [user?.id, productPage, productSearch, productApprovalStatus, productStockStatus]);
+  const [orderPage, setOrderPage] = useState(1);
+  const [inventoryProductId, setInventoryProductId] = useState('');
+  const [inventoryVariantId, setInventoryVariantId] = useState('');
+  const [inventoryQuantityChange, setInventoryQuantityChange] = useState('');
+  const [inventoryReason, setInventoryReason] = useState('');
+  const [savingInventory, setSavingInventory] = useState(false);
+  const [inventoryError, setInventoryError] = useState('');
+  const [inventoryMessage, setInventoryMessage] = useState('');
+  const [historyProductId, setHistoryProductId] = useState('');
+  const [orderStatus, setOrderStatus] = useState<'all' | 'new' | 'processing' | 'ready' | 'completed' | 'cancelled'>('all');
+  const orders = useLoad(() => api.sellerOrders(orderPage, 20, orderStatus), [user?.id, orderPage, orderStatus]);
+  const orderViewStatus: Partial<Record<typeof orderStatus, string[]>> = {
+    new: ['placed', 'order_confirmed'],
+    processing: ['accepted', 'preparing'],
+    ready: ['ready_for_pickup', 'delivery_partner_assigned', 'out_for_pickup', 'picked_up', 'out_for_delivery', 'return_requested', 'return_accepted', 'return_partner_assigned', 'return_picked_up'],
+    completed: ['delivered', 'completed', 'return_delivered_to_seller', 'ready_for_refund', 'refund_completed', 'return_rejected'],
+    cancelled: ['cancelled', 'delivery_failed'],
+  };
   useRefreshOnFocus(dashboard.reload);
   useRefreshOnFocus(products.reload);
   useRefreshOnFocus(orders.reload);
   const data = dashboard.data;
   const metrics = data?.metrics;
+  const [updatingOrderId, setUpdatingOrderId] = useState('');
+  const [orderActionMessage, setOrderActionMessage] = useState('');
+  const [orderActionError, setOrderActionError] = useState('');
 
-  const sidebar = (
-    <>
-      <button className={view === 'overview' ? 'active' : ''} onClick={() => setView('overview')}><span>⌂</span>Overview</button>
-      <button className={view === 'profile' ? 'active' : ''} onClick={() => setView('profile')}><span>◯</span>My Store Profile</button>
-      <button className={view === 'products' ? 'active' : ''} onClick={() => setView('products')}><span>◇</span>Products</button>
-      <button className="is-unavailable" disabled title="Seller inventory updates are not available yet"><span>▦</span>Inventory <small>Read only</small></button>
-      <button className={view === 'orders' ? 'active' : ''} onClick={() => setView('orders')}><span>▤</span>Orders</button>
-      <button className="is-unavailable" disabled title="Seller order preparation actions are not available yet"><span>◷</span>Processing <small>Read only</small></button>
-      <button className="is-unavailable" disabled title="Settlements are not tracked yet"><span>₹</span>Earnings & Settlements <small>Unavailable</small></button>
-      <button className="is-unavailable" disabled title="Seller reviews are not available yet"><span>☆</span>Reviews & Feedback <small>Unavailable</small></button>
-    </>
-  );
-  const title = view === 'products' ? 'Products' : view === 'orders' ? 'Orders' : view === 'profile' ? 'My store profile' : 'Seller overview';
+  const updateSellerOrderStatus = async (order: SellerOrder, nextStatus: 'accepted' | 'preparing' | 'ready_for_pickup' | 'completed') => {
+    setUpdatingOrderId(order._id);
+    setOrderActionError('');
+    setOrderActionMessage('');
+    try {
+      await api.updateSellerOrderStatus(order._id, nextStatus);
+      const confirmation = nextStatus === 'ready_for_pickup'
+        ? (order.fulfilmentMethod === 'delivery'
+          ? `Order #${order.orderReference} is now Ready for Pickup! A popup notification has been sent to the City Admin portal to assign a suitable delivery partner.`
+          : `Order #${order.orderReference} is now Ready for Pickup! The customer has been notified.`)
+        : nextStatus === 'accepted'
+          ? `Order #${order.orderReference} accepted. You can now start preparing the items or mark it Ready for Pickup.`
+          : nextStatus === 'preparing'
+            ? `Order #${order.orderReference} marked as Preparing.`
+            : `Order #${order.orderReference} marked as Completed.`;
+      setOrderActionMessage(confirmation);
+      await Promise.all([orders.reload(false), dashboard.reload(false)]);
+    } catch (cause) {
+      setOrderActionError(displayError(cause));
+    } finally {
+      setUpdatingOrderId('');
+    }
+  };
+
+  const submitInventoryAdjustment = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const quantityChange = Number(inventoryQuantityChange);
+    if (!inventoryProductId || !Number.isInteger(quantityChange) || quantityChange === 0) {
+      setInventoryError('Enter a non-zero whole number of units to add or remove.');
+      return;
+    }
+    setSavingInventory(true);
+    setInventoryError('');
+    setInventoryMessage('');
+    try {
+      await api.adjustSellerInventory(inventoryProductId, {
+        quantityChange,
+        reason: inventoryReason.trim(),
+        ...(inventoryVariantId ? { variantId: inventoryVariantId } : {}),
+      });
+      setInventoryProductId('');
+      setInventoryVariantId('');
+      setInventoryQuantityChange('');
+      setInventoryReason('');
+      setInventoryMessage('Inventory updated and recorded.');
+      await Promise.all([products.reload(false), dashboard.reload(false)]);
+    } catch (cause) {
+      setInventoryError(displayError(cause));
+    } finally {
+      setSavingInventory(false);
+    }
+  };
+
+  const navItem = (key: typeof view, label: string, icon: string, badge?: number, selected = view === key, onSelect: () => void = () => setView(key)) => <button className={selected ? 'active' : ''} onClick={onSelect} key={`${key}-${label}`}><span aria-hidden="true">{icon}</span>{label}{badge ? <small>{badge}</small> : null}</button>;
+  const title: Record<typeof view, string> = {
+    overview: 'Overview', profile: 'My Store Profile', products: 'Products', inventory: 'Inventory',
+    orders: 'Orders', new_product: 'Add a product', finance: 'Earnings & Settlements',
+    payments: 'Payment History', reviews: 'Reviews & Feedback', support: 'Support Requests',
+    notifications: 'Notifications', settings: 'Settings', help: 'Help & Support',
+  };
   const orderRows = (rows: SellerOrder[]) => rows.length ? (
-    <div className="seller-order-list">{rows.map((order) => <article className="seller-order-row" key={order._id}>
-      <div><span className="seller-kicker">{order.orderReference}</span><strong>{order.items.map((item) => `${item.productName} × ${item.quantity}`).join(', ')}</strong><small>{new Date(order.createdAt).toLocaleString('en-IN')} · {order.fulfilmentMethod}</small></div>
-      <div><StatusBadge value={order.fulfilmentStatus} fulfilmentMethod={order.fulfilmentMethod} /><strong>{formatMoney(order.subtotalPaise)}</strong><small>Seller item subtotal</small></div>
-    </article>)}</div>
+    <div className="seller-order-list" style={{ display: 'grid', gap: '1rem' }}>
+      {rows.map((order) => (
+        <SellerOrderCard
+          key={order._id}
+          order={order}
+          isUpdating={updatingOrderId === order._id}
+          onTransitionStatus={updateSellerOrderStatus}
+        />
+      ))}
+    </div>
   ) : <div className="seller-empty"><span aria-hidden="true">✿</span><strong>No orders to show</strong><small>Orders containing your products will appear here.</small></div>;
+
+  const allOrders = orders.data?.data ?? [];
+  const visibleOrders = orderStatus === 'all'
+    ? allOrders
+    : allOrders.filter((order) => orderViewStatus[orderStatus]?.includes(order.fulfilmentStatus));
+  const setOrderView = (status: typeof orderStatus) => {
+    setView('orders');
+    setOrderStatus(status);
+    setOrderPage(1);
+  };
+  const viewInventory = (stockStatus = 'all') => {
+    setProductStockStatus(stockStatus);
+    setProductPage(1);
+    setView('inventory');
+  };
+  const currentStore = data?.storeProfile?.shgName || user?.name || 'Your store';
+  const productRows = (isInventory: boolean) => (
+    <section className="seller-panel seller-products-panel">
+      <div className="seller-panel-heading"><div><h2>{isInventory ? 'Inventory at a glance' : 'Your products'}</h2><p>{isInventory ? 'Available stock for your listings. Reserved quantities stay controlled by eSakhi orders.' : 'Find a listing, check its review status, and keep product availability up to date.'}</p></div></div>
+      {inventoryMessage && <Notice tone="success">{inventoryMessage}</Notice>}
+      {inventoryError && <Notice tone="error">{inventoryError}</Notice>}
+      {!isInventory && savedDraft && (savedDraft.name || savedDraft.description || savedDraft.price || savedDraft.imageUrl) && (
+        <div className="seller-draft-banner Notice">
+          <div>
+            <strong>Saved draft on this device: {savedDraft.name || 'Untitled product'}</strong>
+            <p>{savedDraft.productType ? `${savedDraft.productType} · ` : ''}{savedDraft.price ? `₹${savedDraft.price}` : 'Price not set'}{savedDraft.stock ? ` · ${savedDraft.stock} units` : ''}</p>
+          </div>
+          <div className="seller-table-actions">
+            <button type="button" className="seller-primary-action" onClick={() => setView('new_product')}>Continue editing draft</button>
+            <button type="button" className="seller-secondary-action" onClick={discardDraft}>Discard draft</button>
+          </div>
+        </div>
+      )}
+      {products.error && <div className="seller-panel-state"><Notice tone="error">{products.error}</Notice><button className="seller-secondary-action" onClick={() => void products.reload()}>Try again</button></div>}
+      <div className="seller-product-tools">
+        <label><span>Search products</span><input type="search" value={productSearch} onChange={(event) => { setProductPage(1); setProductSearch(event.target.value); }} placeholder="Search by product name" /></label>
+        <label><span>Review status</span><select value={productApprovalStatus} onChange={(event) => { setProductPage(1); setProductApprovalStatus(event.target.value); }}><option value="">All statuses</option><option value="pending">Awaiting review</option><option value="approved">Approved</option><option value="rejected">Changes requested</option></select></label>
+        <label><span>Stock status</span><select value={productStockStatus} onChange={(event) => { setProductPage(1); setProductStockStatus(event.target.value); }}><option value="all">All stock</option><option value="low_stock">Low stock</option><option value="out_of_stock">Out of stock</option><option value="in_stock">In stock</option></select></label>
+      </div>
+      {products.loading ? <Loading label="Loading your products…" /> : products.error ? null : products.data?.data.length ? <>
+        <div className="seller-products-table-wrap"><table className="seller-products-table"><thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Available stock</th><th>Listing / review</th><th>Updated</th><th>Actions</th></tr></thead><tbody>
+          {products.data.data.map((product) => {
+            const stock = product.variants.length ? product.variants.reduce((sum, variant) => sum + variant.stock, 0) : product.stock;
+            const stockLabel = stock === 0 ? 'Out of stock' : stock <= product.lowStockThreshold ? 'Low stock' : 'In stock';
+            const isAdjusting = inventoryProductId === product._id;
+            return <Fragment key={product._id}>
+              <tr>
+                <td><span className="seller-table-product"><span className="seller-product-image">{product.imageUrls[0] ? <img src={resolveProductImageUrl(product.imageUrls[0])} alt="" /> : '✿'}</span><span><strong>{product.name}</strong><small>{product.productType}</small></span></span></td>
+                <td>{product.categoryName}<small>{product.subcategoryName}</small></td>
+                <td>{formatMoney(product.pricePaise)}</td>
+                <td><span className={`seller-stock-label${stock === 0 ? ' is-empty' : stock <= product.lowStockThreshold ? ' is-low' : ''}`}>{stockLabel}</span><small>{stock} units</small></td>
+                <td><span className={`seller-approval-status status-${product.approvalStatus}`}>{product.approvalStatus === 'pending' ? 'Awaiting review' : product.approvalStatus === 'approved' ? 'Approved' : 'Changes requested'}</span><small>{product.isActive ? 'Published' : 'Not published'}{product.isFoodProduct ? ` · FSSAI ${product.foodComplianceStatus.replaceAll('_', ' ')}` : ''}</small>{product.classificationStatus === 'needs_review' && <small>Category review needed</small>}</td>
+                <td>{product.updatedAt ? new Date(product.updatedAt).toLocaleDateString('en-IN') : '—'}</td>
+                <td><div className="seller-table-actions"><button onClick={() => { setInventoryError(''); setInventoryProductId(isAdjusting ? '' : product._id); setInventoryVariantId(product.variants[0]?._id ?? ''); setInventoryQuantityChange(''); setInventoryReason(''); }}>{isAdjusting ? 'Close' : 'Update stock'}</button><button onClick={() => setHistoryProductId(historyProductId === product._id ? '' : product._id)}>{historyProductId === product._id ? 'Hide history' : 'History'}</button></div></td>
+              </tr>
+              {isAdjusting && <tr><td colSpan={7}><form className="seller-inventory-form" onSubmit={(event) => void submitInventoryAdjustment(event)}>
+                {product.variants.length > 0 && <label><span>Variant</span><select required value={inventoryVariantId} onChange={(event) => setInventoryVariantId(event.target.value)}>{product.variants.map((variant) => <option key={variant._id} value={variant._id}>{Object.entries(variant.attributes).map(([key, value]) => `${key}: ${value}`).join(', ') || variant.sku || 'Variant'} · {variant.stock} available</option>)}</select></label>}
+                <label><span>Units to add or remove</span><input required type="number" step="1" min="-100000" max="100000" value={inventoryQuantityChange} onChange={(event) => setInventoryQuantityChange(event.target.value)} placeholder="e.g. 10 or -2" /></label>
+                <label><span>Reason for adjustment</span><input required minLength={3} maxLength={300} value={inventoryReason} onChange={(event) => setInventoryReason(event.target.value)} placeholder="e.g. New handmade stock received" /></label>
+                <button className="seller-primary-action" type="submit" disabled={savingInventory}>{savingInventory ? 'Saving…' : 'Save stock update'}</button>
+              </form></td></tr>}
+              {historyProductId === product._id && <tr><td colSpan={7}><SellerInventoryHistoryPanel productId={product._id} /></td></tr>}
+            </Fragment>;
+          })}
+        </tbody></table></div>
+      </> : <div className="seller-empty"><span>◇</span><strong>{productSearch || productApprovalStatus || productStockStatus !== 'all' ? 'No products match these filters' : 'No products yet'}</strong><small>{productSearch || productApprovalStatus || productStockStatus !== 'all' ? 'Try a different search or status.' : 'Add your first product to start building your shop.'}</small>{!productSearch && !productApprovalStatus && productStockStatus === 'all' && <button className="seller-primary-action" onClick={() => setView('new_product')}>＋ Add your first product</button>}</div>}
+      {products.data && products.data.pagination.totalPages > 1 && <div className="seller-pagination"><button className="seller-secondary-action" disabled={productPage <= 1} onClick={() => setProductPage((page) => page - 1)}>Previous</button><span>Page {productPage} of {products.data.pagination.totalPages}</span><button className="seller-secondary-action" disabled={productPage >= products.data.pagination.totalPages} onClick={() => setProductPage((page) => page + 1)}>Next</button></div>}
+    </section>
+  );
+  const orderTabs: Array<{ key: typeof orderStatus; label: string }> = [
+    { key: 'all', label: 'All orders' }, { key: 'new', label: 'New' }, { key: 'processing', label: 'Preparing' },
+    { key: 'ready', label: 'Ready for pickup' }, { key: 'completed', label: 'Completed' }, { key: 'cancelled', label: 'Cancelled' },
+  ];
 
   return <div className="seller-portal">
     <aside className="seller-sidebar">
-      <Link to="/" className="seller-brand"><span className="seller-brand-mark">ई</span><span><strong>E Sakhi</strong><small>SELLER</small></span></Link>
-      <div className="seller-account-summary"><span>{(user?.name?.trim().charAt(0) || 'S').toLocaleUpperCase('en-IN')}</span><div><strong>{user?.name || 'Seller account'}</strong><small>Seller workspace</small></div></div>
-      <span className="seller-nav-heading">MY BUSINESS</span>
-      <nav>{sidebar}</nav>
-      <div className="seller-support-note"><strong>Need help?</strong><small>For seller assistance, contact the eSakhi support team.</small><Link to="/help">Help & support →</Link></div>
+      <Link to="/" className="seller-brand"><img src="/images/maitri-sisterhood-logo.png" alt="" /><span><strong>eSakhi</strong><small>SELLER WORKSPACE</small></span></Link>
+      <div className="seller-account-summary"><span>{(currentStore.trim().charAt(0) || 'S').toLocaleUpperCase('en-IN')}</span><div><strong>{currentStore}</strong><small>{data?.storeProfile?.city || user?.assignedCity || 'Seller account'}</small></div></div>
+      <nav className="seller-navigation" aria-label="Seller workspace">
+        <span className="seller-nav-heading">MAIN</span>{navItem('overview', 'Overview', '⌂')}
+        <span className="seller-nav-heading">MY BUSINESS</span>{navItem('profile', 'My Store Profile', '◯')}{navItem('products', 'Products', '◇', metrics?.totalProducts)}{navItem('inventory', 'Inventory', '▦', metrics?.lowStockProducts, view === 'inventory', () => viewInventory())}
+        <span className="seller-nav-heading">ORDERS</span>{navItem('orders', 'New Orders', '＋', metrics?.newOrders, view === 'orders' && orderStatus === 'new', () => setOrderView('new'))}{navItem('orders', 'Processing', '◷', metrics?.ordersToPrepare, view === 'orders' && orderStatus === 'processing', () => setOrderView('processing'))}{navItem('orders', 'Ready for Pickup', '↗', metrics?.readyOrders, view === 'orders' && orderStatus === 'ready', () => setOrderView('ready'))}{navItem('orders', 'Completed Orders', '✓', metrics?.completedOrders, view === 'orders' && orderStatus === 'completed', () => setOrderView('completed'))}{navItem('orders', 'Cancelled Orders', '×', undefined, view === 'orders' && orderStatus === 'cancelled', () => setOrderView('cancelled'))}
+        <span className="seller-nav-heading">FINANCE</span>{navItem('finance', 'Earnings & Settlements', '₹')}{navItem('payments', 'Payment History', '▤')}
+        <span className="seller-nav-heading">CUSTOMER SERVICE</span>{navItem('reviews', 'Reviews & Feedback', '☆')}{navItem('support', 'Support Requests', '?')}
+        <span className="seller-nav-heading">ACCOUNT</span>{navItem('notifications', 'Notifications', '♧')}{navItem('settings', 'Settings', '⚙')}{navItem('help', 'Help & Support', '♡')}
+      </nav>
+      <div className="seller-support-note"><strong>We’re here to help</strong><small>Need help with your store or an order?</small><Link to="/help">Visit Help & Support →</Link></div>
     </aside>
     <main className="seller-main">
-      <header className="seller-topbar"><Link to="/" className="seller-topbar-brand">E Sakhi</Link><div><span>{user?.name || 'Seller'}</span><Link to="/account/profile">Profile</Link><button onClick={() => void signOut()}>Sign out</button></div></header>
+      <header className="seller-topbar"><Link to="/" className="seller-topbar-brand">eSakhi <small>SELLER</small></Link><div><span>{currentStore}</span><button className="seller-topbar-profile" onClick={() => setView('profile')}>My store</button><button onClick={() => void signOut()}>Sign out</button></div></header>
       <div className="seller-page">
-        <div className="seller-page-heading"><div><span className="seller-kicker">✓ SELLER ACCOUNT</span><h1>{view === 'overview' ? `Namaste${user?.name ? `, ${user.name}` : ''}!` : title}</h1><p>{view === 'overview' ? 'Here is an overview of your products and orders.' : 'Seller workspace data is scoped to your account.'}</p></div>
-          {view === 'products' && <button className="seller-secondary-action" disabled title="Product creation is not available in the seller API">＋ Add product · unavailable</button>}
+        <div className="seller-page-heading"><div><span className="seller-kicker">{data?.storeProfile?.verificationStatus === 'approved' ? '✓ VERIFIED SELLER' : 'SELLER WORKSPACE'}</span><h1>{view === 'overview' ? `Namaste, ${currentStore}` : title[view]}</h1><p>{view === 'overview' ? 'Here’s what’s happening with your shop today.' : view === 'orders' ? 'Check order status and the payment state for your items.' : 'Your seller workspace, built around your store.'}</p></div>
+          {(view === 'products' || view === 'overview') && <button className="seller-primary-action" onClick={() => setView('new_product')}>＋ Add a product</button>}
         </div>
-        {(dashboard.error || products.error || orders.error) && <Notice tone="error">{dashboard.error || products.error || orders.error}</Notice>}
+        {dashboard.error && <div className="seller-panel-state"><Notice tone="error">{dashboard.error}</Notice><button className="seller-secondary-action" onClick={() => void dashboard.reload()}>Retry dashboard</button></div>}
         {view === 'overview' && <>
-          <section className="seller-metrics">
-            <SellerMetric label="New orders" value={metrics?.newOrders} icon="▤" unavailable={!metrics} />
-            <SellerMetric label="Orders to prepare" value={metrics?.ordersToPrepare} icon="◷" unavailable={!metrics} />
-            <SellerMetric label="Active products" value={metrics?.activeProducts} icon="◇" unavailable={!metrics} />
-            <SellerMetric label="Low stock" value={metrics?.lowStockProducts} icon="!" alert />
-            <SellerMetric label="Gross paid product sales · this month" value={metrics ? formatMoney(metrics.grossPaidProductSalesThisMonthPaise) : undefined} icon="↗" unavailable={!metrics} />
-            <SellerMetric label="Settlement balance" value="Unavailable" icon="₹" unavailable />
-          </section>
-          <div className="seller-content-grid">
-            <section className="seller-panel seller-sales-panel"><div className="seller-panel-heading"><div><h2>Sales overview</h2><p>Confirmed paid item totals for this month, before any settlement adjustments.</p></div></div><div className="seller-sales-value">{metrics ? formatMoney(metrics.grossPaidProductSalesThisMonthPaise) : <Loading label="Loading sales…" />}</div><Notice>Sales history, commission deductions, pending settlements, and payouts are not currently available.</Notice></section>
-            <section className="seller-panel"><div className="seller-panel-heading"><div><h2>Store progress</h2><p>Manage your catalogue and profile.</p></div></div><div className="seller-progress-list"><button onClick={() => setView('profile')}>Review account profile <span>→</span></button><button onClick={() => setView('products')}>View your products <span>{products.data?.pagination.total ?? '…'}</span></button><button disabled title="Product creation is unavailable">Add product <span>Unavailable</span></button></div></section>
-          </div>
-          <section className="seller-panel seller-recent-orders"><div className="seller-panel-heading"><div><h2>Recent orders</h2><p>Orders that include your products.</p></div><button onClick={() => setView('orders')}>View orders →</button></div>{orders.loading ? <Loading label="Loading seller orders…" /> : orders.error ? null : orderRows(data?.recentOrders ?? [])}</section>
-          <p className="seller-data-note">Product and order information is restricted to this seller account. Order totals show only your own items. Order acceptance/preparation actions and settlement calculations are not yet available.</p>
+          {dashboard.loading && !data ? <Loading label="Preparing your seller dashboard…" /> : <>
+            {metrics?.pendingProducts ? <button className="seller-pending-banner" onClick={() => { setProductApprovalStatus('pending'); setView('products'); }}><span aria-hidden="true">◷</span><span><strong>{metrics.pendingProducts} product{metrics.pendingProducts === 1 ? '' : 's'} awaiting approval</strong><small>Your new listings will appear in the marketplace after City Admin review.</small></span><b>View products →</b></button> : null}
+            <section className="seller-metrics">
+              <button onClick={() => setOrderView('new')}><SellerMetric label="New orders" value={metrics?.newOrders} icon="＋" unavailable={!metrics} /></button>
+              <button onClick={() => setOrderView('processing')}><SellerMetric label="Orders to prepare" value={metrics?.ordersToPrepare} icon="◷" unavailable={!metrics} /></button>
+              <button onClick={() => setView('products')}><SellerMetric label="Active products" value={metrics?.activeProducts} icon="◇" unavailable={!metrics} /></button>
+              <button onClick={() => viewInventory('low_stock')}><SellerMetric label="Low stock" value={metrics?.lowStockProducts} icon="!" alert={Boolean(metrics?.lowStockProducts)} unavailable={!metrics} /></button>
+              <SellerMetric label="Sales this month" value={metrics ? formatMoney(metrics.grossPaidProductSalesThisMonthPaise) : undefined} icon="↗" unavailable={!metrics} />
+              <button onClick={() => setView('finance')}><SellerMetric label="Settlement & Penalties" value="View Ledger →" icon="₹" /></button>
+            </section>
+            <SellerSettlementsLedgerPanel />
+            <div className="seller-dashboard-grid">
+              <section className="seller-panel seller-chart-panel"><div className="seller-panel-heading"><div><h2>Sales trend</h2><p>Confirmed paid product sales · last six months</p></div><span className="seller-trend-total">{metrics ? formatMoney(metrics.grossPaidProductSalesThisMonthPaise) : '—'} <small>this month</small></span></div>{data ? <SellerSalesTrendChart rows={data.salesTrend} /> : <Loading label="Loading sales trend…" />}<p className="seller-chart-footnote">Gross product sales only—not commission-adjusted earnings or settlement balance.</p></section>
+              <section className="seller-panel seller-checklist-panel"><div className="seller-panel-heading"><div><h2>Your shop checklist</h2><p>A few small steps to keep your store ready.</p></div></div><div className="seller-checklist">
+                <button onClick={() => setView('profile')}><span className="seller-check-complete">✓</span><span><strong>Seller account approved</strong><small>Your seller profile is active.</small></span></button>
+                <button onClick={() => setView('profile')}><span className={data?.storeProfile?.storeDescription ? 'seller-check-complete' : 'seller-check-pending'}>{data?.storeProfile?.storeDescription ? '✓' : '2'}</span><span><strong>Add a store introduction</strong><small>{data?.storeProfile?.storeDescription ? 'Your story is on your profile.' : 'Tell shoppers about your group and craft.'}</small></span></button>
+                <button onClick={() => setView('products')}><span className={metrics?.activeProducts ? 'seller-check-complete' : 'seller-check-pending'}>{metrics?.activeProducts ? '✓' : '3'}</span><span><strong>Publish your first product</strong><small>{metrics?.activeProducts ? 'Your products are live.' : 'Approved products appear in the marketplace.'}</small></span></button>
+              </div></section>
+              <section className="seller-panel"><div className="seller-panel-heading"><div><h2>Recent orders</h2><p>Update preparation status or mark orders Ready for Pickup.</p></div><button onClick={() => setOrderView('all')}>See all orders →</button></div>{orderActionMessage && <Notice tone="success">{orderActionMessage}</Notice>}{orderActionError && <Notice tone="error">{orderActionError}</Notice>}{orders.loading ? <SellerOrderSkeleton count={2} /> : orders.error ? <Notice tone="error">{orders.error}</Notice> : orderRows(data?.recentOrders ?? [])}</section>
+              <section className="seller-panel"><div className="seller-panel-heading"><div><h2>Top-selling products</h2><p>By units sold in confirmed orders.</p></div><button onClick={() => setView('products')}>Your products →</button></div>{data?.topSellingProducts.length ? <div className="seller-top-products">{data.topSellingProducts.map((item, index) => <div key={item._id}><span>{String(index + 1).padStart(2, '0')}</span><strong>{item.productName}</strong><small>{item.unitsSold} sold</small><b>{formatMoney(item.grossSalesPaise)}</b></div>)}</div> : <div className="seller-panel-empty">Your top sellers will show here after confirmed paid orders.</div>}</section>
+              <section className="seller-panel seller-low-stock-panel"><div className="seller-panel-heading"><div><h2>Stock needing attention</h2><p>Items at or below their low-stock threshold.</p></div><button onClick={() => viewInventory('low_stock')}>View inventory →</button></div>{data?.lowStockProducts.length ? <div className="seller-low-stock-list">{data.lowStockProducts.map((item) => <div key={item._id}><span className={item.availableStock === 0 ? 'is-out' : ''}>{item.availableStock}</span><strong>{item.name}</strong><small>{item.availableStock === 0 ? 'Out of stock' : 'Low stock'}</small></div>)}</div> : <div className="seller-panel-empty">All your products are above their low-stock threshold.</div>}</section>
+              <section className="seller-panel"><div className="seller-panel-heading"><div><h2>Customer feedback</h2><p>Reviews are not available yet.</p></div></div><div className="seller-feedback-empty"><span>☆</span><strong>No reviews to show</strong><small>eSakhi does not currently collect customer reviews.</small><Link to="/help">Need help? Contact support →</Link></div></section>
+            </div>
+          </>}
         </>}
-        {view === 'products' && <section className="seller-panel"><div className="seller-panel-heading"><div><h2>Your products</h2><p>Read-only catalogue view for products assigned to your seller account.</p></div></div>{products.loading ? <Loading label="Loading products…" /> : products.data?.data.length ? <div className="seller-product-list">{products.data.data.map((product) => <article className="seller-product-row" key={product._id}><span className="seller-product-image">{product.imageUrls[0] ? <img src={resolveProductImageUrl(product.imageUrls[0])} alt="" /> : '✿'}</span><span><strong>{product.name}</strong><small>{product.category} · {product.isActive ? 'Active' : 'Inactive'}</small></span><span><strong>{formatMoney(product.pricePaise)}</strong><small>{product.variants.length ? `${product.variants.reduce((sum, variant) => sum + variant.stock, 0)} variant units` : `${product.stock} in stock`}</small></span></article>)}</div> : <div className="seller-empty"><span>◇</span><strong>No products are assigned to your account</strong><small>Products must be assigned through an approved seller workflow.</small></div>}</section>}
-        {view === 'orders' && <section className="seller-panel"><div className="seller-panel-heading"><div><h2>Your orders</h2><p>Only items associated with your seller account are shown.</p></div></div>{orders.loading ? <Loading label="Loading seller orders…" /> : orders.error ? null : orderRows(orders.data?.data ?? [])}</section>}
-        {view === 'profile' && <section className="seller-panel seller-profile-panel"><div className="seller-panel-heading"><div><h2>Seller account</h2><p>Account identity currently available to this workspace.</p></div></div><dl><div><dt>Account name</dt><dd>{user?.name || 'Not provided'}</dd></div><div><dt>Phone</dt><dd>{user?.phone || 'Not available'}</dd></div><div><dt>Email</dt><dd>{user?.email || 'Not provided'}</dd></div><div><dt>Seller verification</dt><dd>Application verification status is not stored in the current backend</dd></div></dl><Link className="seller-profile-link" to="/account/profile">Edit account name →</Link></section>}
+        {view === 'products' && productRows(false)}
+        {view === 'inventory' && productRows(true)}
+        {view === 'profile' && <SellerProfileView profile={data?.storeProfile ?? null} onSaved={() => dashboard.reload(false)} />}
+        {view === 'orders' && <section className="seller-panel seller-orders-panel"><div className="seller-panel-heading"><div><h2>Your orders</h2><p>Manage order preparation and mark orders Ready for Pickup so the City Admin can assign a delivery partner.</p></div></div>
+          {orderActionMessage && <Notice tone="success">{orderActionMessage}</Notice>}
+          {orderActionError && <Notice tone="error">{orderActionError}</Notice>}
+          <div className="seller-order-tabs" role="tablist" aria-label="Filter orders">{orderTabs.map((tab) => <button key={tab.key} role="tab" aria-selected={orderStatus === tab.key} className={orderStatus === tab.key ? 'active' : ''} onClick={() => { setOrderStatus(tab.key); setOrderPage(1); }}>{tab.label}</button>)}</div>
+          {orders.loading ? <SellerOrderSkeleton count={3} /> : orders.error ? <Notice tone="error">{orders.error}</Notice> : orderRows(visibleOrders)}
+          {orders.data && orders.data.pagination.totalPages > 1 && <div className="seller-pagination"><button className="seller-secondary-action" disabled={orderPage <= 1} onClick={() => setOrderPage((page) => page - 1)}>Previous</button><span>Page {orderPage} of {orders.data.pagination.totalPages} · {orders.data.pagination.total} orders</span><button className="seller-secondary-action" disabled={orderPage >= orders.data.pagination.totalPages} onClick={() => setOrderPage((page) => page + 1)}>Next</button></div>}
+          <p className="seller-data-note">Once you mark a delivery order Ready for Pickup, the City Admin receives a popup notification in their portal to assign a suitable delivery partner.</p>
+        </section>}
+        {view === 'finance' && <SellerSettlementsLedgerPanel />}
+        {view === 'payments' && <SellerSettlementsLedgerPanel />}
+        {view === 'reviews' && <SellerUnavailablePanel title="Customer reviews are not available yet" description="The marketplace does not currently collect product ratings or written reviews." />}
+        {view === 'support' && <SellerUnavailablePanel title="Support requests are handled by eSakhi" description="Seller support tickets are not tracked in the dashboard yet. Use the help centre to contact the team." />}
+        {view === 'notifications' && <SellerUnavailablePanel title="Seller notifications are not configured yet" description="Order and product updates are visible in this dashboard. Seller-specific notification preferences are not currently available." />}
+        {view === 'settings' && <section className="seller-panel seller-settings-panel"><div className="seller-panel-heading"><div><h2>Account settings</h2><p>Manage your sign-in and seller profile.</p></div></div><div className="seller-settings-actions"><button onClick={() => setView('profile')}>Edit store profile <span>→</span></button><Link to="/account/profile">Update account name <span>→</span></Link><button onClick={() => void signOut()}>Sign out <span>→</span></button></div></section>}
+        {view === 'help' && <section className="seller-panel seller-help-panel"><div className="seller-panel-heading"><div><h2>Help & Support</h2><p>We’re here to help you run your store.</p></div></div><p>For help with products, orders, your account, or an assigned service area, contact the eSakhi team through the Help & policies page.</p><Link className="seller-primary-action" to="/help">Open Help & Support →</Link></section>}
+        {view === 'new_product' && <SellerCatalogueListingPage onCancel={() => setView('products')} onSubmitted={() => { setView('products'); void products.reload(false); void dashboard.reload(false); }} onDraftSaved={setSavedDraft} />}
       </div>
-      <nav className="seller-mobile-nav" aria-label="Seller navigation"><button className={view === 'overview' ? 'active' : ''} onClick={() => setView('overview')}>⌂<small>Overview</small></button><button className={view === 'products' ? 'active' : ''} onClick={() => setView('products')}>◇<small>Products</small></button><button className={view === 'orders' ? 'active' : ''} onClick={() => setView('orders')}>▤<small>Orders</small></button><button className={view === 'profile' ? 'active' : ''} onClick={() => setView('profile')}>◯<small>Profile</small></button></nav>
+      <nav className="seller-mobile-nav" aria-label="Seller navigation">
+        {navItem('overview', 'Overview', '⌂')}
+        {navItem('products', 'Products', '◇')}
+        {navItem('orders', 'Orders', '▤')}
+        {navItem('profile', 'Store', '◯')}
+        <button className={mobileMenuOpen || !['overview', 'products', 'orders', 'profile'].includes(view) ? 'active' : ''} aria-expanded={mobileMenuOpen} aria-controls="seller-mobile-more" onClick={() => setMobileMenuOpen((open) => !open)}><span aria-hidden="true">⋯</span><small>More</small></button>
+        {mobileMenuOpen && <div className="seller-mobile-more" id="seller-mobile-more">
+          {navItem('inventory', 'Inventory', '▦', undefined, view === 'inventory', () => { viewInventory(); setMobileMenuOpen(false); })}
+          {navItem('finance', 'Earnings & Settlements', '₹', undefined, view === 'finance', () => { setView('finance'); setMobileMenuOpen(false); })}
+          {navItem('payments', 'Payment History', '▤', undefined, view === 'payments', () => { setView('payments'); setMobileMenuOpen(false); })}
+          {navItem('reviews', 'Reviews & Feedback', '☆', undefined, view === 'reviews', () => { setView('reviews'); setMobileMenuOpen(false); })}
+          {navItem('support', 'Support Requests', '?', undefined, view === 'support', () => { setView('support'); setMobileMenuOpen(false); })}
+          {navItem('notifications', 'Notifications', '♧', undefined, view === 'notifications', () => { setView('notifications'); setMobileMenuOpen(false); })}
+          {navItem('settings', 'Settings', '⚙', undefined, view === 'settings', () => { setView('settings'); setMobileMenuOpen(false); })}
+          {navItem('help', 'Help & Support', '♡', undefined, view === 'help', () => { setView('help'); setMobileMenuOpen(false); })}
+        </div>}
+      </nav>
     </main>
   </div>;
 }
@@ -2973,120 +4644,425 @@ function DeliveryPartnerPage(): ReactNode {
   const [view, setView] = useState<'overview' | 'deliveries' | 'history' | 'profile'>('overview');
   const orders = useLoad(() => api.partnerOrders(), [user?.id]);
   const history = useLoad(() => api.partnerOrderHistory(), [user?.id]);
+  const profile = useLoad(() => api.partnerProfile(), [user?.id]);
   useRefreshOnFocus(orders.reload);
   useRefreshOnFocus(history.reload);
+  useRefreshOnFocus(profile.reload);
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const updateStatus = async (id: string, status: 'out_for_delivery' | 'delivered' | 'delivery_failed', orderReference: string) => {
-    const confirmation = status === 'out_for_delivery'
-      ? `Start delivery for ${orderReference}?`
-      : status === 'delivered'
-        ? `Confirm ${orderReference} was delivered to the customer?`
-        : `Report delivery failed for ${orderReference}?`;
-    if (!window.confirm(confirmation)) return;
+  const [updatingAvailability, setUpdatingAvailability] = useState(false);
+
+  const toggleOnlineAvailability = async (nextOnline: boolean, nextStatus?: 'available' | 'busy' | 'offline') => {
+    setUpdatingAvailability(true);
     setError('');
     setMessage('');
     try {
-      await api.updatePartnerOrderStatus(id, status, note.trim() || undefined);
+      await api.updatePartnerAvailability({
+        isOnline: nextOnline,
+        availabilityStatus: nextStatus ?? (nextOnline ? 'available' : 'offline'),
+      });
+      setMessage(nextOnline ? 'You are now ONLINE & AVAILABLE for nearby order assignments.' : 'You are now OFFLINE.');
+      await profile.reload(false);
+    } catch (cause) {
+      setError(displayError(cause));
+    } finally {
+      setUpdatingAvailability(false);
+    }
+  };
+
+  const refreshLiveGpsLocation = () => {
+    setUpdatingAvailability(true);
+    setError('');
+    setMessage('');
+    const saveCoords = async (lat: number, lng: number) => {
+      try {
+        await api.updatePartnerAvailability({
+          isOnline: true,
+          latitude: lat,
+          longitude: lng,
+        });
+        setMessage(`Live GPS location updated (${lat.toFixed(4)}, ${lng.toFixed(4)}).`);
+        await profile.reload(false);
+      } catch (cause) {
+        setError(displayError(cause));
+      } finally {
+        setUpdatingAvailability(false);
+      }
+    };
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => void saveCoords(pos.coords.latitude, pos.coords.longitude),
+        () => void saveCoords(23.8388, 79.4422),
+        { timeout: 5000 },
+      );
+    } else {
+      void saveCoords(23.8388, 79.4422);
+    }
+  };
+
+  const updateStatus = async (
+    id: string,
+    status: 'out_for_pickup' | 'picked_up' | 'out_for_delivery' | 'delivered' | 'delivery_failed' | 'return_picked_up' | 'return_delivered_to_seller',
+    orderReference: string,
+    paymentCollected?: boolean,
+  ) => {
+    const confirmationMap: Record<typeof status, string> = {
+      out_for_pickup: `Accept assignment for #${orderReference} and start Route to Seller (OUT_FOR_PICKUP)?`,
+      picked_up: `Confirm you reached the Seller and picked up package #${orderReference} (PICKED_UP)?`,
+      out_for_delivery: `Start Route to Customer for #${orderReference} (OUT_FOR_DELIVERY)?`,
+      delivered: `Confirm payment collected/settled and package #${orderReference} handed over to Customer (DELIVERED)? Your status will revert to AVAILABLE.`,
+      delivery_failed: `Report delivery failed for #${orderReference}?`,
+      return_picked_up: `Confirm you reached the Customer and picked up the return package #${orderReference} (RETURN_PICKED_UP)?`,
+      return_delivered_to_seller: `Confirm you handed over the return package #${orderReference} back to the Seller (RETURN_DELIVERED_TO_SELLER)? Your active task will end and status will revert to AVAILABLE.`,
+    };
+    if (!window.confirm(confirmationMap[status])) return;
+    setError('');
+    setMessage('');
+    try {
+      await api.updatePartnerOrderStatus(id, status, note.trim() || undefined, paymentCollected);
       setNote('');
-      setMessage('Delivery status updated.');
-      await Promise.all([orders.reload(false), history.reload(false)]);
+      setMessage(
+        status === 'delivered'
+          ? `Order #${orderReference} marked DELIVERED & payment settled! Your availability reverted to AVAILABLE.`
+          : status === 'return_delivered_to_seller'
+            ? `Reverse return #${orderReference} handed over to Seller (RETURN_DELIVERED_TO_SELLER)! Your availability reverted to AVAILABLE.`
+            : `Order #${orderReference} updated to ${orderStatusLabel(status)}.`,
+      );
+      await Promise.all([orders.reload(false), history.reload(false), profile.reload(false)]);
     } catch (cause) {
       setError(displayError(cause));
     }
   };
   const activeOrders = orders.data ?? [];
   const deliveryHistory = history.data ?? [];
-  const activeDelivery = activeOrders.find((order) => order.fulfilmentStatus === 'out_for_delivery');
+  const activeDelivery = activeOrders.find((order) =>
+    ['out_for_pickup', 'picked_up', 'out_for_delivery', 'delivery_partner_assigned', 'return_partner_assigned', 'return_picked_up'].includes(order.fulfilmentStatus),
+  ) ?? activeOrders[0];
+  const [gpsStreamState, setGpsStreamState] = useState<'GPS_STREAM_ACTIVE' | 'GPS_STREAM_INACTIVE'>('GPS_STREAM_INACTIVE');
+
+  useEffect(() => {
+    const activeId = activeDelivery?._id;
+    const status = activeDelivery?.fulfilmentStatus ?? '';
+    const isTransitActive = Boolean(
+      activeId && ['delivery_partner_assigned', 'out_for_pickup', 'picked_up', 'out_for_delivery', 'return_partner_assigned', 'return_picked_up'].includes(status),
+    );
+    if (!isTransitActive || !activeId) {
+      setGpsStreamState('GPS_STREAM_INACTIVE');
+      return;
+    }
+
+    setGpsStreamState('GPS_STREAM_ACTIVE');
+    let cancelled = false;
+    let watchId: number | null = null;
+
+    const sendPing = async (lat: number, lng: number) => {
+      if (cancelled) return;
+      try {
+        const res = await api.broadcastPartnerOrderLocation(activeId, lat, lng);
+        if (res.streamStatus === 'GPS_STREAM_INACTIVE' || !res.active) {
+          setGpsStreamState('GPS_STREAM_INACTIVE');
+          if (watchId !== null && navigator.geolocation) {
+            navigator.geolocation.clearWatch(watchId);
+            watchId = null;
+          }
+        }
+      } catch {
+        // Ignore transient network hiccups; next ping will retry while order remains in transit
+      }
+    };
+
+    if (navigator.geolocation) {
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => void sendPing(pos.coords.latitude, pos.coords.longitude),
+        () => {
+          const fallbackLat = status === 'picked_up'
+            ? (activeDelivery?.sellerPickup?.latitude ?? 23.8388)
+            : status === 'out_for_delivery'
+              ? ((activeDelivery?.sellerPickup?.latitude ?? 23.8388) + (activeDelivery?.address?.latitude ?? 23.8342)) / 2
+              : 23.8402;
+          const fallbackLng = status === 'picked_up'
+            ? (activeDelivery?.sellerPickup?.longitude ?? 79.4422)
+            : status === 'out_for_delivery'
+              ? ((activeDelivery?.sellerPickup?.longitude ?? 79.4422) + (activeDelivery?.address?.longitude ?? 79.4385)) / 2
+              : 79.4438;
+          void sendPing(fallbackLat, fallbackLng);
+        },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 6000 },
+      );
+    }
+
+    return () => {
+      cancelled = true;
+      if (watchId !== null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
+  }, [activeDelivery?._id, activeDelivery?.fulfilmentStatus, activeDelivery?.sellerPickup?.latitude, activeDelivery?.sellerPickup?.longitude, activeDelivery?.address?.latitude, activeDelivery?.address?.longitude]);
   const completedToday = deliveryHistory.filter((order) => {
     if (!['delivered', 'completed'].includes(order.fulfilmentStatus)) return false;
     const completedAt = [...(order.statusHistory ?? [])].reverse().find((event) => ['delivered', 'completed'].includes(event.status))?.changedAt;
     return completedAt ? new Date(completedAt).toDateString() === new Date().toDateString() : false;
   }).length;
+  const isOnline = profile.data?.isOnline ?? true;
+  const availabilityStatus = profile.data?.availabilityStatus ?? (activeOrders.length > 0 ? 'busy' : 'available');
+  const partnerCoords = profile.data?.currentLocation;
   const title = view === 'history' ? 'Delivery history' : view === 'deliveries' ? 'My deliveries' : view === 'profile' ? 'Partner profile' : 'Ready to deliver?';
   const selectView = (next: typeof view) => setView(next);
+
   const renderOrders = (items: Order[], isHistory = false) => items.length ? (
     <div className="delivery-order-list">{items.map((order) => {
-      const onRoute = order.fulfilmentStatus === 'out_for_delivery';
+      const seller = order.sellerPickup;
       const destination = order.address;
-      const mapQuery = destination
+      const sellerMapUrl = seller?.latitude !== undefined && seller?.longitude !== undefined
+        ? `https://www.google.com/maps/dir/?api=1&destination=${seller.latitude},${seller.longitude}`
+        : seller?.address
+          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${seller.address}, ${seller.city}`)}`
+          : '';
+      const customerMapQuery = destination
         ? encodeURIComponent([destination.addressLine1, destination.locality, destination.city, destination.postalCode].filter(Boolean).join(', '))
         : '';
+      const customerMapUrl = destination
+        ? (destination.latitude !== undefined && destination.longitude !== undefined
+          ? `https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}`
+          : `https://www.google.com/maps/search/?api=1&query=${customerMapQuery}`)
+        : '';
+
+      const checkpointSteps = [
+        { key: 'assigned', label: '1. Assigned', active: ['delivery_partner_assigned', 'ready_for_pickup', 'preparing', 'out_for_pickup', 'picked_up', 'out_for_delivery', 'delivered', 'completed'].includes(order.fulfilmentStatus) },
+        { key: 'out_for_pickup', label: '2. Route to Seller (Out for Pickup)', active: ['out_for_pickup', 'picked_up', 'out_for_delivery', 'delivered', 'completed'].includes(order.fulfilmentStatus) },
+        { key: 'picked_up', label: '3. Picked Up from Seller', active: ['picked_up', 'out_for_delivery', 'delivered', 'completed'].includes(order.fulfilmentStatus) },
+        { key: 'out_for_delivery', label: '4. Route to Customer (Out for Delivery)', active: ['out_for_delivery', 'delivered', 'completed'].includes(order.fulfilmentStatus) },
+        { key: 'delivered', label: '5. Delivered & Settled', active: ['delivered', 'completed'].includes(order.fulfilmentStatus) },
+      ];
+
       return <article className="delivery-order-card" key={order._id}>
         <div className="delivery-order-heading">
-          <div><span className="delivery-section-kicker">ORDER {order.orderReference}</span><h3>{onRoute ? order.customerName : 'Customer details after pickup'}</h3></div>
+          <div>
+            <span className="delivery-section-kicker">ORDER #{order.orderReference} · {order.paymentMethod === 'cash' ? 'CASH ON DELIVERY' : 'ONLINE / UPI'} ({formatMoney(order.totalPaise)})</span>
+            <h3>{order.customerName}</h3>
+          </div>
           <StatusBadge value={order.fulfilmentStatus} fulfilmentMethod={order.fulfilmentMethod} />
         </div>
-        <div className="delivery-route">
-          <span className="delivery-route-point pickup"><i />Pickup</span>
-          <span className="delivery-route-line" />
-          <span className="delivery-route-point"><i />{onRoute && destination ? `${destination.locality}, ${destination.city}` : 'Destination shown after dispatch'}</span>
+
+        {/* Visual Route Checkpoints */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: '0.45rem', margin: '0.75rem 0' }}>
+          {checkpointSteps.map((cp) => (
+            <div
+              key={cp.key}
+              style={{
+                padding: '0.45rem 0.6rem',
+                borderRadius: '8px',
+                fontSize: '0.78rem',
+                fontWeight: 600,
+                background: cp.active ? 'rgba(29, 107, 67, 0.12)' : 'rgba(120, 80, 100, 0.06)',
+                color: cp.active ? 'var(--success, #1d6b43)' : 'var(--muted, #6a5864)',
+                border: cp.active ? '1px solid rgba(29, 107, 67, 0.35)' : '1px solid rgba(120, 80, 100, 0.14)',
+              }}
+            >
+              {cp.active ? '✓ ' : '○ '}{cp.label}
+            </div>
+          ))}
         </div>
-        {onRoute && destination && <address>{destination.addressLine1}{destination.addressLine2 ? `, ${destination.addressLine2}` : ''}, {destination.locality}, {destination.city}, {destination.state} {destination.postalCode}</address>}
+
+        {/* Visual Route Summary Bar */}
+        <div className="delivery-route">
+          <span className="delivery-route-point pickup"><i />Seller Pickup: {seller?.sellerName || 'Seller Shop'} ({seller?.city || 'Damoh'})</span>
+          <span className="delivery-route-line" />
+          <span className="delivery-route-point"><i />Customer Drop-off: {destination ? `${destination.locality}, ${destination.villageOrCity || destination.city}` : 'Customer Address'}</span>
+        </div>
+
+        {/* Full Seller Pickup & Customer Drop-off GPS Cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '0.85rem', margin: '0.75rem 0' }}>
+          <div style={{ padding: '0.85rem', borderRadius: '12px', background: 'rgba(107, 33, 92, 0.05)', border: '1px solid rgba(107, 33, 92, 0.18)' }}>
+            <strong style={{ display: 'block', fontSize: '0.82rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--brand, #6b215c)' }}>
+              📍 Step A · Route to Seller (Pickup Address & GPS)
+            </strong>
+            <div style={{ marginTop: '0.35rem', fontSize: '0.92rem' }}>
+              <strong>{seller?.sellerName || 'Assigned Seller SHG'}</strong>
+              {seller?.phoneE164 && <> · <a href={`tel:${seller.phoneE164}`}>{seller.phoneE164}</a></>}
+              <address style={{ fontStyle: 'normal', marginTop: '0.2rem' }}>
+                {seller ? `${seller.address}, ${seller.city}` : 'Damoh Seller Center'}
+              </address>
+              {seller?.latitude !== undefined && seller?.longitude !== undefined && (
+                <small style={{ display: 'block', marginTop: '0.2rem', color: 'var(--muted, #6a5864)' }}>
+                  Seller GPS: {seller.latitude.toFixed(4)}, {seller.longitude.toFixed(4)}
+                  {order.deliveryPartner?.distanceKm !== undefined && order.deliveryPartner?.distanceKm !== null ? ` (${order.deliveryPartner.distanceKm} km from your location)` : ''}
+                </small>
+              )}
+              {!isHistory && sellerMapUrl && (
+                <a className="delivery-map-link" style={{ display: 'inline-block', marginTop: '0.35rem' }} href={sellerMapUrl} target="_blank" rel="noreferrer">
+                  Navigate to Seller in Maps <span aria-hidden="true">↗</span>
+                </a>
+              )}
+            </div>
+          </div>
+
+          <div style={{ padding: '0.85rem', borderRadius: '12px', background: 'rgba(29, 107, 67, 0.05)', border: '1px solid rgba(29, 107, 67, 0.2)' }}>
+            <strong style={{ display: 'block', fontSize: '0.82rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--success, #1d6b43)' }}>
+              🏁 Step B · Route to Customer (Drop-off Address & GPS)
+            </strong>
+            <div style={{ marginTop: '0.35rem', fontSize: '0.92rem' }}>
+              <strong>{destination?.name || order.customerName}</strong>
+              {destination?.phoneE164 && <> · <a href={`tel:${destination.phoneE164}`}>{destination.phoneE164}</a></>}
+              {destination && (
+                <address style={{ fontStyle: 'normal', marginTop: '0.2rem' }}>
+                  {destination.formattedAddress || [destination.addressLine1, destination.addressLine2, destination.area, destination.landmark, destination.villageOrCity || destination.city, destination.district, destination.state, destination.postalCode].filter(Boolean).join(', ')}
+                </address>
+              )}
+              {destination?.latitude !== undefined && destination?.longitude !== undefined && (
+                <small style={{ display: 'block', marginTop: '0.2rem', color: 'var(--muted, #6a5864)' }}>
+                  Customer GPS: {destination.latitude.toFixed(4)}, {destination.longitude.toFixed(4)}
+                </small>
+              )}
+              {!isHistory && customerMapUrl && (
+                <a className="delivery-map-link" style={{ display: 'inline-block', marginTop: '0.35rem' }} href={customerMapUrl} target="_blank" rel="noreferrer">
+                  Navigate to Customer in Maps <span aria-hidden="true">↗</span>
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+
         <div className="delivery-order-items">{order.items.map((item, index) => <span key={`${item.productId}-${index}`}>{item.productName} × {item.quantity}</span>)}</div>
-        <div className="delivery-order-meta"><span>Assigned {order.deliveryPartner?.assignedAt ? new Date(order.deliveryPartner.assignedAt).toLocaleString('en-IN') : '—'}</span>{onRoute && order.customerPhoneE164 && <a href={`tel:${order.customerPhoneE164}`}>Call customer</a>}</div>
-        {onRoute && mapQuery && <a className="delivery-map-link" href={`https://www.google.com/maps/search/?api=1&query=${mapQuery}`} target="_blank" rel="noreferrer">Open destination in Maps <span aria-hidden="true">↗</span></a>}
-        {!isHistory && <div className="delivery-order-actions">
-          {['preparing', 'ready_for_pickup'].includes(order.fulfilmentStatus) && <button className="delivery-primary-action" onClick={() => void updateStatus(order._id, 'out_for_delivery', order.orderReference)}>Start delivery</button>}
-          {onRoute && <><button className="delivery-primary-action" onClick={() => void updateStatus(order._id, 'delivered', order.orderReference)}>Confirm delivered</button><button className="delivery-secondary-action" onClick={() => void updateStatus(order._id, 'delivery_failed', order.orderReference)}>Report a problem</button></>}
+        <div className="delivery-order-meta">
+          <span>Assigned {order.deliveryPartner?.assignedAt ? new Date(order.deliveryPartner.assignedAt).toLocaleString('en-IN') : '—'}</span>
+          <span>Payment: <strong>{order.paymentMethod.toUpperCase()} ({formatMoney(order.totalPaise)}) · {order.paymentStatus.replaceAll('_', ' ')}</strong></span>
+          {destination?.phoneE164 && <a href={`tel:${destination.phoneE164}`}>Call customer ({destination.phoneE164})</a>}
+        </div>
+
+        {!isHistory && <div className="delivery-order-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', marginTop: '0.75rem' }}>
+          {['delivery_partner_assigned', 'ready_for_pickup', 'preparing'].includes(order.fulfilmentStatus) && (
+            <button className="delivery-primary-action" onClick={() => void updateStatus(order._id, 'out_for_pickup', order.orderReference)}>
+              Accept & Start Pickup (OUT_FOR_PICKUP)
+            </button>
+          )}
+          {order.fulfilmentStatus === 'out_for_pickup' && (
+            <button className="delivery-primary-action" onClick={() => void updateStatus(order._id, 'picked_up', order.orderReference)}>
+              Confirm Picked Up from Seller (PICKED_UP)
+            </button>
+          )}
+          {order.fulfilmentStatus === 'picked_up' && (
+            <button className="delivery-primary-action" onClick={() => void updateStatus(order._id, 'out_for_delivery', order.orderReference)}>
+              Start Route to Customer (OUT_FOR_DELIVERY)
+            </button>
+          )}
+          {order.fulfilmentStatus === 'out_for_delivery' && (
+            <>
+              <button className="delivery-primary-action" onClick={() => void updateStatus(order._id, 'delivered', order.orderReference, true)}>
+                Confirm Payment ({order.paymentMethod === 'cash' ? `Collect Cash ${formatMoney(order.totalPaise)}` : 'Online Paid'}) & Mark DELIVERED
+              </button>
+              <button className="delivery-secondary-action" onClick={() => void updateStatus(order._id, 'delivery_failed', order.orderReference)}>
+                Report Delivery Problem
+              </button>
+            </>
+          )}
+          {['return_partner_assigned', 'return_accepted'].includes(order.fulfilmentStatus) && (
+            <button
+              className="delivery-primary-action"
+              style={{ background: '#EA580C', borderColor: '#EA580C' }}
+              onClick={() => void updateStatus(order._id, 'return_picked_up', order.orderReference)}
+            >
+              🔄 Confirm Return Picked Up from Customer (RETURN_PICKED_UP)
+            </button>
+          )}
+          {order.fulfilmentStatus === 'return_picked_up' && (
+            <button
+              className="delivery-primary-action"
+              style={{ background: '#16A34A', borderColor: '#16A34A' }}
+              onClick={() => void updateStatus(order._id, 'return_delivered_to_seller', order.orderReference)}
+            >
+              ✓ Confirm Return Handed Over to Seller (RETURN_DELIVERED_TO_SELLER)
+            </button>
+          )}
         </div>}
       </article>;
     })}</div>
-  ) : <div className="delivery-empty"><span aria-hidden="true">✿</span><h3>{isHistory ? 'No completed deliveries yet' : 'No active deliveries right now'}</h3><p>{isHistory ? 'Completed delivery records will appear here.' : 'Orders assigned to your account will appear here when available.'}</p></div>;
+  ) : <div className="delivery-empty"><span aria-hidden="true">✿</span><h3>{isHistory ? 'No completed deliveries yet' : 'No active deliveries right now'}</h3><p>{isHistory ? 'Completed delivery records will appear here.' : 'Ensure your status is ONLINE & AVAILABLE so City Admin can assign nearby orders to you.'}</p></div>;
 
   const nav = (
     <>
       <button className={view === 'overview' ? 'active' : ''} onClick={() => selectView('overview')}><span aria-hidden="true">⌂</span>Overview</button>
-      <button className="is-unavailable" disabled title="Delivery offer acceptance is not available yet"><span aria-hidden="true">＋</span>Requests <small>Unavailable</small></button>
-      <button className={view === 'deliveries' ? 'active' : ''} onClick={() => selectView('deliveries')}><span aria-hidden="true">▣</span>My deliveries</button>
+      <button className={view === 'deliveries' ? 'active' : ''} onClick={() => selectView('deliveries')}><span aria-hidden="true">▣</span>Active Requests ({activeOrders.length})</button>
       <button className={view === 'history' ? 'active' : ''} onClick={() => selectView('history')}><span aria-hidden="true">◷</span>Delivery history</button>
-      <button className="is-unavailable" disabled title="Earnings and payout data are not tracked yet"><span aria-hidden="true">₹</span>Earnings & payouts<small>Unavailable</small></button>
-      <button className={view === 'profile' ? 'active' : ''} onClick={() => selectView('profile')}><span aria-hidden="true">○</span>Profile</button>
+      <button className={view === 'profile' ? 'active' : ''} onClick={() => selectView('profile')}><span aria-hidden="true">○</span>Profile & Pay Slip</button>
     </>
   );
   return <div className="delivery-portal">
     <header className="delivery-portal-header">
-      <Link to="/" className="delivery-portal-brand"><img src="/images/esakhi-emblem.png" alt="" /><span><strong>eSakhi</strong><small>DELIVERY PARTNER</small></span></Link>
+      <Link to="/" className="delivery-portal-brand"><img src="/images/maitri-sisterhood-logo.png" alt="" /><span><strong>eSakhi</strong><small>DELIVERY PARTNER</small></span></Link>
       <div className="delivery-header-user"><span>{user?.name || 'Delivery partner'}</span><button onClick={() => void signOut()} className="delivery-signout">Sign out</button></div>
     </header>
     <div className="delivery-portal-layout">
-      <aside className="delivery-sidebar"><span className="delivery-sidebar-label">WORKSPACE</span><nav>{nav}</nav><div className="delivery-sidebar-note"><strong>Assigned deliveries</strong><span>Only orders assigned to your account are shown here.</span></div></aside>
+      <aside className="delivery-sidebar"><span className="delivery-sidebar-label">WORKSPACE</span><nav>{nav}</nav><div className="delivery-sidebar-note"><strong>Live GPS & Dispatch</strong><span>Stay ONLINE & AVAILABLE to receive nearby Seller pickup requests.</span></div></aside>
       <main className="delivery-main">
-        <div className="delivery-page-heading"><div><span className="delivery-section-kicker">E SAKHI · DELIVERY PARTNER</span><h1>{title}</h1><p>{view === 'overview' ? 'Your assigned work and delivery activity.' : view === 'profile' ? 'Your account details and portal availability.' : 'Orders and records connected to your partner account.'}</p></div><button className="delivery-refresh" onClick={() => void Promise.all([orders.reload(), history.reload()])}>Refresh</button></div>
+        <div className="delivery-page-heading"><div><span className="delivery-section-kicker">E SAKHI · DELIVERY PARTNER</span><h1>{title}</h1><p>{view === 'overview' ? 'Accept assigned orders, navigate to the Seller for pickup, and deliver to the Customer.' : view === 'profile' ? 'Your account details, live GPS coordinates, monthly pay slip, and availability controls.' : 'Orders and records connected to your partner account.'}</p></div><button className="delivery-refresh" onClick={() => void Promise.all([orders.reload(), history.reload(), profile.reload()])}>Refresh</button></div>
         {error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}
         {view === 'overview' && <>
           <section className="delivery-welcome">
-            <div><span className="delivery-section-kicker">GOOD DAY{user?.name ? `, ${user.name.split(' ')[0].toLocaleUpperCase('en-IN')}` : ''}</span><h2>Your delivery workspace</h2><p>Here are the orders currently assigned to your account.</p></div>
-            <div className="delivery-availability"><span className="delivery-status-dot" /><span><strong>Assigned orders only</strong><small>Availability controls are not enabled</small></span></div>
+            <div>
+              <span className="delivery-section-kicker">GOOD DAY{user?.name ? `, ${user.name.split(' ')[0].toLocaleUpperCase('en-IN')}` : ''}</span>
+              <h2>Your delivery workspace</h2>
+              <p>
+                Status: <strong>{isOnline ? (availabilityStatus === 'busy' ? 'ONLINE · ON DELIVERY' : 'ONLINE & AVAILABLE') : 'OFFLINE'}</strong>
+                {partnerCoords ? ` · GPS: ${partnerCoords.latitude.toFixed(4)}, ${partnerCoords.longitude.toFixed(4)}` : ''}
+                {' · '}
+                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: gpsStreamState === 'GPS_STREAM_ACTIVE' ? '#2563eb' : '#64748b' }}>
+                  {gpsStreamState === 'GPS_STREAM_ACTIVE' ? '◉ Live GPS Broadcast Active' : '○ GPS Broadcast Idle (Battery Saver)'}
+                </span>
+              </p>
+            </div>
+            <div className="delivery-availability" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+              <button
+                type="button"
+                className={isOnline ? 'delivery-secondary-action' : 'delivery-primary-action'}
+                disabled={updatingAvailability}
+                onClick={() => void toggleOnlineAvailability(!isOnline)}
+              >
+                {isOnline ? 'Go Offline' : 'Go Online & Available'}
+              </button>
+              {isOnline && availabilityStatus !== 'available' && activeOrders.length === 0 && (
+                <button
+                  type="button"
+                  className="delivery-primary-action"
+                  disabled={updatingAvailability}
+                  onClick={() => void toggleOnlineAvailability(true, 'available')}
+                >
+                  Mark Idle / Available
+                </button>
+              )}
+              <button
+                type="button"
+                className="delivery-secondary-action"
+                disabled={updatingAvailability}
+                onClick={refreshLiveGpsLocation}
+              >
+                📍 Update GPS
+              </button>
+            </div>
           </section>
           <section className="delivery-metrics" aria-label="Delivery summary">
             <article><span className="delivery-metric-icon">▣</span><small>Active deliveries</small><strong>{orders.loading ? '…' : activeOrders.length}</strong><span>Assigned to you</span></article>
             <article><span className="delivery-metric-icon">✓</span><small>Completed today</small><strong>{history.loading ? '…' : completedToday}</strong><span>From delivery history</span></article>
-            <article className="unavailable"><span className="delivery-metric-icon">＋</span><small>Available requests</small><strong>Unavailable</strong><span>Offer system not connected</span></article>
-            <article className="unavailable"><span className="delivery-metric-icon">₹</span><small>Today's earnings</small><strong>Unavailable</strong><span>Payout data not tracked</span></article>
+            <article><span className="delivery-metric-icon">◎</span><small>Availability</small><strong>{isOnline ? (availabilityStatus === 'busy' ? 'On Delivery' : 'Available') : 'Offline'}</strong><span>Live City Admin visibility</span></article>
+            <article><span className="delivery-metric-icon">📍</span><small>Current GPS</small><strong>{partnerCoords ? `${partnerCoords.latitude.toFixed(3)}, ${partnerCoords.longitude.toFixed(3)}` : 'Damoh'}</strong><span>Used for Seller proximity</span></article>
           </section>
+          <DeliveryPartnerPaySlipPanel />
           <div className="delivery-content-grid">
-            <section className="delivery-panel">
-              <div className="delivery-panel-heading"><div><span className="delivery-section-kicker">{activeDelivery ? 'ACTIVE DELIVERY' : 'YOUR ASSIGNMENTS'}</span><h2>{activeDelivery ? 'Continue delivery' : 'Assigned deliveries'}</h2></div><button onClick={() => selectView('deliveries')}>View all <span aria-hidden="true">→</span></button></div>
-              {orders.loading ? <Loading label="Loading assigned deliveries…" /> : orders.error ? <div className="delivery-panel-state"><Notice tone="error">{orders.error}</Notice><button className="delivery-secondary-action" onClick={() => void orders.reload()}>Try again</button></div> : renderOrders(activeDelivery ? [activeDelivery] : activeOrders.slice(0, 2))}
+            <section className="delivery-panel" style={{ gridColumn: '1 / -1' }}>
+              <div className="delivery-panel-heading"><div><span className="delivery-section-kicker">{activeDelivery ? 'ACTIVE REQUEST & ROUTE CHECKPOINTS' : 'YOUR ASSIGNMENTS'}</span><h2>{activeDelivery ? 'Active pickup & delivery route' : 'Assigned deliveries'}</h2></div><button onClick={() => selectView('deliveries')}>View all ({activeOrders.length}) <span aria-hidden="true">→</span></button></div>
+              {orders.loading ? <Loading label="Loading assigned deliveries…" /> : orders.error ? <div className="delivery-panel-state"><Notice tone="error">{orders.error}</Notice><button className="delivery-secondary-action" onClick={() => void orders.reload()}>Try again</button></div> : renderOrders(activeOrders)}
             </section>
-            <aside className="delivery-panel delivery-earnings-panel">
-              <div className="delivery-panel-heading"><div><span className="delivery-section-kicker">EARNINGS</span><h2>Earnings & payouts</h2></div></div>
-              <div className="delivery-unavailable-block"><span aria-hidden="true">₹</span><strong>Not available yet</strong><p>Earnings and payout records are not currently connected to this portal. No estimate is shown.</p></div>
-              <div className="delivery-unavailable-footnote">Offer acceptance, availability settings, zones, and payout history are not yet supported.</div>
-            </aside>
           </div>
           <section className="delivery-panel delivery-recent-history"><div className="delivery-panel-heading"><div><span className="delivery-section-kicker">RECENT ACTIVITY</span><h2>Delivery history</h2></div><button onClick={() => selectView('history')}>View history <span aria-hidden="true">→</span></button></div>{history.loading ? <Loading label="Loading delivery history…" /> : history.error ? <Notice tone="error">{history.error}</Notice> : renderOrders(deliveryHistory.slice(0, 2), true)}</section>
         </>}
-        {view === 'deliveries' && <section className="delivery-panel"><div className="delivery-panel-heading"><div><span className="delivery-section-kicker">ACTIVE WORK</span><h2>My assigned deliveries</h2></div></div>{orders.loading ? <Loading label="Loading assigned deliveries…" /> : orders.error ? <div className="delivery-panel-state"><Notice tone="error">{orders.error}</Notice><button className="delivery-secondary-action" onClick={() => void orders.reload()}>Try again</button></div> : renderOrders(activeOrders)}</section>}
+        {view === 'deliveries' && <section className="delivery-panel"><div className="delivery-panel-heading"><div><span className="delivery-section-kicker">ACTIVE REQUESTS</span><h2>My assigned deliveries</h2></div></div>{orders.loading ? <Loading label="Loading assigned deliveries…" /> : orders.error ? <div className="delivery-panel-state"><Notice tone="error">{orders.error}</Notice><button className="delivery-secondary-action" onClick={() => void orders.reload()}>Try again</button></div> : renderOrders(activeOrders)}</section>}
         {view === 'history' && <section className="delivery-panel"><div className="delivery-panel-heading"><div><span className="delivery-section-kicker">COMPLETED & CLOSED</span><h2>Delivery history</h2></div></div>{history.loading ? <Loading label="Loading delivery history…" /> : history.error ? <Notice tone="error">{history.error}</Notice> : renderOrders(deliveryHistory, true)}</section>}
-        {view === 'profile' && <section className="delivery-panel delivery-profile-panel"><div className="delivery-panel-heading"><div><span className="delivery-section-kicker">YOUR ACCOUNT</span><h2>Partner profile</h2></div><Link to="/account/profile">Edit profile <span aria-hidden="true">→</span></Link></div><dl><div><dt>Name</dt><dd>{user?.name || 'Not provided'}</dd></div><div><dt>Phone</dt><dd>{user?.phone || 'Not available'}</dd></div><div><dt>Account</dt><dd>Delivery partner</dd></div><div><dt>Service zones</dt><dd>Not tracked in the current system</dd></div><div><dt>Availability</dt><dd>Portal availability toggle is not connected</dd></div></dl></section>}
-        <p className="delivery-data-note">Delivery status changes are saved to the order record. Customer address and phone are shown only after a delivery is out for delivery. This portal does not yet support offer acceptance, partner availability, service zones, or payout calculations.</p>
+        {view === 'profile' && <><section className="delivery-panel delivery-profile-panel"><div className="delivery-panel-heading"><div><span className="delivery-section-kicker">YOUR ACCOUNT & GPS</span><h2>Partner profile</h2></div><Link to="/account/profile">Edit profile <span aria-hidden="true">→</span></Link></div><dl><div><dt>Name</dt><dd>{user?.name || 'Not provided'}</dd></div><div><dt>Phone</dt><dd>{user?.phone || 'Not available'}</dd></div><div><dt>Account</dt><dd>Delivery partner</dd></div><div><dt>Approved Localities</dt><dd>{profile.data?.serviceableLocalities?.join(', ') || 'Damoh'}</dd></div><div><dt>Availability</dt><dd>{isOnline ? `ONLINE (${availabilityStatus.toUpperCase()})` : 'OFFLINE'}</dd></div><div><dt>Live GPS Coordinates</dt><dd>{partnerCoords ? `${partnerCoords.latitude.toFixed(4)}, ${partnerCoords.longitude.toFixed(4)}` : '23.8388, 79.4422 (Damoh)'}</dd></div></dl></section><DeliveryPartnerPaySlipPanel /></>}
+        <p className="delivery-data-note">Follow the checkpoint buttons in order: Accept (OUT_FOR_PICKUP) → Picked Up from Seller (PICKED_UP) → Out for Delivery (OUT_FOR_DELIVERY) → Confirm Payment & Mark Delivered (DELIVERED). When an order is marked DELIVERED, your status automatically reverts to AVAILABLE.</p>
       </main>
       <nav className="delivery-mobile-nav" aria-label="Delivery portal navigation">
         <button className={view === 'overview' ? 'active' : ''} onClick={() => selectView('overview')}><span>⌂</span>Home</button>
-        <button disabled title="Delivery offers unavailable"><span>＋</span>Requests</button>
         <button className={view === 'deliveries' ? 'active' : ''} onClick={() => selectView('deliveries')}><span>▣</span>Deliveries</button>
         <button className={view === 'history' ? 'active' : ''} onClick={() => selectView('history')}><span>◷</span>History</button>
         <button className={view === 'profile' ? 'active' : ''} onClick={() => selectView('profile')}><span>○</span>Profile</button>
@@ -3206,6 +5182,92 @@ function SystemPage(): ReactNode {
 
 function NotFoundPage(): ReactNode {
   return <div className="page-container not-found"><span className="eyebrow">That page has wandered off</span><h1>Let's find your way back.</h1><Link to="/" className="button">Return home</Link></div>;
+}
+
+import { CityAdminRiderAuditPanel } from './CityAdminRiderAudit';
+import { RiderOnboardingForm } from './RiderOnboardingForm';
+
+function CityAdminDeliveryPartnersPage(): ReactNode {
+  const { user } = useAuth();
+  const [tab, setTab] = useState<'directory' | 'applications' | 'audit'>('directory');
+  const [status, setStatus] = useState('pending');
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const partners = useLoad(() => api.cityAdminDeliveryPartners(1, 100), []);
+  useEffect(() => {
+    const refresh = () => {
+      void partners.reload(false);
+    };
+    window.addEventListener('city-admin-order-updated', refresh);
+    return () => window.removeEventListener('city-admin-order-updated', refresh);
+  }, [partners.reload]);
+  const query = new URLSearchParams({ page: '1', limit: '50', status });
+  const applications = useLoad(() => api.cityAdminDeliveryPartnerApplications(query), [status]);
+  useRefreshOnFocus(partners.reload);
+  useRefreshOnFocus(applications.reload);
+
+  async function review(applicationId: string, decision: 'approved' | 'rejected' | 'needs_info'): Promise<void> {
+    setError('');
+    setMessage('');
+    try {
+      await api.reviewDeliveryPartnerApplication(applicationId, decision, notes[applicationId]?.trim());
+      setMessage(decision === 'approved' ? 'Partner approved for the requested configured localities.' : decision === 'rejected' ? 'Partner application rejected.' : 'Partner application returned for more information.');
+      await Promise.all([applications.reload(), partners.reload()]);
+    } catch (cause) {
+      setError(displayError(cause));
+    }
+  }
+
+  return <div className="city-admin-page">
+    <div className="city-admin-page-heading"><div><p className="city-admin-eyebrow">Local operations</p><h1>Delivery Partners</h1><p>Review partner applications and approved city-locality eligibility.</p></div><Link className="city-admin-secondary-button" to="/delivery-partner/apply">Open application form</Link></div>
+    {error && <div className="city-admin-error" role="alert">{error}</div>}{message && <Notice tone="success">{message}</Notice>}
+    <div className="city-admin-tabs" role="tablist" aria-label="Delivery partner views"><button type="button" role="tab" aria-selected={tab === 'directory'} className={tab === 'directory' ? 'active' : ''} onClick={() => setTab('directory')}>Partner directory</button><button type="button" role="tab" aria-selected={tab === 'applications'} className={tab === 'applications' ? 'active' : ''} onClick={() => setTab('applications')}>Applications</button><button type="button" role="tab" aria-selected={tab === 'audit'} className={tab === 'audit' ? 'active' : ''} onClick={() => setTab('audit')}>Biodata & Vehicle Audit</button></div>
+    {tab === 'audit' ? (
+      <section className="city-admin-panel" style={{ marginTop: '1rem' }}>
+        <CityAdminRiderAuditPanel
+          applications={applications.data?.data ?? []}
+          onApplicationUpdated={() => {
+            void applications.reload();
+            void partners.reload();
+          }}
+        />
+      </section>
+    ) : tab === 'directory' ? <section className="city-admin-panel city-admin-order-directory">
+      {partners.error && <div className="city-admin-error" role="alert">{partners.error}<button onClick={() => void partners.reload()}>Retry</button></div>}
+      {partners.loading ? <Loading label="Loading city delivery partners…" /> : partners.error ? null : partners.data?.data.length ? <div className="city-admin-table-wrap"><table className="city-admin-table"><thead><tr><th>Partner</th><th>Phone</th><th>Approved localities</th><th>Active deliveries</th><th>Completed</th><th>Failed</th><th>Live Availability</th><th>GPS Location / Distance</th><th>Account</th></tr></thead><tbody>{partners.data.data.map((partner) => <tr key={partner._id}><td><strong>{partner.name || 'Delivery Partner'}</strong></td><td><a href={`tel:${partner.phoneE164}`}>{partner.phoneE164}</a></td><td>{partner.serviceableLocalities.join(', ')}</td><td>{partner.activeDeliveries}</td><td>{partner.completedDeliveries}</td><td>{partner.failedDeliveries}</td><td><span className={`status-badge status-${partner.availabilityStatus === 'available' && partner.isOnline ? 'delivered' : partner.availabilityStatus === 'busy' ? 'preparing' : 'cancelled'}`}>{partnerAvailabilityBadge(partner)}</span></td><td>{partner.currentLocation ? <small>{partner.currentLocation.latitude.toFixed(4)}, {partner.currentLocation.longitude.toFixed(4)}{partner.distanceKm !== null && partner.distanceKm !== undefined ? ` (${partner.distanceKm} km)` : ''}</small> : '—'}</td><td><StatusBadge value={partner.status ?? 'active'} /></td></tr>)}</tbody></table></div> : <div className="city-admin-empty">No approved delivery partners are assigned to {user?.assignedCity ?? 'this city'}.</div>}
+    </section> : <section className="city-admin-panel city-admin-order-directory">
+      <div className="city-admin-order-tools"><select aria-label="Filter partner applications by status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="pending">Awaiting review</option><option value="needs_info">Needs more information</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select></div>
+      {applications.error && <div className="city-admin-error" role="alert">{applications.error}<button onClick={() => void applications.reload()}>Retry</button></div>}
+      {applications.loading ? <Loading label="Loading partner applications…" /> : applications.error ? null : applications.data?.data.length ? <div className="city-admin-review-grid">{applications.data.data.map((application) => <article key={application._id} className="city-admin-review-card panel">
+        <div className="panel-heading"><div><span className="eyebrow">{application.city} · {new Date(application.createdAt).toLocaleDateString('en-IN')}</span><h2>{application.name}</h2></div><span className={`status-pill status-${application.status.replaceAll('_', '-')}`}>{application.status.replaceAll('_', ' ')}</span></div>
+        <div className="panel-body"><dl className="review-field-grid"><div><dt>Phone</dt><dd><a href={`tel:${application.phoneE164}`}>{application.phoneE164}</a></dd></div><div><dt>Requested localities</dt><dd>{application.requestedLocalities.join(', ')}</dd></div><div><dt>Note</dt><dd>{application.applicantNote || 'No note provided'}</dd></div>{application.reviewNote && <div><dt>Review note</dt><dd>{application.reviewNote}</dd></div>}</dl>
+          {application.status === 'pending' || application.status === 'needs_info' ? <><label className="field"><span>Review note (required to reject)</span><textarea rows={2} maxLength={1000} value={notes[application._id] ?? ''} onChange={(event) => setNotes((current) => ({ ...current, [application._id]: event.target.value }))} /></label><div className="button-row review-actions"><button type="button" className="button" onClick={() => void review(application._id, 'approved')}>Approve for localities</button><button type="button" className="button button-outline" onClick={() => void review(application._id, 'needs_info')}>Request information</button><button type="button" className="button button-light" disabled={!notes[application._id]?.trim()} onClick={() => void review(application._id, 'rejected')}>Reject</button></div></> : application.reviewedAt && <p className="city-admin-data-note">Reviewed {new Date(application.reviewedAt).toLocaleString('en-IN')}</p>}
+        </div>
+      </article>)}</div> : <div className="city-admin-empty">No partner applications in this queue.</div>}
+    </section>}
+  </div>;
+}
+
+function DeliveryPartnerApplicationPage(): ReactNode {
+  const service = useLoad(() => api.serviceArea(), []);
+  return (
+    <div className="page-container narrow">
+      <div className="page-intro">
+        <div>
+          <span className="eyebrow">Delivery Partner Onboarding</span>
+          <h1>Join the eSakhi Hyperlocal Delivery Fleet</h1>
+          <p>Flexible deliveries for Self-Help Groups (SHGs) with instant per-delivery payouts.</p>
+        </div>
+        <Link to="/" className="button button-outline">Back to store</Link>
+      </div>
+
+      <RiderOnboardingForm
+        assignedCity={service.data?.city ?? 'Jaipur'}
+        availableLocalities={service.data?.serviceableLocalities?.map((l) => l.name) ?? []}
+      />
+    </div>
+  );
 }
 
 export default App;

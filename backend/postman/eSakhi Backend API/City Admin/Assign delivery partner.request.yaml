@@ -1,0 +1,13 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/city-admin/orders/{{orderId}}/delivery-partner"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "partnerId": "{{deliveryPartnerId}}",
+      "reassignmentReason": "Sample reason for reassignment after a failed delivery."
+    }
+order: 14000

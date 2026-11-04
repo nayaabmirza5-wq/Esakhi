@@ -1,0 +1,16 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/delivery-partner-applications"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: text
+  content: |-
+    {
+      "name": "Sample Delivery Partner",
+      "phone": "+919876543210",
+      "city": "Sample City",
+      "requestedLocalities": ["Sample Locality"],
+      "applicantNote": "Sample application note"
+    }
+order: 2000

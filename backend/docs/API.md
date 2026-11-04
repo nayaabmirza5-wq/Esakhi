@@ -202,7 +202,7 @@ The refresh token is not returned in JSON. It is set as the `esakhi_refresh` Htt
 | Customer | Own profile and customer order endpoints |
 | Staff | Admin dashboard, catalogue reads, order reads and fulfilment actions, and internal order notes, when staff access is enabled in settings |
 | Admin | All admin APIs, including product management, customer management, payment review, settings, and inventory |
-| City Admin | Read-only city dashboard and order directory, limited to the assigned city stored on the account; provisioned through the trusted CLI command |
+| City Admin | City-scoped dashboard, seller and delivery-partner application review, product flags, service-zone change requests, and delivery-order assignment; provisioned through the trusted CLI command |
 | Super Admin | Global overview endpoint only in the initial dashboard phase; provisioned through the trusted CLI command. The existing city, seller, finance, refund, payout, support, and audit modules are not implemented. |
 
 An authenticated user without the required role receives `403 FORBIDDEN`. A missing or invalid access token receives `401`.
@@ -227,7 +227,14 @@ This table lists every HTTP endpoint registered by the current backend. The deta
 | `POST` | `/api/v1/auth/logout` | Optional refresh cookie | `200` |
 | `GET` | `/api/v1/auth/me` | Authenticated customer, staff, or admin | `200` |
 | `PATCH` | `/api/v1/auth/me` | Authenticated customer, staff, or admin | `200` |
+| `GET` | `/api/v1/auth/me/addresses` | Authenticated user; own addresses only | `200` |
+| `POST` | `/api/v1/auth/me/addresses` | Authenticated user; own addresses only | `201` |
 | `PUT` | `/api/v1/auth/me/addresses` | Authenticated customer, staff, or admin | `200` |
+| `PATCH` | `/api/v1/auth/me/addresses/:addressId` | Authenticated user; own address only | `200` |
+| `DELETE` | `/api/v1/auth/me/addresses/:addressId` | Authenticated user; own address only | `200` |
+| `PUT` | `/api/v1/auth/me/addresses/:addressId/default` | Authenticated user; own address only | `200` |
+| `GET` | `/api/v1/auth/me/address-search?q=...` | Authenticated user; 20/min in production | `200` |
+| `GET` | `/api/v1/auth/me/address-reverse?latitude=...&longitude=...` | Authenticated user; 20/min in production | `200` |
 | `GET` | `/api/v1/categories` | Public | `200` |
 | `GET` | `/api/v1/products/categories` | Public; alias of `/api/v1/categories` | `200` |
 | `GET` | `/api/v1/products` | Public | `200` |
@@ -244,10 +251,30 @@ This table lists every HTTP endpoint registered by the current backend. The deta
 | `GET` | `/api/v1/super-admin/overview` | Super Admin | `200` |
 | `GET` | `/api/v1/super-admin/orders` | Super Admin | `200` |
 | `GET` | `/api/v1/city-admin/dashboard` | City Admin; assigned city only | `200` |
+| `GET` | `/api/v1/city-admin/service-zones` | City Admin; assigned city only | `200` |
+| `POST` | `/api/v1/city-admin/service-zone-change-requests` | City Admin; assigned city only | `201` |
+| `GET` | `/api/v1/city-admin/sellers` | City Admin; assigned city only | `200` |
+| `GET` | `/api/v1/city-admin/products` | City Admin; assigned city only | `200` |
+| `PATCH` | `/api/v1/city-admin/products/:productId/review` | City Admin; assigned city only | `200` |
+| `POST` | `/api/v1/city-admin/products/:productId/flags` | City Admin; assigned city only | `201` |
+| `GET` | `/api/v1/city-admin/delivery-partners` | City Admin; assigned city only | `200` |
+| `GET` | `/api/v1/city-admin/delivery-partner-applications` | City Admin; assigned city only | `200` |
+| `PATCH` | `/api/v1/city-admin/delivery-partner-applications/:applicationId/review` | City Admin; assigned city only | `200` |
 | `GET` | `/api/v1/city-admin/orders` | City Admin; assigned city only | `200` |
+| `GET` | `/api/v1/city-admin/orders/:orderId` | City Admin; assigned city only | `200` |
+| `PUT` | `/api/v1/city-admin/orders/:orderId/delivery-partner` | City Admin; assigned city only | `200` |
+| `POST` | `/api/v1/seller-applications` | Public | `201` new application; `200` existing pending or needs-info application |
+| `GET` | `/api/v1/seller-applications` | City Admin; assigned city only | `200` |
+| `PATCH` | `/api/v1/seller-applications/:applicationId/review` | City Admin; assigned city only | `200` |
+| `POST` | `/api/v1/delivery-partner-applications` | Public | `201` new application; `200` existing pending or needs-info application |
 | `GET` | `/api/v1/seller/dashboard` | Approved seller; own products and order items only | `200` |
-| `GET` | `/api/v1/seller/products` | Approved seller; own products only | `200` |
-| `GET` | `/api/v1/seller/orders` | Approved seller; own order items only | `200` |
+| `PATCH` | `/api/v1/seller/profile` | Approved seller; edits caller's store profile | `200` |
+| `GET` | `/api/v1/seller/products` | Approved seller; own products only; paginated; optional name search and approval/stock filters | `200` |
+| `POST` | `/api/v1/seller/products/images` | Approved seller; validated product image upload | `201` |
+| `POST` | `/api/v1/seller/products` | Approved seller; creates an unpublished listing owned by caller | `201` |
+| `POST` | `/api/v1/seller/products/:productId/inventory-adjustments` | Approved seller; adjusts stock only for the seller's own non-archived product; records an inventory adjustment and audit log | `200` |
+| `GET` | `/api/v1/seller/products/:productId/inventory-adjustments` | Approved seller; inventory history for caller's own product | `200` |
+| `GET` | `/api/v1/seller/orders` | Approved seller; own order items only; paginated and filterable by fulfillment status | `200` |
 | `GET` | `/api/v1/admin/customers` | Admin | `200` |
 | `GET` | `/api/v1/admin/customers/:customerId` | Admin | `200` |
 | `GET` | `/api/v1/admin/customers/:customerId/orders` | Admin | `200` |
@@ -314,7 +341,14 @@ GET /ready
 | `POST /api/v1/auth/logout` | Optional refresh cookie | `200` | — |
 | `GET /api/v1/auth/me` | Any authenticated role | `200` | `401`, `404 NOT_FOUND` |
 | `PATCH /api/v1/auth/me` | Any authenticated role | `200` | `400 VALIDATION_ERROR`, `401`, `404 NOT_FOUND` |
-| `PUT /api/v1/auth/me/addresses` | Any authenticated role | `200` | `400 VALIDATION_ERROR`, `401`, `404 NOT_FOUND` |
+| `GET /api/v1/auth/me/addresses` | Any authenticated role; caller's addresses only | `200` | `401`, `404 NOT_FOUND` |
+| `POST /api/v1/auth/me/addresses` | Any authenticated role; caller's addresses only | `201` | `400 VALIDATION_ERROR` or `ADDRESS_LIMIT_REACHED`, `401`, `404 NOT_FOUND` |
+| `PATCH /api/v1/auth/me/addresses/:addressId` | Any authenticated role; caller's address only | `200` | `400 VALIDATION_ERROR`, `401`, `404 NOT_FOUND` |
+| `DELETE /api/v1/auth/me/addresses/:addressId` | Any authenticated role; caller's address only | `200` | `401`, `404 NOT_FOUND` |
+| `PUT /api/v1/auth/me/addresses/:addressId/default` | Any authenticated role; caller's address only | `200` | `401`, `404 NOT_FOUND` |
+| `PUT /api/v1/auth/me/addresses` | Any authenticated role; compatibility replacement endpoint | `200` | `400 VALIDATION_ERROR`, `401`, `404 NOT_FOUND` |
+| `GET /api/v1/auth/me/address-search?q=...` | Any authenticated role; 20/min in production | `200` | `400 VALIDATION_ERROR`, `401`, `429 RATE_LIMIT_EXCEEDED`, `502 GEOCODING_UNAVAILABLE`, `502 GEOCODING_INVALID_RESPONSE` |
+| `GET /api/v1/auth/me/address-reverse?latitude=...&longitude=...` | Any authenticated role; 20/min in production | `200` | `400 VALIDATION_ERROR`, `401`, `404 ADDRESS_NOT_FOUND`, `429 RATE_LIMIT_EXCEEDED`, `502 GEOCODING_UNAVAILABLE` |
 
 #### Request an OTP
 
@@ -364,9 +398,13 @@ Invalid, expired, already-consumed, or exhausted OTP challenges return `400 OTP_
 
 - `POST /api/v1/auth/refresh` rotates the refresh cookie and returns a new access token. A missing cookie returns `401 UNAUTHORIZED`; an invalid, expired, revoked, or previously rotated cookie returns `401 REFRESH_TOKEN_INVALID`.
 - `POST /api/v1/auth/logout` revokes the refresh session when a valid cookie is supplied, clears the cookie, and returns `200`. It is safe to call without a cookie.
-- `GET /api/v1/auth/me` returns the caller's safe profile and saved addresses in frontend format (`id`, `label`, `name`, `phone`, address fields); `email` is included when present on the account.
+- `GET /api/v1/auth/me` returns the caller's safe profile and saved addresses in frontend format (`id`, `label`, recipient `name`/`phone`, structured address fields, optional confirmed coordinates and accuracy, `isDefault`); `email` is included when present on the account.
 - `PATCH /api/v1/auth/me` accepts a strict body containing `name` (1–120 characters): `{"name":"Updated name"}`.
-- `PUT /api/v1/auth/me/addresses` replaces the caller's address list (maximum 10) and returns the saved addresses in the same frontend format. Address fields: optional `label`, `name`, `phone` (`+91` Indian mobile), `addressLine1`, optional `addressLine2`, `locality`, `city`, `state`, and six-digit `postalCode`; optional `id` retains an existing address ID. The account page's primary-address form saves one address and preloads it when reopened.
+- `GET /api/v1/auth/me/addresses` lists only the authenticated user's saved addresses. `POST` creates an address; `PATCH` updates one address; `DELETE` removes one; and `PUT /:addressId/default` sets the sole default. All IDs are scoped to the caller's embedded user record. Up to 10 addresses are allowed, and deleting the default promotes the next saved address.
+- Address fields include `label` (`Home`, `Work`, or `Other` in the UI), recipient `name` and `phone` (`+91` Indian mobile), `houseNumber`, `street`, `area`, `landmark`, `villageOrCity`, `district`, `state`, `postalCode` (six digits), service `locality`, optional `deliveryInstructions`, and optional map `latitude`, `longitude`, and `locationAccuracyMeters`. A house/building, street, or area is required; rural addresses do not need a street. Coordinates must be supplied as a pair. The server derives the formatted address instead of trusting a client-supplied string. When address components change without reconfirming a map pin, stored coordinates and accuracy are cleared.
+- `PUT /api/v1/auth/me/addresses` remains as a compatibility endpoint that replaces the caller's list (maximum 10). New clients should use the per-address endpoints.
+- `GET /api/v1/auth/me/address-search?q=...` and `GET /api/v1/auth/me/address-reverse?latitude=...&longitude=...` proxy Photon geocoding from the backend. Search input is 3–120 characters and coordinates must be valid WGS84 ranges. They return address suggestions; failure is explicit and must not be presented as a successful lookup. These endpoints are authenticated and rate-limited to 20 requests/minute per client IP in production (60 in development).
+- Address search defaults to the public Photon instance (`GEOCODER_BASE_URL=https://photon.komoot.io`). It is reasonable-use only, can throttle traffic, and has no availability guarantee; use a self-hosted Photon instance for sustained traffic. The map uses OpenStreetMap tiles with visible attribution; its public tile servers are also best-effort and must not be bulk downloaded.
 
 ### Public catalogue and service area
 
@@ -379,7 +417,7 @@ Invalid, expired, already-consumed, or exhausted OTP challenges return `400 OTP_
 | `GET /api/v1/products/:slug` | Public | `200` | `400 VALIDATION_ERROR`, `404 NOT_FOUND` |
 | `GET /api/v1/service-area` | Public | `200` | — |
 
-`GET /api/v1/categories` currently returns `Bangles`, `Jewellery`, `Dupattas`, and `Others`.
+Both category endpoints return the shared six-category hierarchy with stable `categoryId` and `subcategoryId` values, display names, icons, and the product types recorded in the catalog master. The six main categories are Home and Living, Women's Apparel and Accessories, Men's Apparel and Accessories, Personal Care, Food Items, and Kids Toys & Accessories. Legacy product types such as Bangles, Jewellery, and Dupattas remain within the relevant subcategories; they are not top-level categories.
 
 Product list query parameters:
 
@@ -387,12 +425,14 @@ Product list query parameters:
 |---|---|---|
 | `page` | Integer, default 1, minimum 1 | Page number |
 | `limit` | Integer, default 20, range 1–100 | Page size |
-| `category` | `Bangles`, `Jewellery`, `Dupattas`, or `Others` | Optional category filter |
+| `categoryId` | Stable category slug | Optional main-category filter |
+| `subcategoryId` | Stable subcategory slug | Optional subcategory filter |
 | `q` | String, up to 100 characters | Optional text search |
+| `sort` | `newest`, `price_asc`, or `price_desc` | Listing order; defaults to `newest` |
 
-The public catalogue returns only active, non-archived products. Product records include a stable `sellerId` for the assigned seller when a product is linked to one; price fields use integer paise. `GET /api/v1/service-area` returns `configured: false` when neither pickup nor delivery is enabled. When delivery is enabled, it returns the configured localities and six-digit postal codes. Checkout validates the locality and postal code against this configuration; it does not perform a municipal-boundary or geospatial address check.
+Public product results include category/subcategory IDs and names, `productType`, `isFoodProduct`, price in integer paise, images, stock/variants, and seller/SHG display name when available. They include only active, non-archived, approved, classified records; food products additionally require verified FSSAI compliance. Search covers product name and description. Product detail and checkout use the same publication gate. `GET /api/v1/service-area` returns `configured: false` when neither pickup nor delivery is enabled. When delivery is enabled, it returns the configured localities and six-digit postal codes. Checkout validates the locality and postal code against this configuration; it does not perform a municipal-boundary or geospatial address check.
 
-`GET /api/v1/products/bestsellers` returns up to five products by default (set `limit` from 1 to 12). Ranking uses total units in orders with confirmed payment, excluding cancelled orders. When there are fewer ranked products than requested, the response is filled with the newest active, non-archived catalogue products.
+`GET /api/v1/products/bestsellers` returns up to five products by default (set `limit` from 1 to 12). Ranking uses total units in orders with confirmed payment, excluding cancelled orders. When there are fewer ranked products than requested, the response is filled with the newest products satisfying the same approval, classification, publication, and food-compliance gates.
 
 ### Super Admin overview
 
@@ -476,7 +516,7 @@ Content-Type: application/json
 }
 ```
 
-For delivery, set `fulfilmentMethod` to `delivery` and include `address` with `name`, matching `phone`, `addressLine1`, optional `addressLine2`, `locality`, and six-digit `postalCode`. The locality and postal code must match an admin-configured serviceable locality; a provided address phone must match `customerPhone`. Delivery is not checked against an official municipal boundary.
+For delivery, set `fulfilmentMethod` to `delivery` and include `address` with recipient `name` and `phone`, `addressLine1` (or `houseNumber`, `street`, or `area`), `locality`, and six-digit `postalCode`. Structured fields, optional delivery instructions, and an optional confirmed coordinate pair are snapshotted into the order. The locality and postal code must match an admin-configured serviceable locality; a map pin does not bypass this check. The recipient phone may differ from the account's verified order contact. Delivery is not checked against an official municipal boundary.
 
 Each item requires a 24-character MongoDB ObjectId `productId`, an integer `quantity` from 1 to 99, and an optional 24-character `variantId`. A product/variant can appear only once in `items`. An optional 24-character `sellerId` is accepted only for server-side validation and is ignored for routing if the product already has a persisted seller assignment; the server resolves the authoritative seller from the database. The server calculates prices, delivery fees, and totals; client-submitted prices are not accepted.
 
@@ -489,7 +529,7 @@ Each item requires a 24-character MongoDB ObjectId `productId`, an integer `quan
 | Reuse the key with changed payload | Existing order is returned; clients should use a fresh key for a distinct checkout |
 | Pickup/delivery or payment method is disabled | `400 FULFILMENT_UNAVAILABLE` or `400 PAYMENT_METHOD_UNAVAILABLE` |
 | No checkout settings exist | `503 CHECKOUT_NOT_CONFIGURED` |
-| Delivery address is missing, outside service area, or phone differs from the verified account | `400 ADDRESS_REQUIRED`, `400 OUTSIDE_SERVICE_AREA`, or `400 PHONE_MISMATCH` |
+| Delivery address is missing or outside service area | `400 ADDRESS_REQUIRED` or `400 OUTSIDE_SERVICE_AREA` |
 | Product is inactive/archived or a requested option is unavailable | `409 PRODUCT_UNAVAILABLE` or `409 VARIANT_UNAVAILABLE` |
 | Stock is insufficient | `409 INSUFFICIENT_STOCK`; the transaction does not partially reserve stock |
 | Requested variant is missing/invalid | `400 VARIANT_REQUIRED` or `400 VARIANT_INVALID` |
@@ -529,24 +569,68 @@ Role update body:
 
 ### Seller workspace
 
-The seller workspace is a read-only MVP. All routes require an authenticated `seller` role. Products and order items are scoped to the authenticated user ID stored as `sellerId`; order responses include only that seller's items and subtotal and omit customer contact/address details and other sellers' items.
+All seller workspace routes require an authenticated `seller` role. Products and order items are scoped to the authenticated user ID stored as `sellerId`; order responses include only that seller's items and subtotal and omit customer contact/address details and other sellers' items. Sellers can edit approved store-profile fields, upload and submit unpublished product listings, and adjust stock for their own products. Food listings require a verified FSSAI workflow and all new products remain unpublished until City Admin approval.
+
+`POST /api/v1/seller-applications` accepts `shgName`, `representative`, `phone`, `city`, `address`, `categoryId`, `subcategoryId`, and `productType`. Indian mobile numbers may be sent as ten digits or E.164 with `+91`; the API normalizes them and rejects invalid numbers. Category IDs must identify a valid shared category/subcategory pair. Food applications must also include a 14-digit `fssaiRegistrationNumber`; non-food applications must not include it. New applications are stored with `pending` status. Repeated submissions for the same phone and city while an application is pending or needs information return the existing status without creating another record. An application is not seller access.
+
+Expected submission errors are `400 VALIDATION_ERROR` for invalid fields and `429 RATE_LIMIT_EXCEEDED` when the API rate limit is reached.
+
+City Admin list and review operations always filter by the authenticated account's assigned city. The list accepts `page`, `limit`, and optional `status` (`pending`, `approved`, `rejected`, or `needs_info`). Review accepts `decision` (`approved`, `rejected`, or `needs_info`) and an optional note. Approving a food application additionally requires `fssaiDecision: "verified"`; this is an explicit City Admin attestation and the submitted registration number must be present. Approving an application creates or promotes an active customer account for the submitted phone to the `seller` role; disabled or other-role accounts cannot be promoted. Review decisions and account provisioning are transactional and audited. Approved applicants sign in using OTP for the submitted phone number. Food seller product creation and product publication both recheck that the seller application is approved and FSSAI-verified.
 
 | Method and path | Minimum role | Success | Other expected outcomes |
 |---|---|---:|---|
 | `GET /api/v1/seller/dashboard` | Seller | `200` | `401`, `403` |
+| `PATCH /api/v1/seller/profile` | Seller | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 SELLER_PROFILE_NOT_FOUND` |
 | `GET /api/v1/seller/products` | Seller | `200` | `400 VALIDATION_ERROR`, `401`, `403` |
+| `POST /api/v1/seller/products/images` | Seller | `201` | `400 IMAGE_REQUIRED`, `400 INVALID_IMAGE`, `400 UNSUPPORTED_IMAGE_TYPE`, `401`, `403`, `413` |
+| `POST /api/v1/seller/products` | Seller | `201` | `400 VALIDATION_ERROR`, `401`, `403`, `409 FSSAI_VERIFICATION_REQUIRED` |
+| `POST /api/v1/seller/products/:productId/inventory-adjustments` | Seller | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `409 INVENTORY_UPDATE_FAILED` |
+| `GET /api/v1/seller/products/:productId/inventory-adjustments` | Seller; own product only | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND` |
 | `GET /api/v1/seller/orders` | Seller | `200` | `400 VALIDATION_ERROR`, `401`, `403` |
 
-`GET /api/v1/seller/dashboard` returns active/total/low-stock product counts, order counts by work status, up to five recent non-terminal orders containing seller items, and gross confirmed paid product-item totals for the current UTC month. For products with variants, low stock is based on the summed variant stock; products without variants use base stock. The gross sales amount is before commissions, refunds, and settlement adjustments; it is not a payable or payout balance. `GET /api/v1/seller/products` and `GET /api/v1/seller/orders` accept `page` (default 1) and `limit` (default 20, maximum 100). Seller product creation/updates, inventory adjustment, order acceptance/preparation actions, applications/verification status, reviews, and settlements are not implemented. No payout or commission values are estimated.
+The dashboard returns the approved seller profile, seller-owned product/order metrics, confirmed paid product-sales trend, top-selling products, and low-stock products. Sales are gross product-item sales and are not a settlement or payout amount. Reviews, settlement balances, commission calculations, and payment history are not currently tracked and are not represented as available seller funds.
+
+Seller profile updates accept `shgName`, `representative`, `registeredAddress`, and `storeDescription`. Phone, email, assigned city, serviceable localities, category selection, and FSSAI review state are read-only to sellers; location changes must be requested through the platform.
+
+Seller product listing accepts `page`, `limit`, optional `q` (literal product-name search), optional `approvalStatus`, and optional `stockStatus` (`all`, `low_stock`, `out_of_stock`, `in_stock`). It returns only the caller's non-archived products. The product image upload accepts one JPEG, PNG, or WebP image up to 5 MiB using multipart field `image`. Seller inventory adjustment accepts `quantityChange` (non-zero integer from -100,000 to 100,000), `reason` (3–300 characters), and optional `variantId`; a negative adjustment cannot reduce stock below zero. The product, inventory adjustment record, and audit log are updated transactionally, and products owned by another seller are not accessible through this endpoint. Inventory history is seller- and product-scoped.
+
+Seller product creation accepts `name`, `slug`, `description`, `categoryId`, `subcategoryId`, `productType`, `pricePaise`, optional `imageUrls`, `stock`, and `lowStockThreshold`. The server derives hierarchy display names and the food flag from the shared category master. New listings are always unpublished and pending City Admin approval. Food listings require an approved seller application with verified FSSAI details. Seller submissions whose product type is not in the mapped product master remain marked `needs_review` until the City Admin classifies them. Seller order results accept `page`, `limit`, and `status` (`all`, `new`, `processing`, `ready`, `completed`, or `cancelled`). Seller-side fulfilment transitions, settlement/payout calculations, and customer reviews are not implemented.
 
 ### City Admin dashboard and order directory
 
 | Method and path | Auth | Success | Other expected outcomes |
 |---|---|---:|---|
 | `GET /api/v1/city-admin/dashboard` | Active City Admin with an assigned city | `200` | `401`, `403 FORBIDDEN` or `CITY_SCOPE_REQUIRED`, `503 DATABASE_UNAVAILABLE` |
+| `GET /api/v1/city-admin/service-zones` | Active City Admin with an assigned city | `200` | `401`, `403 FORBIDDEN` or `CITY_SCOPE_REQUIRED` |
+| `POST /api/v1/city-admin/service-zone-change-requests` | Active City Admin with an assigned city | `201` | `400 VALIDATION_ERROR`, `401`, `403 FORBIDDEN` or `CITY_SCOPE_REQUIRED` |
+| `GET /api/v1/city-admin/sellers` | Active City Admin with an assigned city | `200` | `400 VALIDATION_ERROR`, `401`, `403 FORBIDDEN` or `CITY_SCOPE_REQUIRED` |
+| `GET /api/v1/city-admin/products` | Active City Admin with an assigned city | `200` | `400 VALIDATION_ERROR`, `401`, `403 FORBIDDEN` or `CITY_SCOPE_REQUIRED` |
+| `PATCH /api/v1/city-admin/products/:productId/review` | Active City Admin; product seller belongs to assigned city | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND`, `409 PRODUCT_CLASSIFICATION_REQUIRED` or `FSSAI_VERIFICATION_REQUIRED` |
+| `POST /api/v1/city-admin/products/:productId/flags` | Active City Admin; product seller belongs to assigned city | `201` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND` |
+| `GET /api/v1/city-admin/delivery-partners` | Active City Admin; own city only | `200` | `401`, `403 FORBIDDEN` or `CITY_SCOPE_REQUIRED` |
+| `GET /api/v1/city-admin/delivery-partner-applications` | Active City Admin; own city only | `200` | `400 VALIDATION_ERROR`, `401`, `403 FORBIDDEN` or `CITY_SCOPE_REQUIRED` |
+| `PATCH /api/v1/city-admin/delivery-partner-applications/:applicationId/review` | Active City Admin; own city only | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND`, `409` role, city, or locality conflict |
 | `GET /api/v1/city-admin/orders` | Active City Admin with an assigned city | `200` | `400 VALIDATION_ERROR`, `401`, `403 FORBIDDEN` or `CITY_SCOPE_REQUIRED`, `503 DATABASE_UNAVAILABLE` |
+| `GET /api/v1/city-admin/orders/:orderId` | Active City Admin; order address city must match assigned city | `200` | `401`, `403`, `404 NOT_FOUND` |
+| `PUT /api/v1/city-admin/orders/:orderId/delivery-partner` | Active City Admin; order and approved partner must match assigned city and locality | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404`, `409` assignment or eligibility conflict |
+| `GET /api/v1/seller-applications` | Active City Admin with an assigned city | `200` | `400 VALIDATION_ERROR`, `401`, `403 FORBIDDEN` or `CITY_SCOPE_REQUIRED` |
+| `PATCH /api/v1/seller-applications/:applicationId/review` | Active City Admin with an assigned city | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND`, `409` review or account conflict |
 
-The dashboard uses only orders whose delivery address city matches the server-side `assignedCity`. Today's counts and status breakdown use India Standard Time calendar-day boundaries; the seven-day trend includes today and the six preceding city-local days. The response includes today's order count, delivery orders awaiting assignment, orders out for delivery, orders delivered today, orders needing fulfilment action, payments awaiting review, per-fulfilment-status counts, recent orders, and unassigned delivery orders. The current schema does not record city ownership for sellers, inventory, delivery partners, partner applications, or support cases, so those dashboard metrics are explicitly unavailable and no cross-city data is substituted.
+The dashboard uses only orders whose delivery address city matches the server-side `assignedCity`. Today's counts and status breakdown use India Standard Time calendar-day boundaries; the seven-day trend includes today and the six preceding city-local days. The response includes today's order count, seller applications awaiting review for the assigned city, delivery orders awaiting assignment, orders out for delivery, orders delivered today, orders needing fulfilment action, payments awaiting review, per-fulfilment-status counts, recent orders, and unassigned delivery orders. The current schema does not record city ownership for inventory, delivery partners, partner applications, or support cases, so those dashboard metrics are explicitly unavailable and no cross-city data is substituted.
+
+Seller application reviews are city-scoped separately: the City Admin list and review endpoints only expose records whose application city matches the assigned city. Approvals provision seller-role access and write audit entries; rejection and requests for more information update the application status without granting access.
+
+`GET /api/v1/city-admin/service-zones` returns the configured locality/PIN-code records and delivery fees only when the global configured city matches the caller's assigned city. It also reports active delivery-order counts by locality. The current schema does not record partner eligibility by locality, so eligible partner counts are explicitly untracked. When the global city does not match the caller's assigned city, the response contains no zone records. City Admins cannot edit global serviceability settings.
+
+`POST /api/v1/city-admin/service-zone-change-requests` accepts `requestText` (10–1000 characters), stores a pending request against the authenticated City Admin's assigned city, and writes an audit event. It does not change serviceability settings. A corresponding Super Admin review workflow is not yet implemented.
+
+`GET /api/v1/city-admin/sellers` accepts `page`, `limit`, and `q` (seller name or phone). Results only include seller accounts whose `assignedCity` matches the authenticated City Admin's city. Product counts/categories and order counts are derived from seller-linked records. Identity/group verification is not modeled and is returned as `not_tracked`.
+
+`GET /api/v1/city-admin/products` accepts `page`, `limit`, `q`, `categoryId`, `subcategoryId`, `approvalStatus`, `sellerId`, `stockStatus` (`all`, `low_stock`, `out_of_stock`), and `listingStatus` (`all`, `active`, `inactive`, `archived`). Results are restricted to products whose seller is assigned to the caller's city. Available stock reflects current product/variant stock after reservations. `reservedStock` is derived from unexpired, unconfirmed orders in `placed` or `accepted`; other allocation states are not tracked separately. The response includes category hierarchy, classification, FSSAI status, and approval state. Product review accepts `decision` (`approved` or `rejected`), an optional note (required to reject), and optionally all three of `categoryId`, `subcategoryId`, and `productType` to resolve or correct classification. Approval requires a valid classification; food classification/approval requires an approved seller application with verified FSSAI details. Review writes an audit event. `POST /api/v1/city-admin/products/:productId/flags` accepts a 10–1000 character `reason`, records a city-scoped open flag, and writes an audit event without changing the product.
+
+`POST /api/v1/delivery-partner-applications` accepts a name, Indian mobile number, city, one or more requested localities, and an optional note. City Admin review is restricted to their assigned city. Approval is allowed only when the city matches configured service settings, requested localities exist in that city's configured serviceable locality list, and the phone is not a disabled or conflicting-role account. Approval provisions an active delivery partner with `assignedCity` and `serviceableLocalities`; rejection requires a reason. These assignments are audited. `GET /api/v1/city-admin/delivery-partners` only lists partner accounts assigned to that city. Availability and identity verification are not tracked.
+
+City Admin order assignment uses the existing allowed status transitions: new assignment only for an unassigned eligible delivery order, and reassignment only after `delivery_failed`. The partner must be active, assigned to the same city, and have the order's locality in their approved `serviceableLocalities`. Reassignment requires a reason, which is stored in assignment history and audit metadata. Out-of-city orders are not returned by City Admin order detail or assignment routes.
 
 The order directory supports `page` (default 1), `limit` (default 20, maximum 100), `q` (order reference or customer-name search), `fulfilmentStatus`, `paymentStatus`, and `unassignedOnly=true`. Every result is constrained to the authenticated user's assigned city, regardless of query parameters. Responses omit phone numbers, street addresses, delivery instructions, internal notes, and review notes. These endpoints are read-only; assignment mutations and finance/support operations are not yet available to City Admins.
 
@@ -572,7 +656,7 @@ Admin and enabled staff can read the admin catalogue. Product creation, update, 
 | `PATCH /api/v1/admin/products/:id` | Admin | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND`, `409 CONFLICT` |
 | `DELETE /api/v1/admin/products/:id` | Admin | `200` | `400 VALIDATION_ERROR`, `401`, `403`, `404 NOT_FOUND` |
 
-Admin product listing accepts `page`, `limit`, `category`, `q`, and optional `active`/`archived` values (`true` or `false`). Product creation accepts:
+Admin product listing accepts `page`, `limit`, `categoryId`, `subcategoryId`, `q`, and optional `active`/`archived` values (`true` or `false`). Product creation accepts:
 
 Upload each product image before creating or updating a product:
 
@@ -589,7 +673,9 @@ Send one file in the `image` field. JPEG, PNG, and WebP images up to 5 MB are ac
   "name": "Handmade bangles",
   "slug": "handmade-bangles",
   "description": "Product description",
-  "category": "Bangles",
+  "categoryId": "womens-apparel-accessories",
+  "subcategoryId": "jewellery-accessories",
+  "productType": "Bangles",
   "pricePaise": 15000,
   "imageUrls": ["/uploads/product-images/123e4567-e89b-42d3-a456-426614174000.jpg"],
   "stock": 5,
@@ -601,7 +687,8 @@ Send one file in the `image` field. JPEG, PNG, and WebP images up to 5 MB are ac
 
 Important validation rules:
 
-- `category` must be one of the four configured categories.
+- Category and subcategory IDs must be a valid pair from the shared category master. Display names are derived by the API.
+- Food products are detected from the category master. An active food product requires an approved seller application with verified FSSAI details.
 - `pricePaise` must be an integer from 1 to 100,000,000.
 - Product image entries must be HTTPS URLs or paths returned by the image upload endpoint; maximum 10.
 - Slugs must be lowercase letters/numbers separated by single hyphens.

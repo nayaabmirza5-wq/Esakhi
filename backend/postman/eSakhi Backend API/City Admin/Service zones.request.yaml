@@ -1,0 +1,4 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/city-admin/service-zones"
+method: GET
+order: 2000

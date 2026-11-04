@@ -1,0 +1,4 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/city-admin/delivery-partners?page=1&limit=20"
+method: GET
+order: 9000

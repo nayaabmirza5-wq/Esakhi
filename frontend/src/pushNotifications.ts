@@ -28,8 +28,14 @@ function configuredFirebaseApp() {
   return getApps().length ? getApp() : initializeApp(firebaseConfig);
 }
 
+export interface ForegroundPushMessage {
+  title: string;
+  body: string;
+}
+
 export async function enableOrderPushNotifications(
   registerToken: (token: string) => Promise<unknown>,
+  onForegroundMessage?: (message: ForegroundPushMessage) => void,
 ): Promise<void> {
   if (!(await isSupported())) throw new Error('This browser does not support push notifications.');
   const permission = await Notification.requestPermission();
@@ -51,9 +57,26 @@ export async function enableOrderPushNotifications(
       body: payload.notification?.body ?? 'Your order has a new update.',
       data: payload.data,
     };
+    onForegroundMessage?.({ title, body: options.body ?? '' });
     const registration = await navigator.serviceWorker.ready;
     await registration.showNotification(title, options);
   });
+}
+
+/**
+ * Best-effort registration used right after login. Never throws: unsupported browsers,
+ * denied permission or a missing config simply leave notifications off.
+ */
+export async function autoRegisterPushNotifications(
+  registerToken: (token: string) => Promise<unknown>,
+  onForegroundMessage?: (message: ForegroundPushMessage) => void,
+): Promise<void> {
+  try {
+    if (!pushNotificationsConfigured || typeof Notification === 'undefined' || Notification.permission === 'denied') return;
+    await enableOrderPushNotifications(registerToken, onForegroundMessage);
+  } catch (error) {
+    console.warn('Push notification setup skipped:', error);
+  }
 }
 
 export async function disableOrderPushNotifications(

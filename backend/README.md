@@ -35,8 +35,27 @@ From the repository root, run `npm run dev` to start both the backend and fronte
 9. To provision a City Admin for the configured launch city, run `npm run city-admin:create -- +91XXXXXXXXXX` from a trusted terminal. This assigns the `city_admin` role and `Settings.city`, writes a system audit event, and does not grant store-wide admin privileges. If an active account already has an administrative or operational role, the command refuses to change it unless the operator explicitly adds `--replace-existing-role`; that reassigns the existing account (without deleting its user record or other profile data) and audits the previous role. Disabled accounts must go through the approved recovery process first. The City Admin portal currently provides city-scoped, read-only order and dashboard APIs.
 10. After seller approval, provision the seller account from a trusted terminal with `npm run seller:create -- +91XXXXXXXXXX`. This assigns only the `seller` role and writes a system audit event. It can create an account for a new number or promote an active customer account; it refuses disabled accounts and accounts with another operational/admin role. Product assignment and seller onboarding workflows remain separate.
 11. Configure launch settings using the protected `PUT /api/v1/admin/settings` endpoint. Enable pickup/delivery and UPI/cash only after the business has confirmed the relevant instructions, serviceable localities, PIN codes, and fees. Delivery validation matches the configured locality and PIN code; it does not verify an official municipal boundary. Select a stock reservation policy: `stockReservationHours: null` keeps stock reserved until staff/admin action; an integer from 1 to 720 enables automatic expiry of unconfirmed reservations.
+12. Address search and reverse geocoding use Photon (`GEOCODER_BASE_URL`, default `https://photon.komoot.io`) from the backend. No geocoder key is required. The public Photon demo is reasonable-use only, may throttle traffic, and has no availability guarantee; use a self-hosted Photon deployment for sustained production usage. The frontend displays OpenStreetMap attribution and uses its public tile service by default; that tile service is also best-effort and prohibits bulk tile downloads. No schema migration is required: address coordinates and the additional structured fields are optional, and existing saved addresses/orders remain readable. Browser location access requires HTTPS in production (localhost works in development).
 
-The initial Super Admin workspace at `/super-admin` and `/api/v1/super-admin/overview` is read-only and reports existing database counts. The City Admin workspace at `/city-admin` is limited to the configured assigned city and provides read-only order metrics and order lists. City/zone management, seller workflows, finance, refunds, payouts, support, assignment mutations, and audit-log browsing remain future phases.
+The Super Admin workspace at `/super-admin` and `/api/v1/super-admin/overview` reports database-backed platform counts. The City Admin workspace at `/city-admin` is scoped to the configured assigned city and supports seller application/FSSAI review, product classification and publication review, inventory visibility, and order operations.
+
+## Marketplace category migration
+
+The shared catalog master defines six stable main-category IDs and their subcategories. `src/modules/catalog/productMaster.ts` accounts for the 157 product-type rows in the supplied workbook; these are taxonomy entries, not purchasable product or inventory records. Eight ambiguous product types are marked for manual review.
+
+Before any database changes, back up MongoDB and inspect the migration's read-only report:
+
+```powershell
+npm run catalog:migrate-categories
+```
+
+The script is dry-run by default and reports legacy products and seller applications that need review. After reviewing the output in a controlled environment, apply the targeted category/classification/FSSAI updates with:
+
+```powershell
+npm run catalog:migrate-categories -- --apply
+```
+
+The migration does not create or delete products and does not change stock, seller references, order items, or product IDs. Active food products without an approved seller application and verified 14-digit FSSAI registration are made inactive until City Admin review. Do not apply it to production without a verified backup and an operational review of the dry-run results.
 
 ## MSG91 production setup
 

@@ -15,7 +15,8 @@
     "admin:create": "tsx src/scripts/createAdmin.ts",
     "super-admin:create": "tsx src/scripts/createSuperAdmin.ts",
     "city-admin:create": "tsx src/scripts/createCityAdmin.ts",
-    "seller:create": "tsx src/scripts/createSeller.ts"
+    "seller:create": "tsx src/scripts/createSeller.ts",
+    "catalog:migrate-categories": "tsx src/scripts/migrateProductCategories.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

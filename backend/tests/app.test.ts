@@ -1,8 +1,16 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
-import { requestOtpSchema, savedAddressSchema } from '../src/modules/auth/auth.schemas.js';
+import {
+  addressIdParamsSchema,
+  addressReverseQuerySchema,
+  addressSearchQuerySchema,
+  requestOtpSchema,
+  savedAddressSchema,
+} from '../src/modules/auth/auth.schemas.js';
 import { bestSellerQuerySchema, productCreateSchema } from '../src/modules/catalog/product.schemas.js';
+import { categoryMaster, getCategoryHierarchy } from '../src/modules/catalog/categoryMaster.js';
+import { productMaster } from '../src/modules/catalog/productMaster.js';
 import {
   createOrderSchema,
   bulkDeliveryPartnerSchema,
@@ -18,6 +26,9 @@ import {
 } from '../src/modules/orders/order.transitions.js';
 import { pushTokenSchema } from '../src/modules/notifications/notification.schemas.js';
 import { settingsUpdateSchema } from '../src/modules/settings/settings.schemas.js';
+import { createSellerApplicationSchema, sellerApplicationReviewSchema } from '../src/modules/seller/sellerApplication.schemas.js';
+import { sellerInventoryHistoryQuerySchema, sellerProfileUpdateSchema } from '../src/modules/seller/seller.schemas.js';
+import { createDeliveryPartnerApplicationSchema, reviewDeliveryPartnerApplicationSchema } from '../src/modules/cityAdmin/deliveryPartnerApplication.schemas.js';
 
 let app: Express;
 
@@ -25,6 +36,13 @@ const protectedRoutes = [
   ['GET', '/api/v1/auth/me'],
   ['PATCH', '/api/v1/auth/me'],
   ['PUT', '/api/v1/auth/me/addresses'],
+  ['GET', '/api/v1/auth/me/addresses'],
+  ['POST', '/api/v1/auth/me/addresses'],
+  ['PATCH', '/api/v1/auth/me/addresses/64a1b2c3d4e5f6a7b8c9d0e1'],
+  ['DELETE', '/api/v1/auth/me/addresses/64a1b2c3d4e5f6a7b8c9d0e1'],
+  ['PUT', '/api/v1/auth/me/addresses/64a1b2c3d4e5f6a7b8c9d0e1/default'],
+  ['GET', '/api/v1/auth/me/address-search?q=Damoh'],
+  ['GET', '/api/v1/auth/me/address-reverse?latitude=23.8&longitude=79.4'],
   ['POST', '/api/v1/orders'],
   ['GET', '/api/v1/orders'],
   ['GET', '/api/v1/orders/64a1b2c3d4e5f6a7b8c9d0e1'],
@@ -53,9 +71,25 @@ const protectedRoutes = [
   ['GET', '/api/v1/super-admin/overview'],
   ['GET', '/api/v1/super-admin/orders'],
   ['GET', '/api/v1/city-admin/dashboard'],
+  ['GET', '/api/v1/city-admin/service-zones'],
+  ['POST', '/api/v1/city-admin/service-zone-change-requests'],
+  ['GET', '/api/v1/city-admin/sellers'],
+  ['GET', '/api/v1/city-admin/products'],
+  ['POST', '/api/v1/city-admin/products/64a1b2c3d4e5f6a7b8c9d0e1/flags'],
+  ['GET', '/api/v1/city-admin/delivery-partners'],
+  ['GET', '/api/v1/city-admin/delivery-partner-applications'],
+  ['PATCH', '/api/v1/city-admin/delivery-partner-applications/64a1b2c3d4e5f6a7b8c9d0e1/review'],
   ['GET', '/api/v1/city-admin/orders'],
+  ['GET', '/api/v1/city-admin/orders/64a1b2c3d4e5f6a7b8c9d0e1'],
+  ['PUT', '/api/v1/city-admin/orders/64a1b2c3d4e5f6a7b8c9d0e1/delivery-partner'],
+  ['GET', '/api/v1/seller-applications'],
+  ['PATCH', '/api/v1/seller-applications/64a1b2c3d4e5f6a7b8c9d0e1/review'],
   ['GET', '/api/v1/seller/dashboard'],
+  ['PATCH', '/api/v1/seller/profile'],
   ['GET', '/api/v1/seller/products'],
+  ['POST', '/api/v1/seller/products/images'],
+  ['GET', '/api/v1/seller/products/64a1b2c3d4e5f6a7b8c9d0e1/inventory-adjustments'],
+  ['POST', '/api/v1/seller/products/64a1b2c3d4e5f6a7b8c9d0e1/inventory-adjustments'],
   ['GET', '/api/v1/seller/orders'],
   ['GET', '/api/v1/admin/customers'],
   ['GET', '/api/v1/admin/customers/64a1b2c3d4e5f6a7b8c9d0e1'],
@@ -102,6 +136,72 @@ describe('backend API foundation', () => {
     expect(() => requestOtpSchema.parse({ phone: '+911234567890' })).toThrow();
   });
 
+  it('validates seller applications and normalizes Indian mobile numbers', () => {
+    const application = {
+      shgName: 'Sakhi Crafts',
+      representative: 'Nayaab Mirza',
+      phone: '9877656460',
+      city: 'Damoh',
+      address: 'Sagar locality, Damoh',
+      categoryId: 'womens-apparel-accessories',
+      subcategoryId: 'jewellery-accessories',
+      productType: 'Bangles',
+    };
+    expect(createSellerApplicationSchema.parse(application).phone).toBe('+919877656460');
+    expect(createSellerApplicationSchema.safeParse({ ...application, phone: '987765646' }).success).toBe(false);
+    expect(createSellerApplicationSchema.safeParse({
+      ...application,
+      categoryId: 'food-items',
+      subcategoryId: 'papad-snacks',
+      productType: 'Papad',
+    }).success).toBe(false);
+    expect(createSellerApplicationSchema.safeParse({
+      ...application,
+      categoryId: 'food-items',
+      subcategoryId: 'papad-snacks',
+      productType: 'Papad',
+      fssaiRegistrationNumber: '12345678901234',
+    }).success).toBe(true);
+    expect(sellerApplicationReviewSchema.safeParse({ decision: 'approved', note: 'Verified' }).success).toBe(true);
+    expect(sellerApplicationReviewSchema.safeParse({ decision: 'rejected' }).success).toBe(false);
+    expect(sellerApplicationReviewSchema.safeParse({ decision: 'rejected', note: 'Documents could not be verified.' }).success).toBe(true);
+    expect(sellerApplicationReviewSchema.safeParse({ decision: 'granted_seller' }).success).toBe(false);
+  });
+
+  it('validates seller profile updates and inventory history pagination', () => {
+    expect(sellerProfileUpdateSchema.parse({
+      shgName: '  Sakhi Crafts  ',
+      representative: '  Asha Devi  ',
+      registeredAddress: '  Civil Ward, Damoh  ',
+      storeDescription: '  Handmade by our group  ',
+    })).toEqual({
+      shgName: 'Sakhi Crafts',
+      representative: 'Asha Devi',
+      registeredAddress: 'Civil Ward, Damoh',
+      storeDescription: 'Handmade by our group',
+    });
+    expect(sellerProfileUpdateSchema.safeParse({
+      shgName: 'A',
+      representative: 'Asha Devi',
+      registeredAddress: 'Civil Ward, Damoh',
+    }).success).toBe(false);
+    expect(sellerInventoryHistoryQuerySchema.parse({ page: '2', limit: '25' })).toEqual({ page: 2, limit: 25 });
+    expect(sellerInventoryHistoryQuerySchema.safeParse({ page: '0' }).success).toBe(false);
+  });
+
+  it('validates delivery partner applications and requires a reason to reject', () => {
+    const application = {
+      name: 'Rohit Patel',
+      phone: '9876543210',
+      city: 'Damoh',
+      requestedLocalities: ['Civil Ward'],
+    };
+    expect(createDeliveryPartnerApplicationSchema.parse(application).phone).toBe('+919876543210');
+    expect(createDeliveryPartnerApplicationSchema.safeParse({ ...application, requestedLocalities: [] }).success).toBe(false);
+    expect(reviewDeliveryPartnerApplicationSchema.safeParse({ decision: 'rejected' }).success).toBe(false);
+    expect(reviewDeliveryPartnerApplicationSchema.safeParse({ decision: 'rejected', note: 'Documents could not be verified.' }).success).toBe(true);
+  });
+
   it('accepts a complete saved address and rejects incomplete address fields', () => {
     const address = {
       label: 'Primary',
@@ -119,6 +219,30 @@ describe('backend API foundation', () => {
     expect(savedAddressSchema.safeParse({ ...address, phone: '9876543210' }).success).toBe(false);
   });
 
+  it('validates address lookup inputs and accepts rural addresses with confirmed map pins', () => {
+    const ruralAddress = {
+      label: 'Home',
+      name: 'Customer',
+      phone: '+919876543210',
+      addressLine1: '',
+      locality: 'Damoh',
+      city: 'Village',
+      state: 'Madhya Pradesh',
+      postalCode: '470661',
+      area: 'Near the community well',
+      latitude: 23.8,
+      longitude: 79.4,
+      locationAccuracyMeters: 35,
+    };
+    expect(savedAddressSchema.safeParse(ruralAddress).success).toBe(true);
+    expect(savedAddressSchema.safeParse({ ...ruralAddress, latitude: 91 }).success).toBe(false);
+    expect(addressSearchQuerySchema.parse({ q: 'Damoh, India' })).toEqual({ q: 'Damoh, India' });
+    expect(addressSearchQuerySchema.safeParse({ q: 'ab' }).success).toBe(false);
+    expect(addressReverseQuerySchema.parse({ latitude: '23.8', longitude: '79.4' })).toEqual({ latitude: 23.8, longitude: 79.4 });
+    expect(addressReverseQuerySchema.safeParse({ latitude: '91', longitude: '79.4' }).success).toBe(false);
+    expect(addressIdParamsSchema.safeParse({ addressId: 'not-an-id' }).success).toBe(false);
+  });
+
   it('requires an address for delivery checkout', () => {
     const parsed = createOrderSchema.safeParse({
       idempotencyKey: 'request-key-0001',
@@ -130,6 +254,30 @@ describe('backend API foundation', () => {
     });
 
     expect(parsed.success).toBe(false);
+  });
+
+  it('accepts rural order addresses and recipient contact details independent of the verified account', () => {
+    const parsed = createOrderSchema.safeParse({
+      idempotencyKey: 'request-key-0002',
+      customerName: 'Account holder',
+      customerPhone: '+919876543210',
+      fulfilmentMethod: 'delivery',
+      address: {
+        name: 'Recipient',
+        phone: '+919123456789',
+        addressLine1: '',
+        locality: 'Damoh',
+        postalCode: '470661',
+        area: 'Village center',
+        villageOrCity: 'Village',
+        state: 'Madhya Pradesh',
+        latitude: 23.8,
+        longitude: 79.4,
+      },
+      items: [{ productId: '64a1b2c3d4e5f6a7b8c9d0e1', quantity: 1 }],
+      paymentMethod: 'upi',
+    });
+    expect(parsed.success).toBe(true);
   });
 
   it('parses customer-order pagination without using a refined schema pick', () => {
@@ -171,7 +319,9 @@ describe('backend API foundation', () => {
       name: 'Handmade bangles',
       slug: 'handmade-bangles',
       description: 'Test product',
-      category: 'Bangles',
+      categoryId: 'womens-apparel-accessories',
+      subcategoryId: 'jewellery-accessories',
+      productType: 'Bangles',
       pricePaise: 15000,
       stock: 1,
       variants: [{ attributes: { size: 'Small' }, stock: 2 }],
@@ -235,7 +385,9 @@ describe('backend API foundation', () => {
       name: 'Handmade bangles',
       slug: 'handmade-bangles',
       description: 'Test product',
-      category: 'Bangles',
+      categoryId: 'womens-apparel-accessories',
+      subcategoryId: 'jewellery-accessories',
+      productType: 'Bangles',
       pricePaise: 15000,
       imageUrls: ['/uploads/product-images/123e4567-e89b-42d3-a456-426614174000.jpg'],
     });
@@ -276,14 +428,41 @@ describe('backend API foundation', () => {
     const response = await request(app).get('/api/v1/categories');
 
     expect(response.status).toBe(200);
-    expect(response.body.data).toEqual(['Bangles', 'Jewellery', 'Dupattas', 'Others']);
+    expect(response.body.data.map((category: { categoryName: string }) => category.categoryName)).toEqual([
+      'Home and Living',
+      "Women's Apparel and Accessories",
+      "Men's Apparel and Accessories",
+      'Personal Care',
+      'Food Items',
+      'Kids Toys & Accessories',
+    ]);
+    expect(response.body.data.some((category: { categoryName: string }) => ['Bangles', 'Jewellery', 'Dupattas', 'Others'].includes(category.categoryName))).toBe(false);
   });
 
   it('serves the product category alias', async () => {
     const response = await request(app).get('/api/v1/products/categories');
 
     expect(response.status).toBe(200);
-    expect(response.body.data).toEqual(['Bangles', 'Jewellery', 'Dupattas', 'Others']);
+    expect(response.body.data.map((category: { categoryId: string }) => category.categoryId)).toEqual(categoryMaster.map((category) => category.categoryId));
+  });
+
+  it('accounts for every workbook product row and maps legacy types under marketplace categories', () => {
+    expect(productMaster).toHaveLength(157);
+    expect(new Set(productMaster.map((product) => product.sourceRow)).size).toBe(157);
+    expect(Math.min(...productMaster.map((product) => product.sourceRow))).toBe(2);
+    expect(Math.max(...productMaster.map((product) => product.sourceRow))).toBe(158);
+    expect(productMaster.filter((product) => product.classificationStatus === 'needs_review')).toHaveLength(8);
+
+    const bangles = productMaster.filter((product) => product.sourceCategory === 'Bangles');
+    expect(bangles.length).toBeGreaterThan(0);
+    expect(bangles.every((product) => product.categoryId === 'womens-apparel-accessories' && product.subcategoryId === 'jewellery-accessories')).toBe(true);
+    const dupattas = productMaster.filter((product) => product.sourceCategory === 'Dupattas');
+    expect(dupattas.length).toBeGreaterThan(0);
+    expect(dupattas.every((product) => product.categoryId === 'womens-apparel-accessories' && product.subcategoryId === 'dupattas-scarves')).toBe(true);
+    const foodProducts = productMaster.filter((product) => product.isFoodProduct);
+    expect(foodProducts.length).toBeGreaterThan(0);
+    expect(foodProducts.every((product) => product.categoryId === 'food-items')).toBe(true);
+    expect(getCategoryHierarchy()).toHaveLength(6);
   });
 
   it.each(protectedRoutes)('requires authentication for %s %s', async (method, path) => {
@@ -326,10 +505,37 @@ describe('backend API foundation', () => {
 
   it('requires City Admin authentication for city-scoped endpoints', async () => {
     const dashboard = await request(app).get('/api/v1/city-admin/dashboard');
+    const zones = await request(app).get('/api/v1/city-admin/service-zones');
+    const changeRequest = await request(app).post('/api/v1/city-admin/service-zone-change-requests').send({ requestText: 'Add PIN code coverage.' });
+    const sellers = await request(app).get('/api/v1/city-admin/sellers');
+    const products = await request(app).get('/api/v1/city-admin/products');
+    const productFlag = await request(app).post('/api/v1/city-admin/products/64a1b2c3d4e5f6a7b8c9d0e1/flags').send({ reason: 'Misleading listing details.' });
+    const partners = await request(app).get('/api/v1/city-admin/delivery-partners');
+    const partnerApplications = await request(app).get('/api/v1/city-admin/delivery-partner-applications');
+    const orderDetail = await request(app).get('/api/v1/city-admin/orders/64a1b2c3d4e5f6a7b8c9d0e1');
+    const assignment = await request(app).put('/api/v1/city-admin/orders/64a1b2c3d4e5f6a7b8c9d0e1/delivery-partner').send({ partnerId: '64a1b2c3d4e5f6a7b8c9d0e1' });
     const orders = await request(app).get('/api/v1/city-admin/orders');
 
     expect(dashboard.status).toBe(401);
     expect(dashboard.body.error.code).toBe('UNAUTHORIZED');
+    expect(zones.status).toBe(401);
+    expect(zones.body.error.code).toBe('UNAUTHORIZED');
+    expect(changeRequest.status).toBe(401);
+    expect(changeRequest.body.error.code).toBe('UNAUTHORIZED');
+    expect(sellers.status).toBe(401);
+    expect(sellers.body.error.code).toBe('UNAUTHORIZED');
+    expect(products.status).toBe(401);
+    expect(products.body.error.code).toBe('UNAUTHORIZED');
+    expect(productFlag.status).toBe(401);
+    expect(productFlag.body.error.code).toBe('UNAUTHORIZED');
+    expect(partners.status).toBe(401);
+    expect(partners.body.error.code).toBe('UNAUTHORIZED');
+    expect(partnerApplications.status).toBe(401);
+    expect(partnerApplications.body.error.code).toBe('UNAUTHORIZED');
+    expect(orderDetail.status).toBe(401);
+    expect(orderDetail.body.error.code).toBe('UNAUTHORIZED');
+    expect(assignment.status).toBe(401);
+    expect(assignment.body.error.code).toBe('UNAUTHORIZED');
     expect(orders.status).toBe(401);
     expect(orders.body.error.code).toBe('UNAUTHORIZED');
   });
