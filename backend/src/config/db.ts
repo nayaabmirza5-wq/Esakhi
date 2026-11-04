@@ -11,13 +11,20 @@ export async function connectDatabase(): Promise<void> {
     return;
   }
   if (!connectionPromise) {
-    connectionPromise = mongoose.connect(env.MONGODB_URI, {
+    let mongoUri = process.env.MONGODB_URI || env.MONGODB_URI || '';
+    if (mongoUri.includes('/esakhi')) {
+      mongoUri = mongoUri.replace('/esakhi', '/Esakhi');
+    }
+
+    connectionPromise = mongoose.connect(mongoUri, {
+      dbName: 'Esakhi',
       serverSelectionTimeoutMS: 10_000,
     }).then(async () => {
       await Promise.all([NotificationEvent.init(), PushToken.init()]).catch((err) => {
         logger.warn('Index init warning', { error: String(err) });
       });
-      logger.info('MongoDB connected');
+      console.log('Connected to MongoDB database: Esakhi');
+      logger.info('Connected to MongoDB database: Esakhi');
     }).catch((err) => {
       connectionPromise = null;
       throw err;
