@@ -1,15 +1,10 @@
 {
   "version": 2,
   "outputDirectory": "frontend/dist",
-  "functions": {
-    "backend/src/app.ts": {
-      "includeFiles": "backend/**"
-    }
-  },
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/backend/src/app.ts"
+      "destination": "/api"
     },
     {
       "source": "/(.*)",
