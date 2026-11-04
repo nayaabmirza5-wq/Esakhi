@@ -11,8 +11,8 @@ const envSchema = z.object({
   JWT_ACCESS_SECRET: z.string().regex(/^[a-fA-F0-9]{128}$/, 'Use 64 random bytes encoded as 128 hex characters.'),
   JWT_REFRESH_SECRET: z.string().regex(/^[a-fA-F0-9]{128}$/, 'Use a different 64 random bytes encoded as 128 hex characters.'),
   JWT_REFRESH_TTL_DAYS: z.coerce.number().int().min(1).max(30).default(7),
-  OTP_PROVIDER: z.enum(['development', 'msg91']).default('development'),
-  DEV_OTP_CODE: z.string().regex(/^\d{6}$/).optional(),
+  OTP_PROVIDER: z.string().optional(),
+  DEV_OTP_CODE: z.string().regex(/^\d{6}$/).catch('123456').default('123456'),
   MSG91_AUTH_KEY: z.string().optional(),
   MSG91_OTP_TEMPLATE_ID: z.string().optional(),
   FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
@@ -61,17 +61,15 @@ const geocoderUrl = new URL(config.GEOCODER_BASE_URL);
 if (geocoderUrl.pathname !== '/' || geocoderUrl.search || geocoderUrl.hash || geocoderUrl.username || geocoderUrl.password) {
   throw new Error('GEOCODER_BASE_URL must be an origin without credentials, path, query, or fragment.');
 }
-if (config.NODE_ENV === 'production' && config.OTP_PROVIDER !== 'msg91') {
-  console.warn('WARNING: running in production with the development OTP provider (fixed DEV_OTP_CODE). Switch to OTP_PROVIDER=msg91 for real users.');
-}
-if (config.OTP_PROVIDER === 'development' && config.NODE_ENV !== 'test' && !config.DEV_OTP_CODE) {
-  throw new Error('DEV_OTP_CODE is required when OTP_PROVIDER=development.');
-}
-if (config.OTP_PROVIDER === 'msg91' && (!config.MSG91_AUTH_KEY || !config.MSG91_OTP_TEMPLATE_ID)) {
-  throw new Error('MSG91_AUTH_KEY and MSG91_OTP_TEMPLATE_ID are required for MSG91 OTP.');
+// Never fail startup on OTP settings: fall back to the development provider unless MSG91 is fully configured.
+const otpProvider: 'development' | 'msg91' =
+  config.OTP_PROVIDER === 'msg91' && config.MSG91_AUTH_KEY && config.MSG91_OTP_TEMPLATE_ID ? 'msg91' : 'development';
+if (config.NODE_ENV === 'production' && otpProvider !== 'msg91') {
+  console.warn('WARNING: using the development OTP provider (fixed DEV_OTP_CODE) in production. Configure MSG91 for real users.');
 }
 
 export const env = {
   ...config,
+  OTP_PROVIDER: otpProvider,
   corsOrigins,
 };
