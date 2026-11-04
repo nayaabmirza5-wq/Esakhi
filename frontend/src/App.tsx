@@ -896,9 +896,16 @@ function SignInPage(): ReactNode {
       const formattedNumber = formatE164(phone);
       const session = await api.verifyOtp(formattedNumber, code);
       const token = session.token || session.accessToken;
+      if (token) {
+        localStorage.setItem('token', token);
+      }
       setSession(session.user, token);
-      await reloadUser();
-      navigate(signInState?.from || workspacePathForRole(session.user.role), { replace: true, state: signInState?.checkoutState });
+      try {
+        await reloadUser();
+      } catch (err) {
+        console.warn('reloadUser failed, continuing navigation:', err);
+      }
+      navigate(signInState?.from || '/', { replace: true, state: signInState?.checkoutState });
     } catch (cause) {
       setError(displayError(cause));
     } finally {

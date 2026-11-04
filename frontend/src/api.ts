@@ -38,7 +38,7 @@ import type {
 } from './types';
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
-let accessToken: string | null = null;
+let accessToken: string | null = (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
 
 export function resolveProductImageUrl(imageUrl: string): string {
   return new URL(imageUrl, baseUrl || window.location.origin).toString();
@@ -60,6 +60,10 @@ export class ApiError extends Error {
 
 export function setAccessToken(token: string | null): void {
   accessToken = token;
+  if (typeof window !== 'undefined') {
+    if (token) localStorage.setItem('token', token);
+    else localStorage.removeItem('token');
+  }
 }
 
 type Envelope<T> = { success: boolean; data?: T; error?: { code?: string; message?: string; fields?: Record<string, string[]> }; pagination?: PageResult<unknown>['pagination'] };
@@ -93,13 +97,14 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
       payload?.error?.fields,
     );
   }
-  if (!payload || !('data' in payload)) {
+  if (!payload) {
     throw new ApiError(response.status, 'INVALID_RESPONSE', 'The server returned an unexpected response.');
   }
-  if (Array.isArray(payload.data) && payload.pagination) {
-    return { data: payload.data, pagination: payload.pagination } as T;
+  const result = ('data' in payload && payload.data !== undefined) ? payload.data : payload;
+  if (Array.isArray(result) && payload.pagination) {
+    return { data: result, pagination: payload.pagination } as T;
   }
-  return payload.data as T;
+  return result as T;
 }
 
 export const api = {

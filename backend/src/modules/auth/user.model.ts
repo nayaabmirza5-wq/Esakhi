@@ -45,6 +45,7 @@ const bankAccountSchema = new Schema(
 const userSchema = new Schema(
   {
     phoneE164: { type: String, required: true, unique: true },
+    phone: { type: String },
     name: { type: String, trim: true, maxlength: 120 },
     email: { type: String, trim: true, lowercase: true, maxlength: 254 },
     role: { type: String, enum: [...userRoles], default: 'customer', required: true },
@@ -66,8 +67,22 @@ const userSchema = new Schema(
     savedAddresses: { type: [savedAddressSchema], default: [] },
     bankAccount: { type: bankAccountSchema },
   },
-  { timestamps: true },
+  { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
+
+userSchema.pre('validate', function () {
+  const self = this as unknown as { phoneE164?: string; phone?: string; name?: string };
+  if (!self.phoneE164 && self.phone) {
+    self.phoneE164 = self.phone.startsWith('+') ? self.phone : `+91${self.phone.replace(/\D/g, '').slice(-10)}`;
+  }
+  if (!self.phone && self.phoneE164) {
+    self.phone = self.phoneE164;
+  }
+  if (!self.name) {
+    const raw = self.phone || self.phoneE164 || '';
+    self.name = `User ${raw.slice(-4) || '0000'}`;
+  }
+});
 
 export const User = model('User', userSchema);
 export type SavedAddressRecord = InferSchemaType<typeof savedAddressSchema>;
