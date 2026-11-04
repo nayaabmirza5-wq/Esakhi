@@ -1,5 +1,5 @@
 import express from 'express';
-import helmet from 'helmet';
+import * as helmetModule from 'helmet';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { rateLimit } from 'express-rate-limit';
@@ -25,6 +25,10 @@ import { requireRole } from './middleware/requireRole.js';
 import { sellerRoutes } from './modules/seller/seller.routes.js';
 import { sellerApplicationRoutes } from './modules/seller/sellerApplication.routes.js';
 import { deliveryPartnerApplicationRoutes } from './modules/cityAdmin/deliveryPartnerApplication.routes.js';
+
+// helmet's typings differ between installs under NodeNext (default export may resolve to the module namespace).
+type HelmetFactory = () => express.RequestHandler;
+const helmet = ((helmetModule as unknown as { default?: HelmetFactory }).default ?? helmetModule) as unknown as HelmetFactory;
 
 export const app = express();
 app.set('trust proxy', env.TRUST_PROXY_HOPS);
