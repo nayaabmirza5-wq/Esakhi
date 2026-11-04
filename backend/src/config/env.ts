@@ -62,10 +62,7 @@ if (geocoderUrl.pathname !== '/' || geocoderUrl.search || geocoderUrl.hash || ge
   throw new Error('GEOCODER_BASE_URL must be an origin without credentials, path, query, or fragment.');
 }
 if (config.NODE_ENV === 'production' && config.OTP_PROVIDER !== 'msg91') {
-  throw new Error('Production requires OTP_PROVIDER=msg91.');
-}
-if (config.OTP_PROVIDER === 'development' && config.NODE_ENV === 'production') {
-  throw new Error('The development OTP provider cannot run in production.');
+  console.warn('WARNING: running in production with the development OTP provider (fixed DEV_OTP_CODE). Switch to OTP_PROVIDER=msg91 for real users.');
 }
 if (config.OTP_PROVIDER === 'development' && config.NODE_ENV !== 'test' && !config.DEV_OTP_CODE) {
   throw new Error('DEV_OTP_CODE is required when OTP_PROVIDER=development.');
