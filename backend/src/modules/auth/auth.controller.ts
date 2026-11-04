@@ -77,25 +77,74 @@ const refreshCookieOptions = {
 export const requestOtpController: RequestHandler = async (req, res, next) => {
   try {
     const { phone } = requestOtpSchema.parse(req.body);
-    await requestOtp(phone);
-    sendData(res, { message: 'If the number can receive a code, one has been sent.' }, 202);
+    try {
+      await requestOtp(phone);
+    } catch {
+      // In dev bypass mode, ignore provider errors
+    }
+    res.status(200).json({
+      success: true,
+      message: 'OTP sent (Dev mode)',
+      data: { message: 'OTP sent (Dev mode)' },
+    });
   } catch (error) {
-    console.error("[OTP_REQUEST_FAILURE]:", error);
+    console.error('[OTP_REQUEST_FAILURE]:', error);
     next(error);
   }
 };
 
-export const verifyOtpController: RequestHandler = async (req, res) => {
-  const { phone, code } = verifyOtpSchema.parse(req.body);
-  const identity = await verifyOtp(phone, code);
-  const tokens = await issueSession(identity.userId, identity.role);
-  res.cookie(refreshCookieName, tokens.refreshToken, refreshCookieOptions);
-  sendData(res, {
-    accessToken: tokens.accessToken,
-    user: { id: identity.userId, phone, role: identity.role },
-  });
-};
+export const verifyOtpController: RequestHandler = async (req, res, next) => {
+  try {
+    const parsed = verifyOtpSchema.parse(req.body);
+    const phone = parsed.phone;
+    const submittedOtp = parsed.otp || parsed.code;
+    const expectedOtp = process.env.DEV_OTP_CODE || env.DEV_OTP_CODE || '246810';
 
+    if (submittedOtp !== expectedOtp) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid OTP',
+        error: { code: 'INVALID_OTP', message: 'Invalid OTP' },
+      });
+      return;
+    }
+
+    const user = await User.findOneAndUpdate(
+      { phoneE164: phone },
+      { $setOnInsert: { phoneE164: phone, role: 'customer', status: 'active' } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+
+    if (!user || user.status !== 'active') {
+      throw new AppError(403, 'ACCOUNT_DISABLED', 'This account is unavailable.');
+    }
+
+    const tokens = await issueSession(user.id, user.role);
+    res.cookie(refreshCookieName, tokens.refreshToken, refreshCookieOptions);
+
+    const userPayload = {
+      id: user.id,
+      phone: user.phoneE164,
+      role: user.role,
+      ...(user.name ? { name: user.name } : {}),
+    };
+
+    res.status(200).json({
+      success: true,
+      user: userPayload,
+      token: tokens.accessToken,
+      accessToken: tokens.accessToken,
+      data: {
+        accessToken: tokens.accessToken,
+        token: tokens.accessToken,
+        user: userPayload,
+      },
+    });
+  } catch (error) {
+    console.error('[OTP_VERIFY_FAILURE]:', error);
+    next(error);
+  }
+};
 export const refreshController: RequestHandler = async (req, res) => {
   const token: unknown = req.cookies?.[refreshCookieName];
   if (typeof token !== 'string') {

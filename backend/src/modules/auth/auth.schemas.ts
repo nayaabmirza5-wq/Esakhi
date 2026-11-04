@@ -9,12 +9,15 @@ const normalizedPhoneSchema = z.string().trim().transform((value) => {
 
 export const requestOtpSchema = z.object({
   phone: normalizedPhoneSchema,
-}).strict();
+});
 
 export const verifyOtpSchema = z.object({
   phone: normalizedPhoneSchema,
-  code: z.string().regex(/^\d{6}$/, 'OTP must contain six digits.'),
-}).strict();
+  otp: z.string().optional(),
+  code: z.string().optional(),
+}).refine((data) => Boolean((data.otp && /^\d{6}$/.test(data.otp)) || (data.code && /^\d{6}$/.test(data.code))), {
+  message: 'OTP must contain six digits.',
+});
 
 export const updateProfileSchema = z.object({
   name: z.string().trim().min(1).max(120),

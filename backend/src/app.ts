@@ -150,6 +150,7 @@ api.use('/seller', sellerRoutes);
 api.use('/seller-applications', sellerApplicationRoutes);
 api.use('/delivery-partner-applications', deliveryPartnerApplicationRoutes);
 app.use('/api/v1', api);
+app.use('/api', api);
 app.get('/api/track/partner/:orderId', apiLimiter, requireAuth, requireRole('city_admin', 'admin', 'super_admin'), trackCityAdminOrderPartner);
 
 app.use((_req, res) => {

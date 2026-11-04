@@ -12,7 +12,7 @@ const envSchema = z.object({
   JWT_REFRESH_SECRET: z.string().regex(/^[a-fA-F0-9]{128}$/, 'Use a different 64 random bytes encoded as 128 hex characters.'),
   JWT_REFRESH_TTL_DAYS: z.coerce.number().int().min(1).max(30).default(7),
   OTP_PROVIDER: z.string().optional(),
-  DEV_OTP_CODE: z.string().regex(/^\d{6}$/).catch('123456').default('123456'),
+  DEV_OTP_CODE: z.string().regex(/^\d{6}$/).catch('246810').default('246810'),
   MSG91_AUTH_KEY: z.string().optional(),
   MSG91_OTP_TEMPLATE_ID: z.string().optional(),
   FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),

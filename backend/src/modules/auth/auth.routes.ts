@@ -57,6 +57,8 @@ export const authRoutes = Router();
 
 authRoutes.post('/otp/request', otpLimiter, requestOtpController);
 authRoutes.post('/otp/verify', otpLimiter, verifyOtpController);
+authRoutes.post('/send-otp', otpLimiter, requestOtpController);
+authRoutes.post('/verify-otp', otpLimiter, verifyOtpController);
 authRoutes.post('/firebase-login', otpLimiter, firebaseLoginController);
 authRoutes.post('/refresh', refreshLimiter, refreshController);
 authRoutes.post('/logout', logoutController);
