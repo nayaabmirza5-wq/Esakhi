@@ -1,4 +1,5 @@
 import express from 'express';
+// @ts-ignore
 import * as helmetModule from 'helmet';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -45,6 +46,7 @@ app.get('/', (_req, res) => {
   });
 });
 
+// @ts-ignore
 app.use(helmet());
 app.use(cors({
   origin(origin, callback) {
