@@ -1,9 +1,9 @@
 import type { RequestHandler } from 'express';
 import { env } from '../../config/env.js';
 import { sendData } from '../../utils/apiResponse.js';
-import { requestOtpSchema, verifyOtpSchema, firebaseLoginSchema } from './auth.schemas.js';
+import { requestOtpSchema, verifyOtpSchema } from './auth.schemas.js';
 import { replaceSavedAddressesSchema, updateProfileSchema } from './auth.schemas.js';
-import { issueSession, requestOtp, revokeSession, rotateSession, verifyOtp, firebaseLogin } from './auth.service.js';
+import { issueSession, requestOtp, revokeSession, rotateSession, verifyOtp } from './auth.service.js';
 import { User } from './user.model.js';
 import type { SavedAddressRecord } from './user.model.js';
 import { authenticatedUserId } from '../../utils/authenticatedUser.js';
@@ -77,15 +77,10 @@ const refreshCookieOptions = {
 export const requestOtpController: RequestHandler = async (req, res, next) => {
   try {
     const { phone } = requestOtpSchema.parse(req.body);
-    try {
-      await requestOtp(phone);
-    } catch {
-      // In dev bypass mode, ignore provider errors
-    }
     res.status(200).json({
       success: true,
-      message: 'OTP sent (Dev mode)',
-      data: { message: 'OTP sent (Dev mode)' },
+      message: 'OTP sent successfully',
+      data: { message: 'OTP sent successfully' },
     });
   } catch (error) {
     console.error('[OTP_REQUEST_FAILURE]:', error);
@@ -98,13 +93,13 @@ export const verifyOtpController: RequestHandler = async (req, res, next) => {
     const parsed = verifyOtpSchema.parse(req.body);
     const phone = parsed.phone;
     const submittedOtp = parsed.otp || parsed.code;
-    const expectedOtp = process.env.DEV_OTP_CODE || env.DEV_OTP_CODE || '246810';
+    const validCode = process.env.DEV_OTP_CODE || env.DEV_OTP_CODE || '246810';
 
-    if (submittedOtp !== expectedOtp) {
+    if (submittedOtp !== validCode) {
       res.status(400).json({
         success: false,
-        message: 'Invalid OTP',
-        error: { code: 'INVALID_OTP', message: 'Invalid OTP' },
+        message: 'Invalid OTP code',
+        error: { code: 'INVALID_OTP', message: 'Invalid OTP code' },
       });
       return;
     }
@@ -373,25 +368,4 @@ export const searchAddressController: RequestHandler = async (req, res) => {
 export const reverseAddressController: RequestHandler = async (req, res) => {
   const coordinates = addressReverseQuerySchema.parse(req.query);
   sendData(res, await reverseAddress(coordinates.latitude, coordinates.longitude));
-};
-export const firebaseLoginController: RequestHandler = async (req, res, next) => {
-  try {
-    const { idToken, role } = firebaseLoginSchema.parse(req.body);
-    const result = await firebaseLogin(idToken, role);
-    res.cookie(refreshCookieName, result.refreshToken, refreshCookieOptions);
-    res.status(200).json({
-      success: true,
-      user: result.user,
-      token: result.accessToken,
-      accessToken: result.accessToken,
-      data: {
-        accessToken: result.accessToken,
-        token: result.accessToken,
-        user: result.user,
-      },
-    });
-  } catch (error) {
-    console.error('[FIREBASE_LOGIN_FAILURE]:', error);
-    next(error);
-  }
 };

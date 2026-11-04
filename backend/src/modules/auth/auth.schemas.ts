@@ -67,9 +67,3 @@ export const replaceSavedAddressesSchema = z.object({
 
 export type RequestOtpInput = z.infer<typeof requestOtpSchema>;
 export type VerifyOtpInput = z.infer<typeof verifyOtpSchema>;
-export const firebaseLoginSchema = z.object({
-  idToken: z.string().min(1, 'Firebase ID token is required.'),
-  role: z.enum(['customer', 'seller', 'delivery_partner', 'city_admin', 'admin', 'super_admin']).default('customer').optional(),
-}).strict();
-
-export type FirebaseLoginInput = z.infer<typeof firebaseLoginSchema>;

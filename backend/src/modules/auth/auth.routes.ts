@@ -15,7 +15,6 @@ import {
   updateProfileController,
   updateSavedAddressController,
   verifyOtpController,
-  firebaseLoginController,
 } from './auth.controller.js';
 import { requireAuth } from '../../middleware/requireAuth.js';
 import { env } from '../../config/env.js';
@@ -59,7 +58,6 @@ authRoutes.post('/otp/request', otpLimiter, requestOtpController);
 authRoutes.post('/otp/verify', otpLimiter, verifyOtpController);
 authRoutes.post('/send-otp', otpLimiter, requestOtpController);
 authRoutes.post('/verify-otp', otpLimiter, verifyOtpController);
-authRoutes.post('/firebase-login', otpLimiter, firebaseLoginController);
 authRoutes.post('/refresh', refreshLimiter, refreshController);
 authRoutes.post('/logout', logoutController);
 authRoutes.get('/me', requireAuth, meController);

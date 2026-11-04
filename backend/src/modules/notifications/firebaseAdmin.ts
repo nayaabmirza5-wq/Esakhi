@@ -1,6 +1,5 @@
 import { cert, getApps, initializeApp, type App } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
-import { getAuth } from 'firebase-admin/auth';
 import { z } from 'zod';
 import { env } from '../../config/env.js';
 
@@ -43,9 +42,4 @@ export function getFirebaseAdminApp(): App {
 export function firebaseMessaging() {
   const app = getFirebaseAdminApp();
   return getMessaging(app);
-}
-
-export function firebaseAuth() {
-  const app = getFirebaseAdminApp();
-  return getAuth(app);
 }

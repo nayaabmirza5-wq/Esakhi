@@ -4,7 +4,6 @@ import { randomUUID } from 'node:crypto';
 import { env } from '../../config/env.js';
 import { AppError } from '../../utils/AppError.js';
 import { logger } from '../../utils/logger.js';
-import { firebaseAuth, isFirebaseAdminConfigured } from '../notifications/firebaseAdmin.js';
 import { OtpChallenge } from './otpChallenge.model.js';
 import { User } from './user.model.js';
 import { otpProvider } from './otpProvider.js';
@@ -185,46 +184,4 @@ export async function revokeSession(refreshToken: string | undefined): Promise<v
 
 function isDuplicateKeyError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 11000;
-}
-export async function firebaseLogin(idToken: string, requestedRole?: string): Promise<{
-  user: { id: string; phone: string; role: string; name?: string };
-  accessToken: string;
-  refreshToken: string;
-}> {
-  let phoneE164: string;
-  try {
-    const auth = firebaseAuth();
-    const decoded = await auth.verifyIdToken(idToken);
-    if (!decoded.phone_number) {
-      throw new AppError(400, 'PHONE_NUMBER_REQUIRED', 'Firebase ID token does not contain a verified phone number.');
-    }
-    phoneE164 = decoded.phone_number;
-  } catch (error) {
-    if (error instanceof AppError) throw error;
-    if (env.NODE_ENV === 'development' && (!isFirebaseAdminConfigured() || idToken.startsWith('mock:'))) {
-      phoneE164 = idToken.startsWith('mock:') ? idToken.slice(5) : '+919876543210';
-      logger.warn('Dev mode: accepting mock Firebase token', { phone: phoneE164 });
-    } else {
-      logger.error('Firebase token verification failed', {
-        message: error instanceof Error ? error.message : 'Unknown error',
-      });
-      throw new AppError(401, 'INVALID_FIREBASE_TOKEN', 'The provided Firebase ID token is invalid or expired.');
-    }
-  }
-
-  const user = await User.findOneAndUpdate(
-    { phoneE164 },
-    { $setOnInsert: { phoneE164, role: requestedRole || 'customer', status: 'active' } },
-    { upsert: true, new: true, setDefaultsOnInsert: true },
-  );
-  if (!user || user.status !== 'active') {
-    throw new AppError(403, 'ACCOUNT_DISABLED', 'This account is unavailable.');
-  }
-
-  const session = await issueSession(user.id, user.role);
-  return {
-    user: { id: user.id, phone: user.phoneE164, role: user.role, ...(user.name ? { name: user.name } : {}) },
-    accessToken: session.accessToken,
-    refreshToken: session.refreshToken,
-  };
 }
