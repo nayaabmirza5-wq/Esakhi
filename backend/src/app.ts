@@ -49,17 +49,33 @@ app.get('/', (_req, res) => {
 
 // @ts-ignore
 app.use(helmet());
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin || env.corsOrigins.includes(origin)) {
-      callback(null, true);
-      return;
+
+const rawOrigins = process.env.CLIENT_ORIGINS || '';
+const allowedList = rawOrigins.split(',').map((o) => o.trim()).filter(Boolean);
+
+const corsOptions = {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    // Allow mobile apps, curl, or requests with no origin
+    if (!origin) return callback(null, true);
+
+    // Allow explicit origins from CLIENT_ORIGINS or localhost or env.corsOrigins
+    if (allowedList.includes(origin) || origin.includes('localhost') || env.corsOrigins.includes(origin)) {
+      return callback(null, true);
     }
-    callback(new AppError(403, 'CORS_ORIGIN_DENIED', 'Origin is not allowed.'));
+
+    // Allow any Vercel deployment preview / production domain
+    if (/^https:\/\/.*\.vercel\.app$/.test(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new AppError(403, 'CORS_ORIGIN_DENIED', 'Origin is not allowed. (CORS_ORIGIN_DENIED)'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-}));
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+};
+
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '32kb' }));
 app.use(cookieParser());
 app.use((req, res, next) => {

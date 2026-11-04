@@ -6,7 +6,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65_535).default(5000),
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
   MONGODB_URI: z.string().regex(/^mongodb(?:\+srv)?:\/\//),
-  CLIENT_ORIGINS: z.string().min(1),
+  CLIENT_ORIGINS: z.string().default('http://localhost:5173,https://esakhi-six.vercel.app'),
   GEOCODER_BASE_URL: z.string().url().default('https://photon.komoot.io'),
   JWT_ACCESS_SECRET: z.string().regex(/^[a-fA-F0-9]{128}$/, 'Use 64 random bytes encoded as 128 hex characters.'),
   JWT_REFRESH_SECRET: z.string().regex(/^[a-fA-F0-9]{128}$/, 'Use a different 64 random bytes encoded as 128 hex characters.'),
@@ -47,7 +47,7 @@ const corsOrigins = configuredCorsOrigins.map((origin) => {
   if (parsedOrigin.origin !== origin && `${parsedOrigin.origin}/` !== origin) {
     throw new Error('CLIENT_ORIGINS must be exact origins without a path.');
   }
-  if (config.NODE_ENV === 'production' && parsedOrigin.protocol !== 'https:') {
+  if (config.NODE_ENV === 'production' && parsedOrigin.protocol !== 'https:' && parsedOrigin.hostname !== 'localhost' && parsedOrigin.hostname !== '127.0.0.1') {
     throw new Error('CLIENT_ORIGINS must use HTTPS in production.');
   }
 
