@@ -108,7 +108,15 @@ export const listProducts: RequestHandler = async (req, res) => {
     ...publishedProductFilter,
     ...(query.categoryId ? { categoryId: query.categoryId } : {}),
     ...(query.subcategoryId ? { subcategoryId: query.subcategoryId } : {}),
-    ...(query.q ? { $text: { $search: query.q } } : {}),
+    ...(query.q ? {
+      $or: [
+        { name: { $regex: query.q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+        { productType: { $regex: query.q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+        { description: { $regex: query.q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+        { categoryName: { $regex: query.q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+        { subcategoryName: { $regex: query.q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+      ],
+    } : {}),
   };
   const [products, total] = await Promise.all([
     Product.find(filter)
@@ -205,7 +213,15 @@ export const listAllProductsForAdmin: RequestHandler = async (req, res) => {
   const filter = {
     ...(query.categoryId ? { categoryId: query.categoryId } : {}),
     ...(query.subcategoryId ? { subcategoryId: query.subcategoryId } : {}),
-    ...(query.q ? { $text: { $search: query.q } } : {}),
+    ...(query.q ? {
+      $or: [
+        { name: { $regex: query.q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+        { productType: { $regex: query.q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+        { description: { $regex: query.q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+        { categoryName: { $regex: query.q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+        { subcategoryName: { $regex: query.q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+      ],
+    } : {}),
     ...(query.active === undefined ? {} : { isActive: query.active }),
     ...(query.archived === undefined ? {} : { isArchived: query.archived }),
     ...(query.sellerId ? { sellerId: new mongoose.Types.ObjectId(query.sellerId) } : {}),

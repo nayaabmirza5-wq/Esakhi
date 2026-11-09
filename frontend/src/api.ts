@@ -13,6 +13,8 @@ import type {
   CityAdminServiceZones,
   CustomerBankAccount,
   DeliveryPartnerApplication,
+  DeliveryPartnerRecord,
+  DamohDeliveryPartnerOnboardingPayload,
   Dashboard,
   DeliveryPartner,
   Order,
@@ -32,6 +34,9 @@ import type {
   ServiceArea,
   Settings,
   SellerApplication,
+  SellerOnboardingPayload,
+  SellerRecord,
+  ShgLookupResult,
   SuperAdminOverview,
   SuperAdminCity,
   SuperAdminCitySummary,
@@ -115,14 +120,30 @@ export const api = {
   discovery: () => request<{ message: string; endpoints: string[]; health: string }>('/api/v1'),
   health: () => request<{ status: string }>('/health'),
   ready: () => request<{ status: string }>('/ready'),
-  sendOtp: (phone: string) => request<{ message: string }>('/api/auth/send-otp', { method: 'POST', body: JSON.stringify({ phone }) }),
-  requestOtp: (phone: string) => request<{ message: string }>('/api/auth/send-otp', { method: 'POST', body: JSON.stringify({ phone }) }),
-  verifyOtp: (phone: string, otp: string) => request<{ accessToken: string; token?: string; user: User }>('/api/auth/verify-otp', { method: 'POST', body: JSON.stringify({ phone, otp, code: otp }) }, false),
+  sendOtp: (phone: string, channel: 'phone' | 'email' = 'phone', email?: string) =>
+    request<{ message: string; channel?: string; destination?: string }>('/api/auth/send-otp', {
+      method: 'POST',
+      body: JSON.stringify({ phone, channel, email }),
+    }),
+  requestOtp: (phone: string, channel: 'phone' | 'email' = 'phone', email?: string) =>
+    request<{ message: string; channel?: string; destination?: string }>('/api/auth/send-otp', {
+      method: 'POST',
+      body: JSON.stringify({ phone, channel, email }),
+    }),
+  verifyOtp: (phone: string, otp: string, channel: 'phone' | 'email' = 'phone', email?: string) =>
+    request<{ accessToken: string; token?: string; user: User; verified?: boolean; message?: string }>('/api/auth/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ phone, otp, code: otp, channel, email }),
+    }, false),
   firebaseLogin: (idToken: string, role = 'customer') => request<{ accessToken: string; token?: string; user: User }>('/api/v1/auth/firebase-login', { method: 'POST', body: JSON.stringify({ idToken, role }) }, false),
   refresh: () => request<{ accessToken: string }>('/api/v1/auth/refresh', { method: 'POST' }, false),
   logout: () => request<{ message: string }>('/api/v1/auth/logout', { method: 'POST' }, false),
   me: () => request<User>('/api/v1/auth/me'),
-  updateMe: (name: string) => request<User & { savedAddresses?: Address[] }>('/api/v1/auth/me', { method: 'PATCH', body: JSON.stringify({ name }) }),
+  updateMe: (payload: { name: string; email?: string } | string) =>
+    request<User & { savedAddresses?: Address[] }>('/api/v1/auth/me', {
+      method: 'PATCH',
+      body: JSON.stringify(typeof payload === 'string' ? { name: payload } : payload),
+    }),
   replaceAddresses: (addresses: Address[]) => request<Address[]>('/api/v1/auth/me/addresses', { method: 'PUT', body: JSON.stringify({ addresses }) }),
   addresses: () => request<Address[]>('/api/v1/auth/me/addresses'),
   createAddress: (address: Omit<Address, 'id' | '_id'>) => request<Address>('/api/v1/auth/me/addresses', { method: 'POST', body: JSON.stringify(address) }),
@@ -137,6 +158,31 @@ export const api = {
   bestSellingProducts: (limit = 5) => request<Product[]>(`/api/v1/products/bestsellers?limit=${limit}`),
   product: (slug: string) => request<Product>(`/api/v1/products/${encodeURIComponent(slug)}`),
   serviceArea: () => request<ServiceArea>('/api/v1/service-area'),
+  razorpayConfig: () => request<{ configured: boolean; keyId: string | null }>('/api/v1/payments/razorpay/config'),
+  createRazorpayOrder: (orderId: string) =>
+    request<{
+      razorpayOrderId: string;
+      amount: number;
+      currency: string;
+      keyId: string;
+      mode: 'live' | 'mock';
+      orderReference: string;
+      customerName: string;
+      customerPhone: string;
+    }>('/api/v1/payments/razorpay/create-order', {
+      method: 'POST',
+      body: JSON.stringify({ orderId }),
+    }),
+  verifyRazorpayPayment: (payload: {
+    orderId: string;
+    razorpayOrderId: string;
+    razorpayPaymentId: string;
+    razorpaySignature: string;
+  }) =>
+    request<{ verified: boolean; paymentStatus: string; orderReference?: string }>('/api/v1/payments/razorpay/verify-payment', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   createOrder: (payload: Record<string, unknown>) => request<{ order: Order; paymentInstructions: Record<string, unknown> }>('/api/v1/orders', { method: 'POST', body: JSON.stringify(payload) }),
   myOrders: (page = 1, limit = 20) => request<PageResult<Order>>(`/api/v1/orders?page=${page}&limit=${limit}`),
   myOrder: (id: string) => request<Order>(`/api/v1/orders/${encodeURIComponent(id)}`),
@@ -183,6 +229,23 @@ export const api = {
   cityAdminProducts: (query: URLSearchParams = new URLSearchParams()) => request<PageResult<CityAdminProduct>>(`/api/v1/city-admin/products${query.size ? `?${query}` : ''}`),
   reviewCityAdminProduct: (productId: string, payload: { decision: 'approved' | 'rejected'; note?: string; categoryId?: string; subcategoryId?: string; productType?: string }) => request<{ productId: string; approvalStatus: 'approved' | 'rejected'; isActive: boolean }>(`/api/v1/city-admin/products/${encodeURIComponent(productId)}/review`, { method: 'PATCH', body: JSON.stringify(payload) }),
   flagCityAdminProduct: (productId: string, reason: string) => request<{ id: string; productId: string; status: string; createdAt: string }>(`/api/v1/city-admin/products/${encodeURIComponent(productId)}/flags`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  cityAdminRemittanceSummary: () =>
+    request<import('./types').CityAdminRemittanceSummary>('/api/v1/city-admin/remittance/summary'),
+  cityAdminSettleRemittance: (partnerId: string, amountPaise: number, handshakePin: string, notes?: string) =>
+    request<import('./types').SettleRemittanceResponse>('/api/v1/city-admin/remittance/settle', {
+      method: 'POST',
+      body: JSON.stringify({ partnerId, amountPaise, handshakePin, notes }),
+    }),
+  partnerRegenerateRemittancePin: () =>
+    request<{ remittancePin: string; expiresInSeconds?: number; generatedAt: string; expiresAt?: string }>('/api/v1/delivery-partners/remittance-pin/regenerate', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  partnerRemitViaUpi: () =>
+    request<import('./types').SettleRemittanceResponse>('/api/v1/delivery-partners/remit-cash-upi', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
   cityAdminDeliveryPartners: (page = 1, limit = 20, options?: { orderId?: string; sellerLat?: number; sellerLng?: number } | number, sellerLng?: number) => {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (typeof options === 'number' && sellerLng !== undefined) {
@@ -198,6 +261,17 @@ export const api = {
     return request<PageResult<CityAdminDeliveryPartner>>(`/api/v1/city-admin/delivery-partners?${params}`);
   },
   cityAdminDeliveryPartnerApplications: (query: URLSearchParams = new URLSearchParams()) => request<PageResult<DeliveryPartnerApplication>>(`/api/v1/city-admin/delivery-partner-applications${query.size ? `?${query}` : ''}`),
+    onboardDeliveryPartner: (payload: DamohDeliveryPartnerOnboardingPayload) =>
+    request<{
+      partner: DeliveryPartnerRecord;
+      user: User;
+      accessToken: string;
+      token: string;
+      message: string;
+    }>('/api/v1/delivery-partner-applications/onboard', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   submitDeliveryPartnerApplication: (payload: {
     name: string;
     phone: string;
@@ -270,6 +344,138 @@ export const api = {
   cityAdminSellerApplications: (query: URLSearchParams = new URLSearchParams()) => request<PageResult<SellerApplication>>(`/api/v1/seller-applications${query.size ? `?${query}` : ''}`),
   reviewSellerApplication: (id: string, decision: 'approved' | 'rejected' | 'needs_info', note?: string, fssaiDecision?: 'verified' | 'needs_info') => request<{ applicationId: string; status: string; sellerId?: string }>(`/api/v1/seller-applications/${encodeURIComponent(id)}/review`, { method: 'PATCH', body: JSON.stringify({ decision, ...(note ? { note } : {}), ...(fssaiDecision ? { fssaiDecision } : {}) }) }),
   sellerDashboard: () => request<SellerDashboard>('/api/v1/seller/dashboard'),
+  onboardSeller: (payload: SellerOnboardingPayload) =>
+    request<{
+      seller: SellerRecord;
+      user: User;
+      accessToken: string;
+      token: string;
+      message: string;
+    }>('/api/v1/seller/onboard', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  initiateEnrolment: (payload: { panNumber: string; phone?: string; applicantName?: string; state?: string; district?: string }) =>
+    request<{
+      sessionId: string;
+      pan: string;
+      maskedPhone: string;
+      demoOtp: string;
+      expiresInSeconds: number;
+      message: string;
+    }>('/api/v1/seller/initiate-enrolment', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  confirmEnrolment: (payload: { sessionId: string; panNumber: string; otp: string; applicantName?: string; state?: string; district?: string }) =>
+    request<{
+      enrolmentId: string;
+      pan: string;
+      cardholderName: string;
+      status: string;
+      gstnRegistrationStatus: string;
+      stateCode: string;
+      stateName: string;
+      district: string;
+      notificationBasis: string;
+      certificateNumber: string;
+      turnoverLimit: string;
+      verifiedAt: string;
+    }>('/api/v1/seller/confirm-enrolment', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  verifyEnrolmentId: (payload: { enrolmentId: string; panNumber?: string }) =>
+    request<{
+      isValid: boolean;
+      enrolmentId: string;
+      status: string;
+      pan: string;
+      cardholderName: string;
+      legalNameOfBusiness?: string;
+      tradeName?: string;
+      effectiveDateOfCreation?: string;
+      stateJurisdiction?: string;
+      stateCode: string;
+      stateName: string;
+      legalCategory: string;
+      notificationNumber: string;
+      turnoverThreshold: string;
+      verifiedAt: string;
+      gstnRegistryConfirmation: string;
+    }>('/api/v1/seller/verify-enrolment-id', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  verifyGstin: (payload: { gstin: string; panNumber?: string; declaredLegalName?: string; declaredTradeName?: string }) =>
+    request<{
+      isValid: boolean;
+      gstin: string;
+      status: string;
+      legalNameOfBusiness: string;
+      tradeName: string;
+      effectiveDateOfCreation: string;
+      registrationDate: string;
+      stateJurisdiction: string;
+      constitutionOfBusiness: string;
+      taxpayerType: string;
+      stateCode: string;
+      stateName?: string;
+      embeddedPan: string;
+      checksumValid?: boolean;
+      requiresNameDeclaration?: boolean;
+      verifiedSource?: string;
+      verifiedAt: string;
+      gstnRegistryConfirmation: string;
+    }>('/api/v1/seller/verify-gstin', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  generateEnrolmentId: (payload: { panNumber: string; applicantName?: string; state?: string; district?: string }) =>
+    request<{
+      enrolmentId: string;
+      pan: string;
+      stateCode: string;
+      stateName: string;
+      district: string;
+      applicantName: string;
+      status: string;
+      notificationNumber: string;
+      turnoverThreshold: string;
+      exemptionScope: string;
+      certificateNumber: string;
+      isGovernmentLiveRegistered?: boolean;
+      governmentRegistrationUrl?: string;
+      generatedAt: string;
+    }>('/api/v1/seller/generate-enrolment-id', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  verifyPan: (panNumber: string, declaredName?: string) =>
+    request<{
+      isValid: boolean;
+      pan: string;
+      cardholderName: string;
+      entityCode: string;
+      entityName: string;
+      surnameInitial: string;
+      panStatus: string;
+      aadhaarSeeded: boolean;
+      isCustomDeclared?: boolean;
+      verifiedSource: string;
+      verifiedAt: string;
+    }>('/api/v1/seller/verify-pan', {
+      method: 'POST',
+      body: JSON.stringify({ panNumber, declaredName }),
+    }),
+  lookupShg: (code: string) =>
+    request<ShgLookupResult>(`/api/v1/seller/shg-lookup/${encodeURIComponent(code)}`),
+  getSellerProfile: () =>
+    request<{
+      seller: SellerRecord;
+      user: User;
+      status: string;
+    }>('/api/v1/seller/profile'),
   sellerSettlements: () => request<SellerSettlementsResponse>('/api/v1/seller/settlements'),
   updateSellerProfile: (payload: { shgName: string; representative: string; registeredAddress: string; storeDescription: string }) => request<Pick<NonNullable<SellerDashboard['storeProfile']>, 'shgName' | 'representative' | 'registeredAddress' | 'storeDescription' | 'city' | 'phoneE164' | 'fssaiStatus'>>('/api/v1/seller/profile', { method: 'PATCH', body: JSON.stringify(payload) }),
   sellerProducts: (query: URLSearchParams = new URLSearchParams()) => request<PageResult<Product>>(`/api/v1/seller/products${query.size ? `?${query}` : ''}`),
@@ -338,12 +544,18 @@ export const api = {
     status: 'out_for_pickup' | 'picked_up' | 'out_for_delivery' | 'delivered' | 'delivery_failed' | 'return_picked_up' | 'return_delivered_to_seller',
     note?: string,
     paymentCollected?: boolean,
+    deliveryOtp?: string,
+    paymentMode?: 'cash' | 'upi_qr' | 'prepaid_online',
+    upiUtr?: string,
   ) => request<Order>(`/api/v1/delivery-partners/orders/${encodeURIComponent(id)}/status`, {
     method: 'PATCH',
     body: JSON.stringify({
       status,
       ...(note ? { note } : {}),
       ...(paymentCollected !== undefined ? { paymentCollected } : {}),
+      ...(deliveryOtp ? { deliveryOtp } : {}),
+      ...(paymentMode ? { paymentMode } : {}),
+      ...(upiUtr ? { upiUtr } : {}),
     }),
   }),
   updatePartnerReverseOrderStatus: (

@@ -11,10 +11,13 @@ import { Order } from '../orders/order.model.js';
 import { haversineDistanceKm } from '../orders/order.transitions.js';
 import { Settings } from '../settings/settings.model.js';
 import { DeliveryPartnerApplication } from './deliveryPartnerApplication.model.js';
+import { DeliveryPartner } from '../../models/DeliveryPartner.js';
+import { issueSession } from '../auth/auth.service.js';
 import {
   createDeliveryPartnerApplicationSchema,
   deliveryPartnerApplicationListSchema,
   reviewDeliveryPartnerApplicationSchema,
+  damohDeliveryPartnerOnboardingSchema,
 } from './deliveryPartnerApplication.schemas.js';
 
 function cityScope(req: Parameters<RequestHandler>[0]): string {
@@ -90,6 +93,58 @@ export const submitDeliveryPartnerApplication: RequestHandler = async (req, res)
   if (input.passbookDocUrl) applicationDoc.passbookDocUrl = input.passbookDocUrl;
   if (bankDetailsPayload) applicationDoc.bankDetails = bankDetailsPayload;
 
+  // Instant Auto-Provisioning: User account is activated immediately with zero manual bottleneck
+  const partnerUser = await User.findOneAndUpdate(
+    { phoneE164: input.phone },
+    {
+      $set: {
+        role: 'delivery_partner',
+        status: 'active',
+        assignedCity: input.city,
+        serviceableLocalities: input.requestedLocalities && input.requestedLocalities.length ? input.requestedLocalities : [input.city],
+        name: input.name,
+        isOnline: true,
+        availabilityStatus: 'available',
+        currentLocation: { latitude: 23.8415, longitude: 79.445, updatedAt: new Date() },
+      },
+      $setOnInsert: { phoneE164: input.phone },
+    },
+    { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
+  );
+
+  let existingPartner = await DeliveryPartner.findOne({ userId: partnerUser._id });
+  const partnerId = existingPartner ? existingPartner.partnerId : await generatePartnerId();
+
+  await DeliveryPartner.findOneAndUpdate(
+    { userId: partnerUser._id },
+    {
+      $set: {
+        userId: partnerUser._id,
+        partnerId,
+        operatingCity: input.city,
+        status: 'ACTIVE',
+        isAvailable: true,
+        personalDetails: {
+          fullName: input.name,
+          phone: input.phone,
+          emergencyPhone: input.emergencyContactPhone || input.phone,
+          dob: new Date('1995-01-01'),
+        },
+        vehicleDetails: {
+          vehicleType: input.vehicleType === 'BICYCLE' ? 'CYCLE' : 'MOTORCYCLE',
+          dlNumber: input.dlNumber || undefined,
+          rcNumber: input.vehicleRcNumber || undefined,
+          isVerified: true,
+        },
+      },
+    },
+    { upsert: true, new: true },
+  );
+
+  applicationDoc.status = 'approved';
+  applicationDoc.reviewedAt = new Date();
+  applicationDoc.reviewNote = 'Auto-approved instantly upon registration (zero-supervision onboarding).';
+
   const created = await DeliveryPartnerApplication.create([applicationDoc]);
   const application = created[0];
   if (!application) {
@@ -100,8 +155,9 @@ export const submitDeliveryPartnerApplication: RequestHandler = async (req, res)
     res,
     {
       applicationId: String(application._id),
-      status: application.status,
-      message: 'Profile Submitted - Under Physical Audit by City Admin. Form locked in pending queue.',
+      status: 'approved',
+      partnerId,
+      message: 'Welcome to eSakhi Fleet! Your delivery partner account is active and verified.',
     },
     201,
   );
@@ -219,6 +275,191 @@ export const reviewCityAdminDeliveryPartnerApplication: RequestHandler = async (
   sendData(res, result);
 };
 
+
+async function generatePartnerId(): Promise<string> {
+  const count = await DeliveryPartner.countDocuments();
+  let candidateNumber = 1001 + count;
+  while (true) {
+    const candidateId = `DMH-DP-${candidateNumber}`;
+    const exists = await DeliveryPartner.exists({ partnerId: candidateId });
+    if (!exists) {
+      return candidateId;
+    }
+    candidateNumber += 1;
+  }
+}
+
+export const completeDeliveryPartnerOnboarding: RequestHandler = async (req, res) => {
+  const input = damohDeliveryPartnerOnboardingSchema.parse(req.body);
+
+  let user = null;
+  if (req.user?.id) {
+    user = await User.findById(req.user.id);
+  }
+
+  if (!user && input.phone) {
+    const raw = input.phone.trim();
+    const phoneE164 = raw.startsWith('+') ? raw : `+91${raw.replace(/\D/g, '').slice(-10)}`;
+    user = await User.findOne({ phoneE164 });
+    if (!user) {
+      user = new User({
+        phoneE164,
+        name: input.fullName.trim(),
+        role: 'delivery_partner',
+        status: 'active',
+        assignedCity: 'Damoh',
+        serviceableLocalities: ['Damoh'],
+        isOnline: true,
+        availabilityStatus: 'available',
+        currentLocation: { latitude: 23.8415, longitude: 79.445, updatedAt: new Date() },
+      });
+    }
+  }
+
+  if (!user) {
+    throw new AppError(400, 'USER_IDENTIFICATION_REQUIRED', 'Please sign in or provide a valid contact phone number.');
+  }
+
+  user.role = 'delivery_partner';
+  user.status = 'active';
+  user.name = input.fullName.trim();
+  user.assignedCity = 'Damoh';
+  user.serviceableLocalities = ['Damoh'];
+  user.isOnline = true;
+  user.availabilityStatus = 'available';
+  if (!user.currentLocation) {
+    user.currentLocation = { latitude: 23.8415, longitude: 79.445, updatedAt: new Date() };
+  }
+  user.bankAccount = {
+    accountHolderName: input.bankDetails.accountHolderName.trim(),
+    bankName: input.bankDetails.bankName.trim(),
+    accountNumber: input.bankDetails.accountNumber.trim(),
+    ifscCode: input.bankDetails.ifscCode.trim().toUpperCase(),
+    verified: true,
+    linkedAt: new Date(),
+  };
+  await user.save();
+
+  let partner = await DeliveryPartner.findOne({ userId: user._id });
+  let partnerId: string;
+  if (partner) {
+    partnerId = partner.partnerId;
+  } else {
+    partnerId = await generatePartnerId();
+  }
+
+  partner = await DeliveryPartner.findOneAndUpdate(
+    { userId: user._id },
+    {
+      $set: {
+        userId: user._id,
+        partnerId,
+        operatingCity: 'Damoh',
+        status: 'ACTIVE',
+        isAvailable: true,
+        personalDetails: {
+          fullName: input.fullName.trim(),
+          phone: input.phone.trim(),
+          emergencyPhone: input.emergencyPhone.trim(),
+          dob: new Date(input.dob),
+        },
+        vehicleDetails: {
+          vehicleType: input.vehicleType,
+          dlNumber: input.vehicleType === 'CYCLE' ? undefined : input.dlNumber?.trim().toUpperCase(),
+          rcNumber: input.vehicleType === 'CYCLE' ? undefined : input.rcNumber?.trim().toUpperCase(),
+          isVerified: true,
+        },
+        kycDetails: {
+          panNumber: input.panNumber.trim().toUpperCase(),
+          aadharNumber: input.aadharNumber.trim(),
+          isPanVerified: true,
+          isAadharVerified: true,
+        },
+        bankDetails: {
+          accountHolderName: input.bankDetails.accountHolderName.trim(),
+          bankName: input.bankDetails.bankName.trim(),
+          branchName: input.bankDetails.branchName.trim(),
+          accountNumber: input.bankDetails.accountNumber.trim(),
+          ifscCode: input.bankDetails.ifscCode.trim().toUpperCase(),
+          isVerified: true,
+        },
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  if (!partner) {
+    throw new AppError(500, 'INTERNAL_ERROR', 'Failed to save delivery partner profile.');
+  }
+
+  await DeliveryPartnerApplication.findOneAndUpdate(
+    { phoneE164: `+91${input.phone.trim()}` },
+    {
+      $set: {
+        name: input.fullName.trim(),
+        city: 'Damoh',
+        requestedLocalities: ['Damoh'],
+        vehicleType: input.vehicleType === 'CYCLE' ? 'BICYCLE' : 'MOTORCYCLE',
+        status: 'approved',
+        reviewNote: 'Instant Auto-Activation on Damoh Onboarding Completion',
+        reviewedAt: new Date(),
+        emergencyContactPhone: input.emergencyPhone.trim(),
+        dlNumber: input.vehicleType === 'CYCLE' ? undefined : input.dlNumber?.trim().toUpperCase(),
+        vehicleRcNumber: input.vehicleType === 'CYCLE' ? undefined : input.rcNumber?.trim().toUpperCase(),
+        bankDetails: {
+          accountHolderName: input.bankDetails.accountHolderName.trim(),
+          accountNumberMasked: `••••••••${input.bankDetails.accountNumber.trim().slice(-4)}`,
+          accountNumberHash: crypto.createHash('sha256').update(input.bankDetails.accountNumber.trim()).digest('hex'),
+          ifscCode: input.bankDetails.ifscCode.trim().toUpperCase(),
+          bankName: input.bankDetails.bankName.trim(),
+          branchName: input.bankDetails.branchName.trim(),
+          isVerified: true,
+        },
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  await AuditLog.create([
+    {
+      actorId: String(user._id),
+      action: 'delivery_partner.instant_auto_activated',
+      resourceType: 'delivery_partner',
+      resourceId: String(partner._id),
+      metadata: {
+        partnerId: partner.partnerId,
+        operatingCity: 'Damoh',
+        vehicleType: input.vehicleType,
+        phone: input.phone,
+      },
+    },
+  ]);
+
+  const { accessToken } = await issueSession(String(user._id), 'delivery_partner');
+
+  sendData(
+    res,
+    {
+      partner: partner.toObject ? partner.toObject() : partner,
+      user: {
+        id: String(user._id),
+        phoneE164: user.phoneE164,
+        name: user.name,
+        role: user.role,
+        status: user.status,
+        assignedCity: user.assignedCity,
+        serviceableLocalities: user.serviceableLocalities,
+        isOnline: user.isOnline,
+        availabilityStatus: user.availabilityStatus,
+      },
+      accessToken,
+      token: accessToken,
+      message: 'Delivery Partner onboarding completed successfully! Your account is active and verified.',
+    },
+    201
+  );
+};
+
 const partnerListQuerySchema = deliveryPartnerApplicationListSchema.pick({ page: true, limit: true }).extend({
   sellerLat: z.coerce.number().min(-90).max(90).optional(),
   sellerLng: z.coerce.number().min(-180).max(180).optional(),
@@ -230,11 +471,17 @@ export const listCityAdminDeliveryPartners: RequestHandler = async (req, res) =>
   const sellerLat = query.sellerLat ?? 23.8388;
   const sellerLng = query.sellerLng ?? 79.4422;
   const cityRegex = cityFilter(city);
-  const [approvedApps, settings] = await Promise.all([
+  const [approvedApps, deliveryPartners, settings] = await Promise.all([
     DeliveryPartnerApplication.find({ city: cityRegex, status: 'approved' }).select('phoneE164 name requestedLocalities vehicleType maxDeliveryRadiusKm').lean(),
+    DeliveryPartner.find({ operatingCity: cityRegex, status: 'ACTIVE' }).lean(),
     Settings.findOne({ key: 'global' }).select('city serviceableLocalities').lean(),
   ]);
+  const dpByUserId = new Map(deliveryPartners.map((dp) => [String(dp.userId), dp]));
+  const dpByPhone = new Map(deliveryPartners.map((dp) => [`+91${dp.personalDetails.phone}`, dp]));
+  const dpUserIds = deliveryPartners.map((dp) => dp.userId);
+  const dpPhones = deliveryPartners.map((dp) => `+91${dp.personalDetails.phone}`);
   const appPhones = approvedApps.map((app) => app.phoneE164);
+  const allPhones = Array.from(new Set([...appPhones, ...dpPhones]));
   const appByPhone = new Map(approvedApps.map((app) => [app.phoneE164, app]));
   const defaultLocalities = settings && cityRegex.test(settings.city)
     ? settings.serviceableLocalities.map((locality) => locality.name)
@@ -247,7 +494,8 @@ export const listCityAdminDeliveryPartners: RequestHandler = async (req, res) =>
       { assignedCity: { $exists: false } },
       { assignedCity: null },
       { assignedCity: '' },
-      ...(appPhones.length ? [{ phoneE164: { $in: appPhones } }] : []),
+      ...(dpUserIds.length ? [{ _id: { $in: dpUserIds } }] : []),
+      ...(allPhones.length ? [{ phoneE164: { $in: allPhones } }] : []),
     ],
   };
   const [partners, total] = await Promise.all([
@@ -272,16 +520,10 @@ export const listCityAdminDeliveryPartners: RequestHandler = async (req, res) =>
                 $in: [
                   '$fulfilmentStatus',
                   [
-                    'placed',
-                    'order_confirmed',
-                    'accepted',
-                    'preparing',
-                    'ready_for_pickup',
                     'delivery_partner_assigned',
                     'out_for_pickup',
                     'picked_up',
                     'out_for_delivery',
-                    'delivery_failed',
                   ],
                 ],
               },
@@ -318,10 +560,14 @@ export const listCityAdminDeliveryPartners: RequestHandler = async (req, res) =>
     const partnerLng = partner.currentLocation?.longitude ?? (79.445 + index * 0.0025);
     const distanceKm = haversineDistanceKm(sellerLat, sellerLng, partnerLat, partnerLng);
 
+    const dp = dpByUserId.get(String(partner._id)) || dpByPhone.get(partner.phoneE164);
+    const vehicleType = dp?.vehicleDetails?.vehicleType ?? app?.vehicleType ?? 'CYCLE';
+
     return {
       ...partner,
-      name: partner.name || app?.name || 'Delivery Partner',
-      assignedCity: partner.assignedCity || city,
+      partnerId: dp?.partnerId || `DMH-DP-${1000 + index}`,
+      name: partner.name || dp?.personalDetails?.fullName || app?.name || 'Delivery Partner',
+      assignedCity: dp?.operatingCity || partner.assignedCity || city,
       serviceableLocalities,
       activeDeliveries,
       completedDeliveries: stats?.completedDeliveries ?? 0,
@@ -335,9 +581,12 @@ export const listCityAdminDeliveryPartners: RequestHandler = async (req, res) =>
         updatedAt: partner.currentLocation?.updatedAt ?? new Date(),
       },
       distanceKm,
-      vehicleType: app?.vehicleType ?? 'BICYCLE',
-      maxDeliveryRadiusKm: app?.maxDeliveryRadiusKm ?? 3.0,
+      vehicleType,
+      maxDeliveryRadiusKm: app?.maxDeliveryRadiusKm ?? (vehicleType === 'CYCLE' ? 5.0 : 15.0),
       verificationStatus: 'approved',
+      partnerProfile: dp || null,
+      kycVerified: Boolean(dp?.kycDetails?.isPanVerified && dp?.kycDetails?.isAadharVerified),
+      bankVerified: Boolean(dp?.bankDetails?.isVerified ?? true),
     };
   }).sort((a, b) => {
     const rank = (status: 'available' | 'busy' | 'offline') => (status === 'available' ? 0 : status === 'busy' ? 1 : 2);

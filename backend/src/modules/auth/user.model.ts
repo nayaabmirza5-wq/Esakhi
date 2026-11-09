@@ -66,12 +66,27 @@ const userSchema = new Schema(
     refreshTokenHash: { type: String, select: false },
     savedAddresses: { type: [savedAddressSchema], default: [] },
     bankAccount: { type: bankAccountSchema },
+    remittancePin: { type: String, trim: true, maxlength: 6 },
+    remittancePinExpiresAt: { type: Date },
+    previousRemittancePin: { type: String, trim: true, maxlength: 6 },
+    previousPinExpiresAt: { type: Date },
   },
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 
 userSchema.pre('validate', function () {
-  const self = this as unknown as { phoneE164?: string; phone?: string; name?: string };
+  const self = this as unknown as {
+    phoneE164?: string;
+    phone?: string;
+    name?: string;
+    role?: string;
+    remittancePin?: string;
+    remittancePinExpiresAt?: Date;
+  };
+  if (self.role === 'delivery_partner' && !self.remittancePin) {
+    self.remittancePin = String(Math.floor(1000 + Math.random() * 9000));
+    self.remittancePinExpiresAt = new Date(Date.now() + 60_000);
+  }
   if (!self.phoneE164 && self.phone) {
     self.phoneE164 = self.phone.startsWith('+') ? self.phone : `+91${self.phone.replace(/\D/g, '').slice(-10)}`;
   }

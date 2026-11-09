@@ -82,3 +82,73 @@ export const reviewDeliveryPartnerApplicationSchema = z.object({
     context.addIssue({ code: 'custom', path: ['note'], message: 'A review or rejection reason is required.' });
   }
 });
+
+
+export const damohDeliveryPartnerOnboardingSchema = z.object({
+  fullName: z.string().trim().min(2, 'Enter full legal name.').max(120),
+  phone: z.string().trim().regex(/^[6-9]\d{9}$/, 'Enter a valid 10-digit Indian mobile number starting with 6-9.'),
+  emergencyPhone: z.string().trim().regex(/^[6-9]\d{9}$/, 'Enter a valid 10-digit emergency phone number starting with 6-9.'),
+  dob: z.string().trim().min(1, 'Enter date of birth.'),
+  vehicleType: z.enum(['BIKE', 'EV', 'CYCLE']),
+  dlNumber: z.string().trim().toUpperCase().optional(),
+  rcNumber: z.string().trim().toUpperCase().optional(),
+  panNumber: z.string().trim().toUpperCase().regex(/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/, 'Enter a valid 10-character PAN (e.g. ABCDE1234F).'),
+  aadharNumber: z.string().trim().regex(/^\d{12}$/, 'Enter a valid 12-digit Aadhaar number.'),
+  bankDetails: z.object({
+    accountHolderName: z.string().trim().min(2, 'Enter account holder name.'),
+    bankName: z.string().trim().min(2, 'Enter bank name.'),
+    branchName: z.string().trim().min(2, 'Enter branch name.'),
+    accountNumber: z.string().trim().min(8, 'Enter valid bank account number.'),
+    confirmAccountNumber: z.string().trim().min(8, 'Confirm bank account number.'),
+    ifscCode: z.string().trim().toUpperCase().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'Enter a valid 11-character RBI IFSC code.'),
+  }),
+}).superRefine((input, ctx) => {
+  if (input.bankDetails.accountNumber !== input.bankDetails.confirmAccountNumber) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['bankDetails', 'confirmAccountNumber'],
+      message: 'Bank account numbers do not match in double-entry verification.',
+    });
+  }
+
+  if (input.vehicleType === 'BIKE' || input.vehicleType === 'EV') {
+    const dl = input.dlNumber || '';
+    if (!/^[A-Z]{2}[0-9]{2}[0-9]{11}$/.test(dl)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['dlNumber'],
+        message: 'Enter a valid Driving License in Parivahan format (e.g. MP1520210001234).',
+      });
+    }
+    const rc = input.rcNumber || '';
+    if (!rc || rc.length < 5) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['rcNumber'],
+        message: 'Enter a valid Vehicle Registration (RC) number.',
+      });
+    }
+  }
+
+  const birthDate = new Date(input.dob);
+  if (isNaN(birthDate.getTime())) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['dob'],
+      message: 'Enter a valid date of birth.',
+    });
+  } else {
+    const ageDiffMs = Date.now() - birthDate.getTime();
+    const ageDate = new Date(ageDiffMs);
+    const age = Math.abs(ageDate.getUTCFullYear() - 1970);
+    if (age < 18) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['dob'],
+        message: 'Delivery partner must be at least 18 years old.',
+      });
+    }
+  }
+});
+
+export type DamohDeliveryPartnerOnboardingInput = z.infer<typeof damohDeliveryPartnerOnboardingSchema>;

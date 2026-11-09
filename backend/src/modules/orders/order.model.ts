@@ -30,6 +30,7 @@ export const RETURN_REASON_CODES = [
   'defective',
   'wrong_item',
   'box_mutilated',
+  'changed_mind',
   'other',
 ] as const;
 export type ReturnReasonCode = (typeof RETURN_REASON_CODES)[number];
@@ -241,6 +242,8 @@ const returnRequestSchema = new Schema(
     escalatedToSuperAdminAt: { type: Date },
     refund: {
       refundAmountPaise: { type: Number, min: 0 },
+      deductionAmountPaise: { type: Number, min: 0, default: 0 },
+      deductionNote: { type: String, trim: true },
       bankAccountHolderName: { type: String, trim: true },
       bankAccountNumberMasked: { type: String, trim: true },
       bankName: { type: String, trim: true },
@@ -303,7 +306,7 @@ const orderSchema = new Schema(
     totalPaise: { type: Number, required: true, min: 0 },
     reservationExpiresAt: { type: Date, index: true },
     cancellationReason: { type: String, trim: true, maxlength: 300 },
-    paymentMethod: { type: String, enum: ['upi', 'cash'], required: true },
+    paymentMethod: { type: String, enum: ['upi', 'cash', 'card', 'netbanking', 'doorstep_upi', 'razorpay'], required: true },
     paymentStatus: {
       type: String,
       enum: ['pending_verification', 'confirmed', 'rejected', 'refunded'],
@@ -312,6 +315,11 @@ const orderSchema = new Schema(
       index: true,
     },
     paymentEvents: { type: [paymentEventSchema], default: [] },
+    razorpay: {
+      orderId: { type: String, trim: true },
+      paymentId: { type: String, trim: true },
+      signature: { type: String, trim: true },
+    },
     fulfilmentStatus: {
       type: String,
       enum: [...FULFILMENT_STATUS_ENUM],
@@ -341,9 +349,29 @@ const orderSchema = new Schema(
     },
     deliveryExceptions: { type: [deliveryExceptionSchema], default: [] },
     adminResolution: { type: adminResolutionSchema },
+    deliveryOtp: { type: String, trim: true, maxlength: 6 },
+    deliveryOtpVerifiedAt: Date,
+    doorstepPayment: {
+      mode: { type: String, enum: ['cash', 'upi_qr', 'prepaid_online'], default: 'cash' },
+      upiUtr: { type: String, trim: true, maxlength: 30 },
+      collectedAmountPaise: { type: Number, min: 0 },
+      collectedAt: Date,
+      remittedToCityAdmin: { type: Boolean, default: false },
+      remittedAt: Date,
+      remittedReceiptNumber: { type: String, trim: true },
+      receivedByAdminId: { type: Schema.Types.ObjectId, ref: 'User' },
+      notes: { type: String, trim: true, maxlength: 300 },
+    },
   },
   { timestamps: true },
 );
+
+orderSchema.pre('validate', function () {
+  const self = this as unknown as { deliveryOtp?: string };
+  if (!self.deliveryOtp) {
+    self.deliveryOtp = String(Math.floor(1000 + Math.random() * 9000));
+  }
+});
 
 orderSchema.index({ customerId: 1, createdAt: -1 });
 orderSchema.index({ idempotencyKey: 1, customerId: 1 }, { unique: true });

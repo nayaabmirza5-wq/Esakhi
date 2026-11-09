@@ -45,7 +45,7 @@ export const createOrderSchema = z.object({
   address: addressSchema.optional(),
   deliveryInstructions: z.string().trim().max(500).optional(),
   items: z.array(orderItemSchema).min(1).max(30),
-  paymentMethod: z.enum(['upi', 'cash']),
+  paymentMethod: z.enum(['upi', 'cash', 'card', 'netbanking', 'doorstep_upi', 'razorpay']),
 }).strict().superRefine((order, context) => {
   if (order.fulfilmentMethod === 'delivery' && !order.address) {
     context.addIssue({ code: 'custom', path: ['address'], message: 'A delivery address is required.' });

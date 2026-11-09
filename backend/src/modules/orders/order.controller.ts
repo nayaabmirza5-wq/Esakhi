@@ -1,3 +1,4 @@
+import { CashRemittance } from './cashRemittance.model.js';
 import type { RequestHandler } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
@@ -10,6 +11,7 @@ import { InventoryAdjustment } from '../inventory/inventoryAdjustment.model.js';
 import { Product } from '../catalog/product.model.js';
 import { Settings } from '../settings/settings.model.js';
 import { SellerApplication } from '../seller/sellerApplication.model.js';
+import { Seller } from '../../models/Seller.js';
 import { Order, DELIVERY_EXCEPTION_REASON_CODES, RIDER_REQUESTED_ACTIONS } from './order.model.js';
 import { PenaltyLedger } from './penaltyLedger.model.js';
 import {
@@ -85,12 +87,16 @@ export async function resolveOrderSellerPickup(order: {
       .sort({ reviewedAt: -1, createdAt: -1 })
       .lean();
   }
-  const city = sellerApp?.city || sellerUser?.assignedCity || order.address?.city || 'Damoh';
+  const sellerProfile = await Seller.findOne({ userId: sellerId }).lean();
+  const city = sellerProfile?.pickupAddress?.city || sellerApp?.city || sellerUser?.assignedCity || order.address?.city || 'Damoh';
+  const pickupAddressStr = sellerProfile?.pickupAddress
+    ? `${sellerProfile.pickupAddress.streetAddress}, ${sellerProfile.pickupAddress.locality ? sellerProfile.pickupAddress.locality + ', ' : ''}${sellerProfile.pickupAddress.city}, ${sellerProfile.pickupAddress.state} - ${sellerProfile.pickupAddress.pincode}`
+    : sellerApp?.registeredAddress || `Civil Ward, ${city}, Madhya Pradesh 470661`;
   return {
     sellerId: String(sellerId),
-    sellerName: sellerApp?.shgName || sellerUser?.name || sellerApp?.representative || 'Damoh SHG Seller',
+    sellerName: sellerProfile?.supplierDetails?.shgName || sellerProfile?.supplierDetails?.shgLeaderName || sellerApp?.shgName || sellerUser?.name || sellerApp?.representative || 'Damoh SHG Seller',
     ...(sellerApp?.phoneE164 || sellerUser?.phoneE164 ? { phoneE164: sellerApp?.phoneE164 || sellerUser?.phoneE164 } : {}),
-    address: sellerApp?.registeredAddress || `Civil Ward, ${city}, Madhya Pradesh 470661`,
+    address: pickupAddressStr,
     city,
     latitude: sellerApp?.latitude ?? sellerUser?.currentLocation?.latitude ?? 23.8388,
     longitude: sellerApp?.longitude ?? sellerUser?.currentLocation?.longitude ?? 79.4422,
@@ -103,8 +109,16 @@ export const createOrderController: RequestHandler = async (req, res) => {
   const settings = await Settings.findOne({ key: 'global' })
     .select('upiId upiQrUrl upiInstructions cashInstructions').lean();
   const paymentInstructions = input.paymentMethod === 'upi'
-    ? { method: 'upi', upiId: settings?.upiId, qrImageUrl: settings?.upiQrUrl, instructions: settings?.upiInstructions }
-    : { method: 'cash', instructions: settings?.cashInstructions };
+    ? { method: 'upi', upiId: settings?.upiId, qrImageUrl: settings?.upiQrUrl, instructions: settings?.upiInstructions || 'Scan and pay via any UPI app (GPay, PhonePe, Paytm, BHIM).' }
+    : input.paymentMethod === 'razorpay'
+      ? { method: 'razorpay', instructions: 'Payment authorized via Razorpay Gateway (Cards, UPI, NetBanking, Wallets).' }
+    : input.paymentMethod === 'card'
+      ? { method: 'card', instructions: 'Payment via Debit/Credit Card (Visa/MasterCard/RuPay) confirmed. Electronic invoice generated.' }
+      : input.paymentMethod === 'netbanking'
+        ? { method: 'netbanking', instructions: 'Net Banking transaction authorized with your Indian bank.' }
+        : input.paymentMethod === 'doorstep_upi'
+          ? { method: 'doorstep_upi', instructions: 'Doorstep UPI selected: Delivery partner will present dynamic UPI QR code on arrival for 1-tap scan.' }
+          : { method: 'cash', instructions: settings?.cashInstructions || 'Please keep exact cash ready upon doorstep package delivery.' };
   const sellerPickup = await resolveOrderSellerPickup(order.toObject());
   sendData(res, { order: toCustomerOrder({ ...order.toObject(), sellerPickup }), paymentInstructions }, created ? 201 : 200);
 };
@@ -197,11 +211,11 @@ export const cancelOrderDirect: RequestHandler = async (req, res) => {
       const order = await Order.findOne({ _id: id, customerId }).session(session);
       if (!order) throw new AppError(404, 'NOT_FOUND', 'Order not found.');
 
-      if (!canCustomerDirectCancel(order.fulfilmentStatus)) {
+      if (!canCustomerDirectCancel(order.fulfilmentStatus) || Boolean(order.deliveryPartner?.userId)) {
         throw new AppError(
           409,
           'DIRECT_CANCEL_NOT_ALLOWED',
-          'Direct cancellation is only allowed before the seller marks the order Ready for Pickup.',
+          'Direct cancellation is only allowed before the seller marks the order Ready for Pickup and before a partner is assigned.',
         );
       }
 
@@ -321,22 +335,35 @@ export const submitCustomerReturnRequest: RequestHandler = async (req, res) => {
     };
   }
 
-  order.fulfilmentStatus = 'return_requested';
+  const isLowValueReturn = (order.totalPaise || 0) <= 30000;
+  order.fulfilmentStatus = isLowValueReturn ? 'return_accepted' : 'return_requested';
   order.returnRequest = {
-    status: 'requested',
+    status: isLowValueReturn ? 'accepted' : 'requested',
     reasonCode: input.reasonCode,
     reasonText: input.reasonText,
     boxConditionImages: input.boxConditionImages,
     productFaultImages: input.productFaultImages,
     requestedBy: new mongoose.Types.ObjectId(customerId),
     requestedAt: new Date(),
+    ...(isLowValueReturn
+      ? {
+          arbitration: {
+            decision: 'approved',
+            faultAttribution: 'no_fault',
+            penaltyAmountPaise: 0,
+            reviewNote: 'Automated Instant Approval: Order value under ₹300 policy threshold.',
+          },
+        }
+      : {}),
   };
   order.statusHistory.push({
-    status: 'return_requested',
+    status: isLowValueReturn ? 'return_accepted' : 'return_requested',
     changedAt: new Date(),
-    actorType: 'user',
-    actorId: new mongoose.Types.ObjectId(customerId),
-    note: `RETURN_REQUESTED (${input.reasonCode.replaceAll('_', ' ')}): ${input.reasonText}`,
+    actorType: isLowValueReturn ? 'system' : 'user',
+    ...(isLowValueReturn ? {} : { actorId: new mongoose.Types.ObjectId(customerId) }),
+    note: isLowValueReturn
+      ? 'Return automatically approved under ₹300 low-value policy. Ready for reverse pickup.'
+      : `RETURN_REQUESTED (${input.reasonCode.replaceAll('_', ' ')}): ${input.reasonText}`,
   });
 
   await order.save();
@@ -506,7 +533,7 @@ export const assignDeliveryPartner: RequestHandler = async (req, res) => {
   const { id } = orderIdParamsSchema.parse(req.params);
   const input = deliveryPartnerSchema.parse(req.body);
   const actorId = authenticatedUserId(req);
-  const order = await Order.findOne({ _id: id, fulfilmentMethod: 'delivery', fulfilmentStatus: { $in: ['placed', 'order_confirmed', 'accepted', 'preparing', 'ready_for_pickup', 'delivery_partner_assigned', 'out_for_pickup', 'picked_up', 'out_for_delivery', 'delivery_failed'] } });
+  const order = await Order.findOne({ _id: id, fulfilmentMethod: 'delivery', fulfilmentStatus: { $in: ['ready_for_pickup', 'delivery_partner_assigned', 'out_for_pickup', 'delivery_failed'] } });
   if (!order || !canAssignDeliveryPartner(order.fulfilmentStatus, Boolean(order.deliveryPartner))) {
     throw new AppError(409, 'DELIVERY_PARTNER_NOT_ALLOWED', 'A delivery partner can only be assigned to an unassigned delivery order being prepared or delivered, or reassigned after a failed delivery attempt.');
   }
@@ -539,7 +566,7 @@ export const assignDeliveryPartner: RequestHandler = async (req, res) => {
         {
           _id: id,
           fulfilmentMethod: 'delivery',
-          fulfilmentStatus: { $in: ['placed', 'order_confirmed', 'accepted', 'preparing', 'ready_for_pickup', 'delivery_partner_assigned', 'out_for_pickup', 'picked_up', 'out_for_delivery', 'delivery_failed'] },
+          fulfilmentStatus: { $in: ['ready_for_pickup', 'delivery_partner_assigned', 'out_for_pickup', 'delivery_failed'] },
           $or: [{ deliveryPartner: { $exists: false } }, { fulfilmentStatus: 'delivery_failed' }],
         },
         {
@@ -603,7 +630,7 @@ export const bulkAssignDeliveryPartner: RequestHandler = async (req, res) => {
       const orders = await Order.find({
         _id: { $in: input.orderIds },
         fulfilmentMethod: 'delivery',
-        fulfilmentStatus: { $in: ['placed', 'order_confirmed', 'accepted', 'preparing', 'ready_for_pickup', 'delivery_partner_assigned', 'out_for_pickup', 'picked_up', 'out_for_delivery', 'delivery_failed'] },
+        fulfilmentStatus: { $in: ['ready_for_pickup', 'delivery_partner_assigned', 'out_for_pickup', 'delivery_failed'] },
       }).session(session);
       if (orders.length !== input.orderIds.length || orders.some((order) => !canAssignDeliveryPartner(order.fulfilmentStatus, Boolean(order.deliveryPartner)))) {
         throw new AppError(409, 'DELIVERY_PARTNER_NOT_ALLOWED', 'One or more selected orders are ineligible: assigned orders can only be reassigned after a failed delivery attempt.');
@@ -678,7 +705,7 @@ export const getPartnerProfile: RequestHandler = async (req, res) => {
   const partnerId = authenticatedUserId(req);
   const [partner, activeCount] = await Promise.all([
     User.findById(partnerId)
-      .select('name phoneE164 assignedCity serviceableLocalities isOnline availabilityStatus currentLocation')
+      .select('name phoneE164 assignedCity serviceableLocalities isOnline availabilityStatus currentLocation remittancePin remittancePinExpiresAt')
       .lean(),
     Order.countDocuments({
       $or: [
@@ -689,6 +716,7 @@ export const getPartnerProfile: RequestHandler = async (req, res) => {
     }),
   ]);
   if (!partner) throw new AppError(404, 'NOT_FOUND', 'Delivery partner profile not found.');
+
   const isOnline = partner.isOnline ?? true;
   const availabilityStatus = !isOnline
     ? 'offline'
@@ -706,6 +734,29 @@ export const getPartnerProfile: RequestHandler = async (req, res) => {
     isOnline,
     availabilityStatus,
     activeOrderCount: activeCount,
+    unremittedCashPaise: (await (async () => {
+      const unrem = await Order.find({
+        'deliveryPartner.userId': partnerId,
+        fulfilmentStatus: { $in: ['delivered', 'completed'] },
+        $or: [{ paymentMethod: 'cash' }, { 'doorstepPayment.mode': 'cash' }],
+        'doorstepPayment.remittedToCityAdmin': { $ne: true },
+      }).select('totalPaise').lean();
+      return unrem.reduce((acc, curr) => acc + (curr.totalPaise || 0), 0);
+    })()),
+    remittancePin: (partner as any).remittancePin || '8392',
+    remittancePinExpiresAt: (partner as any).remittancePinExpiresAt,
+    expiresInSeconds: (partner as any).remittancePinExpiresAt
+      ? Math.max(0, Math.floor(((new Date((partner as any).remittancePinExpiresAt)).getTime() - Date.now()) / 1000))
+      : 60,
+    exceedsCodThreshold: (await (async () => {
+      const unrem = await Order.find({
+        'deliveryPartner.userId': partnerId,
+        fulfilmentStatus: { $in: ['delivered', 'completed'] },
+        $or: [{ paymentMethod: 'cash' }, { 'doorstepPayment.mode': 'cash' }],
+        'doorstepPayment.remittedToCityAdmin': { $ne: true },
+      }).select('totalPaise').lean();
+      return unrem.reduce((acc, curr) => acc + (curr.totalPaise || 0), 0) > 200000;
+    })()),
     currentLocation: {
       latitude: partner.currentLocation?.latitude ?? 23.8415,
       longitude: partner.currentLocation?.longitude ?? 79.445,
@@ -719,6 +770,24 @@ export const updatePartnerAvailability: RequestHandler = async (req, res) => {
   const input = partnerAvailabilitySchema.parse(req.body);
   const partner = await User.findById(partnerId);
   if (!partner) throw new AppError(404, 'NOT_FOUND', 'Delivery partner profile not found.');
+
+  // Condition 2: Check unremitted cash before going offline
+  if (input.isOnline === false || input.availabilityStatus === 'offline') {
+    const unrem = await Order.find({
+      'deliveryPartner.userId': partnerId,
+      fulfilmentStatus: { $in: ['delivered', 'completed'] },
+      $or: [{ paymentMethod: 'cash' }, { 'doorstepPayment.mode': 'cash' }],
+      'doorstepPayment.remittedToCityAdmin': { $ne: true },
+    }).select('totalPaise').lean();
+    const unremittedCashPaise = unrem.reduce((acc, curr) => acc + (curr.totalPaise || 0), 0);
+    if (unremittedCashPaise > 0) {
+      throw new AppError(
+        400,
+        'UNREMITTED_CASH_HOLD',
+        `Cannot go offline. You have ₹${(unremittedCashPaise / 100).toFixed(2)} in unremitted cash in hand. Cash must be deposited to the City Admin Hub (using your Handshake PIN) or remitted via UPI before ending your shift.`,
+      );
+    }
+  }
 
   if (typeof input.isOnline === 'boolean') {
     partner.isOnline = input.isOnline;
@@ -767,7 +836,7 @@ export const listAssignedPartnerOrders: RequestHandler = async (req, res) => {
     ],
     fulfilmentStatus: { $nin: INACTIVE_PARTNER_ORDER_STATES },
   })
-    .select('-internalNotes -paymentEvents -idempotencyKey -deliveryPartnerHistory -deliveryPartner.internalNotes -deliveryPartner.assignedBy -deliveryPartner.userId -cancellationRequest.reviewedBy -cancellationRequest.adminNote')
+    .select('-internalNotes -paymentEvents -idempotencyKey -deliveryPartnerHistory -deliveryPartner.internalNotes -deliveryPartner.assignedBy -deliveryPartner.userId -cancellationRequest.reviewedBy -cancellationRequest.adminNote -deliveryOtp')
     .sort({ createdAt: -1 })
     .lean();
 
@@ -818,7 +887,7 @@ export const listPartnerDeliveryHistory: RequestHandler = async (req, res) => {
 
 export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
   const { id } = orderIdParamsSchema.parse(req.params);
-  const { status, note, paymentCollected, reasonCode, reasonNotes, proofImageUrl, riderRequestedAction } = z.object({
+  const { status, note, paymentCollected, reasonCode, reasonNotes, proofImageUrl, riderRequestedAction, deliveryOtp, paymentMode, upiUtr } = z.object({
     status: z.enum([
       'out_for_pickup',
       'picked_up',
@@ -834,6 +903,9 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
     reasonNotes: z.string().trim().max(1000).optional(),
     proofImageUrl: z.string().trim().nullish().transform((v) => v ?? null),
     riderRequestedAction: z.enum(RIDER_REQUESTED_ACTIONS).optional(),
+    deliveryOtp: z.string().trim().max(6).optional(),
+    paymentMode: z.enum(['cash', 'upi_qr', 'prepaid_online']).optional(),
+    upiUtr: z.string().trim().max(30).optional(),
   }).strict().parse(req.body);
   const partnerId = authenticatedUserId(req);
   const order = await Order.findOne({
@@ -848,6 +920,17 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
   const priorStatus = order.fulfilmentStatus;
   if (!canPartnerTransitionOrder(priorStatus, status)) {
     throw new AppError(409, 'INVALID_STATUS_TRANSITION', `Cannot transition order from ${priorStatus.replaceAll('_', ' ')} to ${status.replaceAll('_', ' ')}.`);
+  }
+
+  const isPrepaidOrder = order.paymentStatus === 'confirmed' || order.paymentMethod !== 'cash';
+  if (status === 'delivered' && isPrepaidOrder && order.deliveryOtp) {
+    if (!deliveryOtp || deliveryOtp.trim() !== order.deliveryOtp.trim()) {
+      throw new AppError(
+        400,
+        'INVALID_DELIVERY_OTP',
+        'Invalid Customer Delivery OTP. Please ask the customer for their 4-digit verification code.'
+      );
+    }
   }
 
   const defaultNotes: Record<string, string> = {
@@ -866,7 +949,19 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
   let updated;
   try {
     updated = await session.withTransaction(async () => {
-      const shouldConfirmPayment = status === 'delivered' && (paymentCollected || order.paymentMethod === 'cash');
+      const shouldConfirmPayment = status === 'delivered' && (paymentCollected || order.paymentMethod === 'cash' || isPrepaidOrder || paymentMode === 'upi_qr');
+      const effectiveMode = isPrepaidOrder ? 'prepaid_online' : (paymentMode || 'cash');
+      const doorstepPaymentData = status === 'delivered' ? {
+        mode: effectiveMode,
+        upiUtr: upiUtr || undefined,
+        collectedAmountPaise: effectiveMode === 'prepaid_online' ? 0 : order.totalPaise,
+        collectedAt: new Date(),
+        notes: effectiveMode === 'upi_qr'
+          ? `Paid at door via Dynamic UPI QR (Ref: ${upiUtr || 'Confirmed'})`
+          : effectiveMode === 'cash'
+            ? `Paid in cash: ₹${(order.totalPaise / 100).toFixed(2)}`
+            : 'Prepaid online order delivered.',
+      } : undefined;
       const finalLat =
         status === 'delivered' || status === 'return_picked_up'
           ? (order.address?.latitude ?? order.deliveryPartner?.latitude ?? 23.8342)
@@ -880,6 +975,7 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
             ? (order.sellerPickup?.longitude ?? order.deliveryPartner?.longitude ?? 79.4422)
             : order.deliveryPartner?.longitude;
 
+      let nextFulfilmentStatusVal: string = status;
       const returnSubUpdates: Record<string, unknown> = {};
       if (status === 'return_picked_up' && order.returnRequest) {
         returnSubUpdates['returnRequest.status'] = 'picked_up';
@@ -887,9 +983,28 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
       } else if (status === 'return_delivered_to_seller' && order.returnRequest) {
         returnSubUpdates['returnRequest.status'] = 'delivered_to_seller';
         returnSubUpdates['returnRequest.reverseDeliveryPartner.deliveredToSellerAt'] = new Date();
+        nextFulfilmentStatusVal = 'ready_for_refund';
+        returnSubUpdates['statusHistory'] = [
+          ...(order.statusHistory || []),
+          {
+            status: 'return_delivered_to_seller',
+            changedAt: new Date(),
+            actorType: 'partner',
+            note: 'Package handed back to artisan / seller at pickup origin.',
+          },
+          {
+            status: 'ready_for_refund',
+            changedAt: new Date(),
+            actorType: 'system',
+            note: 'Goods verified returned. Automatically queued for Super Admin Razorpay refund release.',
+          },
+        ];
       }
 
       let nextDeliveryStatus = order.deliveryStatus || 'UNASSIGNED';
+      const failureCount = status === 'delivery_failed' ? (order.deliveryExceptions?.length || 0) + 1 : 0;
+      const isAutoRtoTriggered = status === 'delivery_failed' && failureCount >= 2;
+
       if (status === 'delivered') {
         nextDeliveryStatus = 'DELIVERED';
       } else if (status === 'out_for_delivery') {
@@ -897,21 +1012,34 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
       } else if (status === 'out_for_pickup' || status === 'picked_up') {
         nextDeliveryStatus = 'ASSIGNED';
       } else if (status === 'delivery_failed') {
-        const action = riderRequestedAction || 'UNASSIGN_ME';
-        nextDeliveryStatus = (action === 'RETRY_LATER') ? 'DELIVERY_FAILED' : 'ESCALATED_TO_ADMIN';
+        if (isAutoRtoTriggered) {
+          nextDeliveryStatus = 'RETURN_TO_ORIGIN';
+          nextFulfilmentStatusVal = 'return_requested';
+          returnSubUpdates['returnRequest'] = {
+            status: 'requested',
+            reasonCode: 'other',
+            reasonText: `Automated RTO: Exceeded maximum allowed delivery attempts (${failureCount}/2). Auto-return to seller hub triggered.`,
+            boxConditionImages: [],
+            productFaultImages: [],
+            requestedAt: new Date(),
+          };
+        } else {
+          nextDeliveryStatus = 'DELIVERY_FAILED';
+          nextFulfilmentStatusVal = 'delivery_failed';
+        }
       }
 
       const exceptionData = (status === 'delivery_failed') ? {
         attemptedAt: new Date(),
         riderId: new mongoose.Types.ObjectId(partnerId),
         reasonCode: reasonCode || 'OTHER',
-        reasonNotes: reasonNotes || note || '',
+        reasonNotes: reasonNotes || note || (isAutoRtoTriggered ? 'Attempt 2 failed: Auto-RTO executed' : 'Attempt 1 failed: Re-attempt scheduled'),
         proofImageUrl: proofImageUrl || null,
-        riderRequestedAction: riderRequestedAction || 'UNASSIGN_ME',
+        riderRequestedAction: isAutoRtoTriggered ? 'CANCEL_ORDER' : (riderRequestedAction || 'RETRY_LATER'),
       } : null;
 
       const unassignPartnerUpdate: Record<string, unknown> = {};
-      const historyEntry = (status === 'delivery_failed' && (riderRequestedAction === 'UNASSIGN_ME' || !riderRequestedAction) && order.deliveryPartner) ? {
+      const historyEntry = (status === 'delivery_failed' && (riderRequestedAction === 'UNASSIGN_ME' || !riderRequestedAction || isAutoRtoTriggered) && order.deliveryPartner) ? {
         ...(order.deliveryPartner.userId ? { userId: order.deliveryPartner.userId } : {}),
         name: order.deliveryPartner.name,
         phoneE164: order.deliveryPartner.phoneE164,
@@ -919,10 +1047,12 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
         assignedBy: order.deliveryPartner.assignedBy,
         unassignedAt: new Date(),
         unassignedBy: new mongoose.Types.ObjectId(partnerId),
-        changeReason: `Delivery failed [${reasonCode || 'OTHER'}]: ${reasonNotes || note || ''} (Rider requested unassignment)`.trim(),
+        changeReason: isAutoRtoTriggered
+          ? `Automated RTO executed after attempt ${failureCount}/2 failed.`
+          : `Delivery failed [${reasonCode || 'OTHER'}]: ${reasonNotes || note || ''} (Rider requested unassignment)`.trim(),
       } : null;
 
-      if (status === 'delivery_failed' && (riderRequestedAction === 'UNASSIGN_ME' || !riderRequestedAction)) {
+      if (status === 'delivery_failed' && (riderRequestedAction === 'UNASSIGN_ME' || !riderRequestedAction) && !isAutoRtoTriggered) {
         unassignPartnerUpdate['deliveryPartner'] = null;
       }
 
@@ -930,7 +1060,7 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
         { _id: id, fulfilmentStatus: priorStatus },
         {
           $set: {
-            fulfilmentStatus: status,
+            fulfilmentStatus: nextFulfilmentStatusVal,
             deliveryStatus: nextDeliveryStatus,
             ...(shouldConfirmPayment ? { paymentStatus: 'confirmed' } : {}),
             ...(finalLat !== undefined ? { 'deliveryPartner.latitude': finalLat } : {}),
@@ -940,11 +1070,15 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
           },
           $push: {
             statusHistory: {
-              status,
+              status: nextFulfilmentStatusVal,
               changedAt: new Date(),
-              actorType: 'user',
+              actorType: isAutoRtoTriggered ? 'system' : 'user',
               actorId: partnerId,
-              note: note || (status === 'delivery_failed' ? `Delivery failed: ${reasonCode || 'OTHER'} - ${reasonNotes || ''}` : defaultNotes[status]) || `Status updated to ${status}`,
+              note: note || (isAutoRtoTriggered
+                ? `Automated RTO Executed: Delivery failed attempt ${failureCount}/2. Package auto-scheduled for Return to Origin.`
+                : status === 'delivery_failed'
+                ? `Delivery attempt ${failureCount}/2 failed: ${reasonCode || 'OTHER'} - ${reasonNotes || ''}. Re-attempt auto-scheduled.`
+                : defaultNotes[status]) || `Status updated to ${status}`,
             },
             ...(exceptionData ? { deliveryExceptions: exceptionData } : {}),
             ...(historyEntry ? { deliveryPartnerHistory: historyEntry } : {}),
@@ -1354,3 +1488,93 @@ function toCustomerOrder(order: object): Record<string, unknown> {
   delete customerOrder.deliveryPartnerHistory;
   return customerOrder;
 }
+
+export const partnerRemitCashViaUpi: RequestHandler = async (req, res) => {
+  const partnerId = authenticatedUserId(req);
+  const partner = await User.findById(partnerId);
+  if (!partner) throw new AppError(404, 'NOT_FOUND', 'Delivery partner not found.');
+
+  const unremittedOrders = await Order.find({
+    'deliveryPartner.userId': partnerId,
+    fulfilmentStatus: { $in: ['delivered', 'completed'] },
+    $or: [{ paymentMethod: 'cash' }, { 'doorstepPayment.mode': 'cash' }],
+    'doorstepPayment.remittedToCityAdmin': { $ne: true },
+  });
+
+  if (!unremittedOrders.length) {
+    throw new AppError(400, 'NO_UNREMITTED_CASH', 'No outstanding cash on delivery orders found.');
+  }
+
+  const totalPaise = unremittedOrders.reduce((sum, o) => sum + (o.totalPaise || 0), 0);
+  const receiptNumber = `REM-UPI-${Date.now().toString().slice(-6)}`;
+  const now = new Date();
+  const orderIds = unremittedOrders.map((o) => o._id);
+  const orderReferences = unremittedOrders.map((o) => o.orderReference);
+
+  await Order.updateMany(
+    { _id: { $in: orderIds } },
+    {
+      $set: {
+        'doorstepPayment.remittedToCityAdmin': true,
+        'doorstepPayment.remittedAt': now,
+        'doorstepPayment.remittedReceiptNumber': receiptNumber,
+      },
+    },
+  );
+
+  partner.remittancePin = String(Math.floor(1000 + Math.random() * 9000));
+  await partner.save();
+
+  const voucher = await CashRemittance.create({
+    receiptNumber,
+    riderId: partner._id,
+    riderName: partner.name || 'Delivery Partner',
+    riderPhone: partner.phoneE164,
+    city: partner.assignedCity || 'Damoh',
+    amountPaise: totalPaise,
+    orderIds,
+    orderReferences,
+    settledByAdminId: partner._id,
+    settledByAdminName: 'Digital UPI Direct Remittance',
+    handshakePinUsed: 'UPI-DIRECT',
+    method: 'digital_upi',
+    notes: 'Direct digital UPI remittance from partner app',
+    settledAt: now,
+  });
+
+  sendData(res, {
+    success: true,
+    receiptNumber,
+    settledAmountPaise: totalPaise,
+    settledAmountRupees: (totalPaise / 100).toFixed(2),
+    settledOrdersCount: orderIds.length,
+    voucherId: String(voucher._id),
+    settledAt: now,
+  });
+};
+
+export const regeneratePartnerRemittancePin: RequestHandler = async (req, res) => {
+  const partnerId = authenticatedUserId(req);
+  const partner = await User.findById(partnerId);
+  if (!partner) throw new AppError(404, 'NOT_FOUND', 'Delivery partner not found.');
+
+  const now = new Date();
+  const oldPin = partner.remittancePin;
+  const newPin = String(Math.floor(1000 + Math.random() * 9000));
+
+  if (oldPin) {
+    (partner as any).previousRemittancePin = oldPin;
+    (partner as any).previousPinExpiresAt = new Date(now.getTime() + 30_000); // 30s grace window
+  }
+
+  partner.remittancePin = newPin;
+  (partner as any).remittancePinExpiresAt = new Date(now.getTime() + 60_000); // 60s TTL
+  await partner.save();
+
+  sendData(res, {
+    remittancePin: newPin,
+    expiresInSeconds: 60,
+    generatedAt: now,
+    expiresAt: (partner as any).remittancePinExpiresAt,
+  });
+};

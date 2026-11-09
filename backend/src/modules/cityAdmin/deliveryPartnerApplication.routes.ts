@@ -1,6 +1,11 @@
 import { Router } from 'express';
-import { submitDeliveryPartnerApplication } from './deliveryPartnerApplication.controller.js';
+import { optionalAuth } from '../../middleware/requireAuth.js';
+import {
+  completeDeliveryPartnerOnboarding,
+  submitDeliveryPartnerApplication,
+} from './deliveryPartnerApplication.controller.js';
 
 export const deliveryPartnerApplicationRoutes = Router();
 
 deliveryPartnerApplicationRoutes.post('/', submitDeliveryPartnerApplication);
+deliveryPartnerApplicationRoutes.post('/onboard', optionalAuth, completeDeliveryPartnerOnboarding);

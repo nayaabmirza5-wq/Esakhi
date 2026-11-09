@@ -137,7 +137,7 @@ export function CityAdminLiveTracker({
     void fetchTrackingSnapshot(true);
     timerRef.current = window.setInterval(() => {
       void fetchTrackingSnapshot(false);
-    }, 3_000);
+    }, 6_000);
 
     return () => stopPolling();
   }, [fetchTrackingSnapshot, hasPartner, orderStatus, stopPolling]);
@@ -201,7 +201,7 @@ export function CityAdminLiveTracker({
       <div className="city-admin-panel-heading" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
           <p className="city-admin-eyebrow" style={{ color: streamDisconnected ? '#1d6b43' : '#2563eb', fontWeight: 700 }}>
-            {streamDisconnected ? '● GPS_STREAM_INACTIVE · ORDER DELIVERED' : '◉ GPS_STREAM_ACTIVE · LIVE PARTNER TELEMETRY (3S POLL)'}
+            {streamDisconnected ? '● GPS_STREAM_INACTIVE · ORDER DELIVERED' : '◉ GPS_STREAM_ACTIVE · LIVE PARTNER TELEMETRY (6S POLL)'}
           </p>
           <h2>
             {streamDisconnected

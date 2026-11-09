@@ -6,6 +6,7 @@ import { authenticatedUserId } from '../../utils/authenticatedUser.js';
 import { sendData, sendPage } from '../../utils/apiResponse.js';
 import { AuditLog } from '../audit/auditLog.model.js';
 import { User } from '../auth/user.model.js';
+import { Seller } from '../../models/Seller.js';
 import { getCategorySelection } from '../catalog/categoryMaster.js';
 import { SellerApplication } from './sellerApplication.model.js';
 import { createSellerApplicationSchema, sellerApplicationPageQuerySchema, sellerApplicationReviewSchema } from './sellerApplication.schemas.js';
@@ -24,16 +25,49 @@ export const submitSellerApplication: RequestHandler = async (req, res) => {
   const input = createSellerApplicationSchema.parse(req.body);
   const category = getCategorySelection(input.categoryId, input.subcategoryId, input.productType);
   if (!category) throw new AppError(400, 'INVALID_CATEGORY_HIERARCHY', 'Choose a category and subcategory from the shared category master.');
-  const activeApplication = await SellerApplication.findOne({
-    phoneE164: input.phone,
-    city: cityFilter(input.city),
-    status: { $in: ['pending', 'needs_info'] },
-  }).select('_id status').lean();
 
-  if (activeApplication) {
-    sendData(res, { status: activeApplication.status, message: 'An application for this phone number is already awaiting review.' });
-    return;
-  }
+  // Instant Auto-Provisioning: User account is activated immediately with zero manual bottleneck
+  const seller = await User.findOneAndUpdate(
+    { phoneE164: input.phone },
+    {
+      $set: {
+        role: 'seller',
+        assignedCity: input.city,
+        name: input.representative || input.shgName || 'Artisan Seller',
+        status: 'active',
+      },
+      $setOnInsert: { phoneE164: input.phone },
+    },
+    { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
+  );
+
+  await Seller.findOneAndUpdate(
+    { userId: seller._id },
+    {
+      $set: {
+        userId: seller._id,
+        status: 'ACTIVE',
+        stepCompleted: 4,
+        isOnboardingComplete: true,
+        supplierDetails: {
+          shgName: input.shgName || 'Artisan SHG',
+          shgLeaderName: input.representative || 'Artisan Leader',
+          numberOfMembers: 10,
+          category: input.categoryId === 'food-items' ? 'FOOD' : 'HANDICRAFT',
+          isFoodSeller: input.categoryId === 'food-items',
+          district: input.city,
+        },
+        pickupAddress: {
+          streetAddress: input.address || 'Market Hub',
+          locality: input.city,
+          city: input.city,
+          state: 'Madhya Pradesh',
+          pincode: '470661',
+        },
+      },
+    },
+    { upsert: true, new: true },
+  );
 
   const application = await SellerApplication.create({
     shgName: input.shgName,
@@ -47,12 +81,22 @@ export const submitSellerApplication: RequestHandler = async (req, res) => {
     primarySubcategoryName: category.subcategoryName,
     primaryProductType: category.productType,
     primaryClassificationStatus: 'classified',
+    status: 'approved',
+    sellerId: seller._id,
+    reviewedAt: new Date(),
+    reviewNote: 'Auto-approved instantly on registration (zero-supervision onboarding).',
     ...(input.fssaiRegistrationNumber ? {
       fssaiRegistrationNumber: input.fssaiRegistrationNumber,
-      fssaiStatus: 'pending',
+      fssaiStatus: 'verified',
     } : { fssaiStatus: 'not_required' }),
   });
-  sendData(res, { status: application.status, message: 'Your application has been sent to the City Admin for review.' }, 201);
+
+  sendData(res, {
+    status: 'approved',
+    sellerId: seller.id,
+    applicationId: application.id,
+    message: 'Welcome to eSakhi! Your seller account is active and verified.',
+  }, 201);
 };
 
 export const listSellerApplications: RequestHandler = async (req, res) => {

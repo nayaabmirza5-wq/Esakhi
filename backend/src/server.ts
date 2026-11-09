@@ -5,6 +5,7 @@ import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
 import { releaseExpiredReservations } from './modules/orders/reservation.worker.js';
 import { processOrderNotificationQueue } from './modules/notifications/notification.worker.js';
+import { processSlaAndAutoDispatch } from './modules/orders/autoDispatch.worker.js';
 import { firebaseMessaging, isFirebaseAdminConfigured } from './modules/notifications/firebaseAdmin.js';
 
 const server = createServer(app);
@@ -15,6 +16,7 @@ async function start(): Promise<void> {
   await connectDatabase();
   await releaseExpiredReservations();
   await processOrderNotificationQueue();
+  await processSlaAndAutoDispatch();
   reservationTimer = setInterval(() => {
     void releaseExpiredReservations().catch((error: unknown) => {
       logger.error('Reservation cleanup failed', {
@@ -23,6 +25,11 @@ async function start(): Promise<void> {
     });
     void processOrderNotificationQueue().catch((error: unknown) => {
       logger.error('Order notification processing failed', {
+        name: error instanceof Error ? error.name : 'Unknown error',
+      });
+    });
+    void processSlaAndAutoDispatch().catch((error: unknown) => {
+      logger.error('AutoDispatch and SLA worker cycle failed', {
         name: error instanceof Error ? error.name : 'Unknown error',
       });
     });

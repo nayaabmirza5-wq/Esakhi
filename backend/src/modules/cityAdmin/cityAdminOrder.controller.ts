@@ -238,7 +238,7 @@ export const assignCityAdminDeliveryPartner: RequestHandler = async (req, res) =
       const order = await Order.findOne({ _id: orderId, 'address.city': cityFilter(city) }).session(session);
       if (!order) throw new AppError(404, 'NOT_FOUND', 'Order not found in your assigned city.');
       if (order.fulfilmentMethod !== 'delivery' || !canAssignDeliveryPartner(order.fulfilmentStatus, Boolean(order.deliveryPartner))) {
-        throw new AppError(409, 'DELIVERY_PARTNER_NOT_ALLOWED', 'Only eligible, unassigned delivery orders or failed deliveries can be assigned.');
+        throw new AppError(409, 'DELIVERY_PARTNER_NOT_ALLOWED', 'Delivery partner can only be assigned once the seller marks the order as Ready for Pickup, or reassigned after a failed delivery.');
       }
       if (order.deliveryPartner && !reassignmentReason) {
         throw new AppError(400, 'REASSIGNMENT_REASON_REQUIRED', 'A reason is required to reassign a delivery partner.');
@@ -432,7 +432,7 @@ export const arbitrateCityAdminReturnDispute: RequestHandler = async (req, res) 
     }
   }
 
-  const nextStatus = input.decision === 'approved' ? 'return_accepted' : 'return_rejected';
+  let nextStatus: 'return_accepted' | 'return_rejected' = input.decision === 'approved' ? 'return_accepted' : 'return_rejected';
   order.fulfilmentStatus = nextStatus;
   order.returnRequest.status = input.decision === 'approved' ? 'accepted' : 'rejected';
   order.returnRequest.arbitration = {
@@ -461,6 +461,63 @@ export const arbitrateCityAdminReturnDispute: RequestHandler = async (req, res) 
         ? `RETURN_ACCEPTED by City Admin: ${input.reviewNote}${penaltySummaryText}`
         : `RETURN_REJECTED by City Admin: ${input.reviewNote}`,
   });
+
+  // Autonomous Reverse Partner Fetch & Auto-Assignment upon approval
+  if (input.decision === 'approved') {
+    const customerLat = order.address?.latitude ?? 23.8342;
+    const customerLng = order.address?.longitude ?? 79.4385;
+    const onlinePartners = await User.find({
+      role: 'delivery_partner',
+      status: 'active',
+      isOnline: true,
+      availabilityStatus: { $ne: 'offline' },
+      assignedCity: cityFilter(city),
+    }).select('_id name phoneE164 currentLocation serviceableLocalities').lean();
+
+    let closestPartner: (typeof onlinePartners)[0] | null = null;
+    let shortestDist = Infinity;
+
+    for (const p of onlinePartners) {
+      const pLat = p.currentLocation?.latitude ?? 23.8415;
+      const pLng = p.currentLocation?.longitude ?? 79.445;
+      const dist = haversineDistanceKm(customerLat, customerLng, pLat, pLng) ?? 999;
+      if (dist < shortestDist) {
+        shortestDist = dist;
+        closestPartner = p;
+      }
+    }
+
+    if (closestPartner) {
+      order.fulfilmentStatus = 'return_partner_assigned';
+      order.returnRequest.status = 'partner_assigned';
+      order.returnRequest.reverseDeliveryPartner = {
+        userId: closestPartner._id,
+        name: closestPartner.name || 'Delivery Partner',
+        phoneE164: closestPartner.phoneE164,
+        distanceKm: shortestDist,
+        latitude: closestPartner.currentLocation?.latitude ?? 23.8415,
+        longitude: closestPartner.currentLocation?.longitude ?? 79.445,
+        assignedAt: new Date(),
+        assignedBy: new mongoose.Types.ObjectId(actorId),
+      };
+      order.deliveryPartner = {
+        userId: closestPartner._id,
+        name: closestPartner.name || 'Delivery Partner',
+        phoneE164: closestPartner.phoneE164,
+        distanceKm: shortestDist,
+        latitude: closestPartner.currentLocation?.latitude ?? 23.8415,
+        longitude: closestPartner.currentLocation?.longitude ?? 79.445,
+        assignedAt: new Date(),
+        assignedBy: new mongoose.Types.ObjectId(actorId),
+      };
+      order.statusHistory.push({
+        status: 'return_partner_assigned',
+        changedAt: new Date(),
+        actorType: 'system',
+        note: `Autonomous Reverse Dispatch: Nearest available partner ${closestPartner.name} (${shortestDist.toFixed(1)} km) auto-selected for return collection.`,
+      });
+    }
+  }
 
   await order.save();
   await AuditLog.create({

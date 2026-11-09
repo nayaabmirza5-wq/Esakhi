@@ -21,6 +21,7 @@ export const verifyOtpSchema = z.object({
 
 export const updateProfileSchema = z.object({
   name: z.string().trim().min(1).max(120),
+  email: z.string().trim().email("Enter a valid email address.").optional().or(z.literal("")),
 }).strict();
 
 export const savedAddressSchema = z.object({

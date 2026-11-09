@@ -27,6 +27,8 @@ import { requireRole } from './middleware/requireRole.js';
 import { sellerRoutes } from './modules/seller/seller.routes.js';
 import { sellerApplicationRoutes } from './modules/seller/sellerApplication.routes.js';
 import { deliveryPartnerApplicationRoutes } from './modules/cityAdmin/deliveryPartnerApplication.routes.js';
+import { lookupShgCode } from './modules/seller/seller.controller.js';
+import { paymentRoutes } from './modules/payments/payment.routes.js';
 
 // helmet's typings differ between installs under NodeNext (default export may resolve to the module namespace).
 type HelmetFactory = () => express.RequestHandler;
@@ -124,10 +126,15 @@ app.get('/ready', (_req, res) => {
 
 const apiLimiter = rateLimit({
   windowMs: 60_000,
-  limit: 120,
+  limit: process.env.NODE_ENV === 'development' ? 2500 : 1500,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
-  skip: (req) => req.path === '/health' || req.path === '/ready',
+  skip: (req) =>
+    req.path === '/health' ||
+    req.path === '/ready' ||
+    req.originalUrl.includes('/track/partner') ||
+    req.path.includes('/track/partner') ||
+    req.originalUrl.includes('/city-admin/'),
   message: {
     success: false,
     error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many requests. Try again later.' },
@@ -152,6 +159,7 @@ api.use('/products', productRoutes);
 api.get('/categories', categoriesController);
 api.use('/service-area', settingsRoutes);
 api.use('/orders', customerOrderRoutes);
+api.use('/payments', paymentRoutes);
 api.use('/delivery-partners', deliveryPartnerRoutes);
 api.use('/admin/products', adminProductRoutes);
 api.use('/admin/orders', adminOrderRoutes);
@@ -164,6 +172,7 @@ api.use('/city-admin', cityAdminRoutes);
 api.get('/track/partner/:orderId', requireAuth, requireRole('city_admin', 'admin', 'super_admin'), trackCityAdminOrderPartner);
 api.use('/seller', sellerRoutes);
 api.use('/seller-applications', sellerApplicationRoutes);
+api.get('/shg/lookup/:code', lookupShgCode);
 api.use('/delivery-partner-applications', deliveryPartnerApplicationRoutes);
 app.use('/api/v1', api);
 app.use('/api', api);

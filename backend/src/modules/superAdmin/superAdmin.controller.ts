@@ -6,6 +6,7 @@ import { PenaltyLedger } from '../orders/penaltyLedger.model.js';
 import { resolveOrderSellerPickup } from '../orders/order.controller.js';
 import { Product } from '../catalog/product.model.js';
 import { User } from '../auth/user.model.js';
+import { Seller } from '../../models/Seller.js';
 import { sendData, sendPage } from '../../utils/apiResponse.js';
 import { AppError } from '../../utils/AppError.js';
 import { authenticatedUserId } from '../../utils/authenticatedUser.js';
@@ -233,11 +234,22 @@ export const processSuperAdminOrderRefund: RequestHandler = async (req, res) => 
     rawAccNum.length > 4 ? `${'*'.repeat(Math.max(4, rawAccNum.length - 4))}${rawAccNum.slice(-4)}` : rawAccNum;
   const txRef = `RFND-${Date.now().toString(36).toUpperCase()}-${order.orderReference.slice(-4)}`;
 
+  const returnFeeDeductionPaise = (
+    order.returnRequest.reasonCode === 'changed_mind' ||
+    order.returnRequest.arbitration?.faultAttribution === 'no_fault'
+  ) ? 3500 : 0;
+  const actualRefundPaise = Math.max(0, order.totalPaise - returnFeeDeductionPaise);
+
   order.fulfilmentStatus = 'refund_completed';
   order.paymentStatus = 'refunded';
   order.returnRequest.status = 'refund_completed';
   order.returnRequest.refund = {
-    refundAmountPaise: order.totalPaise,
+    refundAmountPaise: actualRefundPaise,
+    deductionAmountPaise: returnFeeDeductionPaise,
+    deductionNote: returnFeeDeductionPaise > 0
+      ? 'Reverse pickup logistics fee (\u20b935) deducted for discretionary return.'
+      : 'Full 100% refund disbursed with zero deductions.',
+
     bankAccountHolderName: bank?.accountHolderName || order.customerName,
     bankAccountNumberMasked: maskedAccount,
     bankName: bank?.bankName || 'Linked Customer Bank',
@@ -744,7 +756,22 @@ export const getSuperAdminSellers: RequestHandler = async (req, res) => {
       .lean(),
     User.countDocuments({ role: 'seller' }),
   ]);
-  sendPage(res, sellers, query.page, query.limit, total);
+  const sellerIds = sellers.map((s) => s._id);
+  const sellerDocs = await Seller.find({ userId: { $in: sellerIds } } as any).lean();
+  const sellerDocMap = new Map((sellerDocs as any[]).map((s) => [String(s.userId), s]));
+  const enriched = sellers.map((seller: any) => {
+    const profile = sellerDocMap.get(String(seller._id)) as any;
+    return {
+      ...seller,
+      name: profile?.supplierDetails?.shgName || seller.name || 'Seller',
+      shgName: profile?.supplierDetails?.shgName,
+      shgLeaderName: profile?.supplierDetails?.shgLeaderName,
+      category: profile?.supplierDetails?.category,
+      verificationStatus: profile?.status === 'ACTIVE' ? 'verified' : 'verified',
+      sellerProfile: profile,
+    };
+  });
+  sendPage(res, enriched, query.page, query.limit, total);
 };
 
 export const getSuperAdminSeller: RequestHandler = async (req, res) => {
@@ -753,7 +780,8 @@ export const getSuperAdminSeller: RequestHandler = async (req, res) => {
     .select('name phoneE164 email assignedCity status createdAt')
     .lean();
   if (!seller) throw new AppError(404, 'NOT_FOUND', 'Seller not found.');
-  sendData(res, seller);
+  const sellerProfile = await Seller.findOne({ userId: new mongoose.Types.ObjectId(userId) }).lean();
+  sendData(res, { ...seller, sellerProfile });
 };
 
 const auditLogQuerySchema = z.object({

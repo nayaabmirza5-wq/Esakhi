@@ -8,6 +8,7 @@ import { AuditLog } from '../audit/auditLog.model.js';
 import { Order } from '../orders/order.model.js';
 import { Product } from '../catalog/product.model.js';
 import { User } from '../auth/user.model.js';
+import { DeliveryPartner } from '../../models/DeliveryPartner.js';
 
 const pageSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -127,34 +128,65 @@ export const updateCustomerStatus: RequestHandler = async (req, res) => {
 export const listDeliveryPartners: RequestHandler = async (req, res) => {
   const { page, limit } = pageSchema.parse(req.query);
   const [partners, total] = await Promise.all([
-    User.find({ role: 'delivery_partner' }).select('phoneE164 name email role status createdAt').sort({ createdAt: -1 })
-      .skip((page - 1) * limit).limit(limit).lean(),
+    User.find({ role: 'delivery_partner' })
+      .select('phoneE164 name email role status assignedCity serviceableLocalities isOnline availabilityStatus createdAt')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
     User.countDocuments({ role: 'delivery_partner' }),
   ]);
-  const workloads = await Order.aggregate([
-    { $match: { fulfilmentMethod: 'delivery', fulfilmentStatus: { $nin: ['delivered', 'completed', 'cancelled'] } } },
-    { $group: { _id: '$deliveryPartner.userId', assignedCount: { $sum: 1 } } },
+  const partnerIds = partners.map((p) => p._id);
+  const [workloads, deliveryPartners] = await Promise.all([
+    Order.aggregate([
+      { $match: { fulfilmentMethod: 'delivery', fulfilmentStatus: { $nin: ['delivered', 'completed', 'cancelled'] } } },
+      { $group: { _id: '$deliveryPartner.userId', assignedCount: { $sum: 1 } } },
+    ]),
+    DeliveryPartner.find({ userId: { $in: partnerIds } }).lean(),
   ]);
   const workloadByPartner = new Map(workloads.map((workload) => [String(workload._id), workload.assignedCount]));
-  const workload = partners.map((partner) => ({
-    ...partner,
-    assignedCount: workloadByPartner.get(String(partner._id)) ?? 0,
-  }));
+  const dpByUserId = new Map(deliveryPartners.map((dp) => [String(dp.userId), dp]));
+  const workload = partners.map((partner, index) => {
+    const dp = dpByUserId.get(String(partner._id));
+    return {
+      ...partner,
+      partnerId: dp?.partnerId || `DMH-DP-${1000 + index}`,
+      operatingCity: dp?.operatingCity || partner.assignedCity || 'Damoh',
+      vehicleType: dp?.vehicleDetails?.vehicleType || 'CYCLE',
+      assignedCount: workloadByPartner.get(String(partner._id)) ?? 0,
+      partnerProfile: dp || null,
+    };
+  });
   sendPage(res, workload, page, limit, total);
 };
 
 export const getDeliveryPartner: RequestHandler = async (req, res) => {
   const { userId } = z.object({ userId: z.string().regex(/^[a-f\d]{24}$/i) }).parse(req.params);
   const { page, limit } = pageSchema.parse(req.query);
-  const partner = await User.findOne({ _id: userId, role: 'delivery_partner' })
-    .select('phoneE164 name email role status createdAt').lean();
+  const [partner, partnerProfile] = await Promise.all([
+    User.findOne({ _id: userId, role: 'delivery_partner' })
+      .select('phoneE164 name email role status assignedCity serviceableLocalities isOnline availabilityStatus bankAccount createdAt')
+      .lean(),
+    DeliveryPartner.findOne({ userId }).lean(),
+  ]);
   if (!partner) throw new AppError(404, 'NOT_FOUND', 'Delivery partner not found.');
   const filter = { 'deliveryPartner.userId': partner._id };
   const [orders, total] = await Promise.all([
     Order.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
     Order.countDocuments(filter),
   ]);
-  sendData(res, { partner, orders: { data: orders, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } } });
+  sendData(res, {
+    partner: {
+      ...partner,
+      partnerId: partnerProfile?.partnerId,
+      operatingCity: partnerProfile?.operatingCity || partner.assignedCity || 'Damoh',
+      vehicleDetails: partnerProfile?.vehicleDetails,
+      kycDetails: partnerProfile?.kycDetails,
+      bankDetails: partnerProfile?.bankDetails,
+      partnerProfile,
+    },
+    orders: { data: orders, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } },
+  });
 };
 
 export const updateDeliveryPartnerStatus: RequestHandler = async (req, res) => {

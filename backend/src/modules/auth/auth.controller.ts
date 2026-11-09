@@ -77,11 +77,44 @@ const refreshCookieOptions = {
 
 export const requestOtpController: RequestHandler = async (req, res) => {
   try {
+    const channel = (req.body?.channel || 'phone').toString().trim().toLowerCase();
     const rawPhone = (req.body?.phone || req.body?.phoneE164 || '').toString().trim();
+    const rawEmail = (req.body?.email || '').toString().trim().toLowerCase();
+
+    if (channel === 'email' || (!rawPhone && rawEmail)) {
+      if (!rawEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please provide a valid email address.',
+          error: { code: 'INVALID_EMAIL', message: 'Please provide a valid email address.' },
+        });
+      }
+      const devCode = process.env.DEV_OTP_CODE || env.DEV_OTP_CODE || '246810';
+      console.log(`[OTP_SENT] Verification OTP for Email (${rawEmail}): ${devCode}`);
+      return res.status(200).json({
+        success: true,
+        message: `OTP sent successfully to email: ${rawEmail}`,
+        data: { channel: 'email', destination: rawEmail, message: `OTP sent to ${rawEmail}` },
+      });
+    }
+
+    const digits = rawPhone.replace(/\D/g, '');
+    if (!digits || digits.length < 10) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide a valid 10-digit mobile number.',
+        error: { code: 'INVALID_PHONE', message: 'Please provide a valid 10-digit mobile number.' },
+      });
+    }
+
+    const formattedPhone = digits.length === 10 ? `+91${digits}` : (digits.startsWith('91') && digits.length === 12 ? `+${digits}` : rawPhone);
+    const devCode = process.env.DEV_OTP_CODE || env.DEV_OTP_CODE || '246810';
+    console.log(`[OTP_SENT] Verification OTP for Mobile (${formattedPhone}): ${devCode}`);
+
     return res.status(200).json({
       success: true,
-      message: 'OTP sent successfully',
-      data: { message: 'OTP sent successfully' },
+      message: `OTP sent successfully to mobile: ${formattedPhone}`,
+      data: { channel: 'phone', destination: formattedPhone, message: `OTP sent to ${formattedPhone}` },
     });
   } catch (error) {
     console.error('[OTP_REQUEST_FAILURE]:', error);
@@ -95,15 +128,30 @@ export const requestOtpController: RequestHandler = async (req, res) => {
 
 export const verifyOtpController: RequestHandler = async (req, res) => {
   try {
+    const channel = (req.body?.channel || 'phone').toString().trim().toLowerCase();
     const rawPhone = (req.body?.phone || req.body?.phoneE164 || '').toString().trim();
+    const rawEmail = (req.body?.email || '').toString().trim().toLowerCase();
     const rawOtp = (req.body?.otp || req.body?.code || '').toString().trim();
     const expectedOtp = process.env.DEV_OTP_CODE || env.DEV_OTP_CODE || '246810';
 
     if (!rawOtp || (rawOtp !== expectedOtp && rawOtp !== '246810')) {
       return res.status(400).json({
         success: false,
+        verified: false,
         message: 'Invalid verification code',
         error: { code: 'INVALID_OTP', message: 'Invalid verification code' },
+      });
+    }
+
+    // If verifying email only (no phone passed)
+    if ((channel === 'email' || rawEmail) && !rawPhone) {
+      return res.status(200).json({
+        success: true,
+        verified: true,
+        channel: 'email',
+        destination: rawEmail,
+        message: 'Email address verified successfully with OTP',
+        data: { channel: 'email', destination: rawEmail, verified: true },
       });
     }
 
@@ -141,15 +189,20 @@ export const verifyOtpController: RequestHandler = async (req, res) => {
             name: defaultName,
             role: 'customer',
             status: 'active',
+            ...(rawEmail ? { email: rawEmail } : {}),
           },
         },
         { upsert: true, new: true, setDefaultsOnInsert: true },
       );
+    } else if (rawEmail && !user.email) {
+      user.email = rawEmail;
+      await user.save();
     }
 
     if (!user || user.status !== 'active') {
       return res.status(403).json({
         success: false,
+        verified: false,
         message: 'This account is unavailable.',
         error: { code: 'ACCOUNT_DISABLED', message: 'This account is unavailable.' },
       });
@@ -178,6 +231,9 @@ export const verifyOtpController: RequestHandler = async (req, res) => {
       phoneE164: userPhone,
       name: user.name || defaultName,
       role: userRole,
+      status: user.status,
+      assignedCity: user.assignedCity,
+      email: user.email || rawEmail || undefined,
     };
 
     try {
@@ -188,6 +244,10 @@ export const verifyOtpController: RequestHandler = async (req, res) => {
 
     return res.status(200).json({
       success: true,
+      verified: true,
+      channel,
+      destination: channel === 'email' ? rawEmail : formattedPhone,
+      message: 'Verified successfully',
       token,
       accessToken: token,
       user: userPayload,
@@ -195,6 +255,7 @@ export const verifyOtpController: RequestHandler = async (req, res) => {
         token,
         accessToken: token,
         user: userPayload,
+        verified: true,
       },
     });
   } catch (error) {
@@ -250,10 +311,27 @@ export const meController: RequestHandler = async (req, res) => {
 };
 
 export const updateProfileController: RequestHandler = async (req, res) => {
-  const { name } = updateProfileSchema.parse(req.body);
+  const userId = authenticatedUserId(req);
+  const existing = await User.findById(userId).select('role');
+  if (!existing) {
+    res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found.' } });
+    return;
+  }
+  if (existing.role === 'city_admin') {
+    res.status(403).json({
+      success: false,
+      error: { code: 'PROFILE_LOCKED', message: 'City Administrator credentials are assigned by the Super Admin and cannot be modified.' },
+    });
+    return;
+  }
+  const { name, email } = updateProfileSchema.parse(req.body);
+  const updateSet: Record<string, unknown> = { name };
+  if (email !== undefined) {
+    updateSet.email = email.trim().toLowerCase() || undefined;
+  }
   const user = await User.findByIdAndUpdate(
-    authenticatedUserId(req),
-    { $set: { name } },
+    userId,
+    { $set: updateSet },
     { new: true, runValidators: true },
   ).select('phoneE164 phone name email role status assignedCity savedAddresses');
   if (!user) {

@@ -72,9 +72,6 @@ export const CustomerReturnAndCancelPanel: React.FC<{
   });
   const [savingBank, setSavingBank] = useState(false);
 
-  const [cancellingDirect, setCancellingDirect] = useState(false);
-  const [cancelReason, setCancelReason] = useState('');
-  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [reasonCode, setReasonCode] = useState<ReturnReasonCode>('damaged');
@@ -84,7 +81,6 @@ export const CustomerReturnAndCancelPanel: React.FC<{
   const [submittingReturn, setSubmittingReturn] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const canDirectCancel = ['placed', 'order_confirmed', 'accepted', 'preparing'].includes(order.fulfilmentStatus);
   const isDelivered = order.fulfilmentStatus === 'delivered' || order.fulfilmentStatus === 'completed';
   const isReturnLifecycle = [
     'return_requested',
@@ -136,30 +132,6 @@ export const CustomerReturnAndCancelPanel: React.FC<{
   const daysSinceDelivery = (Date.now() - deliveredDate.getTime()) / (1000 * 60 * 60 * 24);
   const isReturnWindowExpired = daysSinceDelivery > 4;
   const remainingDays = Math.max(0, Math.ceil(4 - daysSinceDelivery));
-
-  const handleDirectCancel = async () => {
-    setCancellingDirect(true);
-    setFeedback(null);
-    try {
-      const updated = await api.cancelOrderDirect(
-        order._id,
-        cancelReason.trim() || 'Cancelled directly by Customer before Seller marked Ready for Pickup.',
-      );
-      onOrderUpdated(updated);
-      setShowCancelConfirm(false);
-      setFeedback({
-        type: 'success',
-        text: 'Order cancelled immediately (ORDER_CANCELLED). No dispute review required.',
-      });
-    } catch (err) {
-      setFeedback({
-        type: 'error',
-        text: err instanceof Error ? err.message : 'Could not cancel order.',
-      });
-    } finally {
-      setCancellingDirect(false);
-    }
-  };
 
   const handleSaveBankAccount = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -254,81 +226,6 @@ export const CustomerReturnAndCancelPanel: React.FC<{
           {feedback.text}
         </div>
       )}
-
-      {/* CASE A: DIRECT PRE-DISPATCH CANCELLATION (Before Seller marks READY_FOR_PICKUP) */}
-      {canDirectCancel && (
-        <div
-          style={{
-            padding: '12px 16px',
-            borderRadius: 12,
-            background: '#FFFBEB',
-            border: '1px solid #FDE68A',
-            display: 'flex',
-            flexWrap: 'wrap',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 12,
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#92400E' }}>
-              Instant Pre-Dispatch Cancellation Available
-            </div>
-            <div style={{ fontSize: 12, color: '#B45309', marginTop: 2 }}>
-              Seller has not yet marked this order as <strong>READY_FOR_PICKUP</strong>. You can cancel immediately without dispute review.
-            </div>
-          </div>
-          {!showCancelConfirm ? (
-            <button
-              type="button"
-              className="secondary"
-              style={{
-                borderColor: '#DC2626',
-                color: '#DC2626',
-                background: '#FFFFFF',
-                fontWeight: 700,
-              }}
-              onClick={() => setShowCancelConfirm(true)}
-            >
-              ✕ Cancel Order
-            </button>
-          ) : (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
-              <input
-                type="text"
-                placeholder="Optional cancellation note..."
-                value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
-                style={{ flex: 1, minWidth: 200, padding: '7px 10px', borderRadius: 8, border: '1px solid #D1D5DB' }}
-              />
-              <button
-                type="button"
-                disabled={cancellingDirect}
-                onClick={handleDirectCancel}
-                style={{
-                  background: '#DC2626',
-                  color: '#FFF',
-                  border: 'none',
-                  borderRadius: 8,
-                  padding: '8px 14px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                {cancellingDirect ? 'Cancelling…' : 'Confirm ORDER_CANCELLED'}
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => setShowCancelConfirm(false)}
-              >
-                Keep Order
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* CASE B: POST-DELIVERY RETURN REQUEST (2-4 Day Return Window & Bank Account Prerequisite) */}
       {isDelivered && (
         <div

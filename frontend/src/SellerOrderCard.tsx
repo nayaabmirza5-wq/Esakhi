@@ -111,6 +111,7 @@ export function SellerOrderCard({
   onTransitionStatus: (order: SellerOrder, nextStatus: 'preparing' | 'ready_for_pickup' | 'completed') => Promise<void>;
 }): ReactNode {
   const [expanded, setExpanded] = useState(false);
+  const [showSlip, setShowSlip] = useState(false);
   const [inspectionImages, setInspectionImages] = useState<string[]>(
     order.preDispatchInspection?.imageUrls?.length === 5
       ? order.preDispatchInspection.imageUrls
@@ -177,12 +178,6 @@ export function SellerOrderCard({
   };
 
   const handleActionClick = async (nextStatus: 'preparing' | 'ready_for_pickup' | 'completed') => {
-    const confirmText = nextStatus === 'preparing'
-      ? `Start preparing order #${order.orderReference} (${itemsPreview})?`
-      : nextStatus === 'ready_for_pickup'
-        ? `Confirm that 5 pre-dispatch inspection images are attached and order #${order.orderReference} is READY FOR PICKUP? This will immediately notify the City Admin to dispatch the nearest available Delivery Partner.`
-        : `Confirm customer pickup completed for #${order.orderReference}?`;
-    if (!window.confirm(confirmText)) return;
     if (nextStatus === 'ready_for_pickup') {
       await api
         .uploadSellerOrderInspectionImages(order._id, {
@@ -508,14 +503,24 @@ export function SellerOrderCard({
           borderTop: '1px solid rgba(107, 33, 92, 0.12)',
         }}
       >
-        <button
-          type="button"
-          className="seller-secondary-action"
-          onClick={() => setExpanded((prev) => !prev)}
-          style={{ fontSize: '0.84rem', padding: '0.42rem 0.8rem' }}
-        >
-          {expanded ? 'Hide Item & Timeline Details ▲' : 'View Item & Timeline Details ▼'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="seller-secondary-action"
+            onClick={() => setExpanded((prev) => !prev)}
+            style={{ fontSize: '0.84rem', padding: '0.42rem 0.8rem' }}
+          >
+            {expanded ? 'Hide Details ▲' : 'View Details ▼'}
+          </button>
+          <button
+            type="button"
+            className="seller-secondary-action"
+            onClick={() => setShowSlip(true)}
+            style={{ fontSize: '0.84rem', padding: '0.42rem 0.8rem', background: '#f8fafc', color: '#475569', border: '1px solid #cbd5e1' }}
+          >
+            📄 Packing Slip
+          </button>
+        </div>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.65rem' }}>
           {/* Stage 1: ORDER_CONFIRMED -> Primary CTA: Mark as Preparing */}
@@ -536,7 +541,7 @@ export function SellerOrderCard({
                 boxShadow: '0 4px 12px rgba(217, 119, 6, 0.28)',
               }}
             >
-              {isUpdating ? '⟳ Syncing Status…' : 'Mark as Preparing →'}
+              {isUpdating ? '⟳ Updating…' : '✓ Accept & Pack'}
             </button>
           )}
 
@@ -558,7 +563,7 @@ export function SellerOrderCard({
                 boxShadow: '0 4px 12px rgba(29, 107, 67, 0.28)',
               }}
             >
-              {isUpdating ? '⟳ Notifying City Admin…' : '✓ Attach 5 Photos & Mark Ready for Pickup'}
+              {isUpdating ? '⟳ Notifying Fleet…' : '📦 Ready for Delivery Partner'}
             </button>
           )}
 
@@ -647,6 +652,108 @@ export function SellerOrderCard({
           )}
         </div>
       </footer>
+      {/* Printable Dispatch Packing Slip Modal */}
+      {showSlip && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '1rem',
+          }}
+          onClick={() => setShowSlip(false)}
+        >
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: '16px',
+              maxWidth: '540px',
+              width: '100%',
+              padding: '1.75rem',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.25)',
+              display: 'grid',
+              gap: '1rem',
+              position: 'relative',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #e2e8f0', paddingBottom: '0.85rem' }}>
+              <div>
+                <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#6b215c', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  eSakhi Damoh · Dispatch Packing Slip
+                </div>
+                <h3 style={{ margin: '0.2rem 0 0', fontSize: '1.35rem', color: '#0f172a' }}>
+                  Order #{order.orderReference}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSlip(false)}
+                style={{ background: 'transparent', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: '#64748b' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', background: '#f8fafc', padding: '0.85rem', borderRadius: '10px', fontSize: '0.82rem' }}>
+              <div>
+                <span style={{ color: '#64748b', display: 'block' }}>Order Date:</span>
+                <strong>{new Date(order.createdAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })}</strong>
+              </div>
+              <div>
+                <span style={{ color: '#64748b', display: 'block' }}>Fulfilment Method:</span>
+                <strong style={{ textTransform: 'uppercase' }}>{order.fulfilmentMethod}</strong>
+              </div>
+            </div>
+
+            <div>
+              <strong style={{ fontSize: '0.84rem', color: '#334155', display: 'block', marginBottom: '0.4rem' }}>
+                Item Checklist:
+              </strong>
+              <div style={{ display: 'grid', gap: '0.4rem', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.65rem' }}>
+                {order.items.map((item, idx) => (
+                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.88rem' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                      <input type="checkbox" defaultChecked />
+                      <span>{item.productName}</span>
+                    </label>
+                    <strong>× {item.quantity}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '0.65rem 0.85rem', borderRadius: '8px', fontSize: '0.78rem', color: '#065f46' }}>
+              ✓ 5-Angle Pre-Dispatch Inspection Verified by Rural Artisan Group
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.65rem', borderTop: '1px solid #e2e8f0', paddingTop: '0.85rem' }}>
+              <button
+                type="button"
+                className="seller-secondary-action"
+                onClick={() => setShowSlip(false)}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="seller-primary-action"
+                onClick={() => window.print()}
+                style={{ background: '#6b215c', color: '#ffffff' }}
+              >
+                🖨️ Print Packing Slip
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </article>
   );
 }

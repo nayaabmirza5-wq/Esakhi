@@ -35,21 +35,15 @@ export function canCustomerDirectCancel(status: FulfilmentStatus): boolean {
 
 export function canAssignDeliveryPartner(status: FulfilmentStatus, hasAssignment: boolean): boolean {
   const assignableStatus =
-    status === 'placed' ||
-    status === 'order_confirmed' ||
-    status === 'accepted' ||
-    status === 'preparing' ||
     status === 'ready_for_pickup' ||
     status === 'delivery_partner_assigned' ||
     status === 'out_for_pickup' ||
-    status === 'picked_up' ||
-    status === 'out_for_delivery' ||
     status === 'delivery_failed';
-  return assignableStatus && (!hasAssignment || status === 'delivery_failed');
+  return assignableStatus && (!hasAssignment || status === 'delivery_failed' || status === 'delivery_partner_assigned' || status === 'out_for_pickup');
 }
 
 export function statusAfterDeliveryPartnerAssignment(status: FulfilmentStatus): FulfilmentStatus {
-  return status === 'delivery_failed' ? 'delivery_partner_assigned' : status;
+  return status === 'ready_for_pickup' || status === 'delivery_failed' ? 'delivery_partner_assigned' : status;
 }
 
 export function nextFulfilmentStatus(

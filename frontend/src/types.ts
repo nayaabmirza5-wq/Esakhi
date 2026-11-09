@@ -22,6 +22,7 @@ export type ReturnReasonCode =
   | 'defective'
   | 'wrong_item'
   | 'box_mutilated'
+  | 'changed_mind'
   | 'other';
 
 export type ReturnFaultAttribution =
@@ -70,6 +71,8 @@ export interface OrderReturnRequest {
   escalatedToSuperAdminAt?: string;
   refund?: {
     refundAmountPaise?: number;
+    deductionAmountPaise?: number;
+    deductionNote?: string;
     bankAccountHolderName?: string;
     bankAccountNumberMasked?: string;
     bankName?: string;
@@ -255,6 +258,11 @@ export interface PartnerProfile {
   isOnline: boolean;
   availabilityStatus: 'available' | 'busy' | 'offline';
   activeOrderCount: number;
+  unremittedCashPaise?: number;
+  remittancePin?: string;
+  remittancePinExpiresAt?: string;
+  expiresInSeconds?: number;
+  exceedsCodThreshold?: boolean;
   currentLocation: {
     latitude: number;
     longitude: number;
@@ -440,7 +448,7 @@ export interface Order {
   subtotalPaise: number;
   deliveryFeePaise: number;
   totalPaise: number;
-  paymentMethod: 'upi' | 'cash';
+  paymentMethod: 'upi' | 'cash' | 'card' | 'netbanking' | 'doorstep_upi' | string;
   paymentStatus: 'pending_verification' | 'confirmed' | 'rejected' | 'refunded';
   fulfilmentMethod: 'delivery' | 'pickup';
   fulfilmentStatus: string;
@@ -456,6 +464,20 @@ export interface Order {
     phoneE164?: string;
     email?: string;
     assignedCity?: string;
+  };
+  deliveryOtp?: string;
+  requiresDeliveryOtp?: boolean;
+  isPrepaid?: boolean;
+  amountToCollectPaise?: number;
+  doorstepPayment?: {
+    mode?: 'cash' | 'upi_qr' | 'prepaid_online';
+    upiUtr?: string;
+    collectedAmountPaise?: number;
+    collectedAt?: string;
+    remittedToCityAdmin?: boolean;
+    remittedAt?: string;
+    remittedReceiptNumber?: string;
+    notes?: string;
   };
   pickupInstructions?: string;
   statusHistory?: Array<{
@@ -482,6 +504,7 @@ export interface Order {
     unassignedAt: string;
     changeReason?: string;
   }>;
+  cancellationReason?: string;
   cancellationRequest?: {
     requestedAt?: string;
     customerNote?: string;
@@ -889,7 +912,7 @@ export interface CityAdminOrder {
   subtotalPaise: number;
   deliveryFeePaise: number;
   totalPaise: number;
-  paymentMethod: 'upi' | 'cash';
+  paymentMethod: 'upi' | 'cash' | 'card' | 'netbanking' | 'doorstep_upi' | string;
   paymentStatus: 'pending_verification' | 'confirmed' | 'rejected' | 'refunded';
   fulfilmentMethod: 'delivery' | 'pickup';
   fulfilmentStatus: string;
@@ -1032,3 +1055,216 @@ export interface DeliveryTrackingInfo {
   roadHazardWarning?: string;
   timeline: Array<{ title: string; time: string; done: boolean; current?: boolean }>;
 }
+
+
+export interface SellerRecord {
+  _id?: string;
+  id?: string;
+  userId: string;
+  status: 'ACTIVE' | 'SUSPENDED';
+  stepCompleted: number;
+  isOnboardingComplete: boolean;
+  taxDetails: {
+    hasGst: boolean;
+    gstin?: string;
+    hasEnrolmentId: boolean;
+    enrolmentId?: string;
+    panNumber: string;
+    businessName: string;
+    email: string;
+  };
+  pickupAddress: {
+    streetAddress: string;
+    locality: string;
+    city: string;
+    state: string;
+    pincode: string;
+    landmark?: string;
+  };
+  bankDetails: {
+    accountHolderName: string;
+    bankName: string;
+    accountNumber: string;
+    ifscCode: string;
+    accountType: 'SAVINGS' | 'CURRENT';
+  };
+  supplierDetails: {
+    shgCode?: string;
+    shgName: string;
+    shgLeaderName: string;
+    numberOfMembers: number;
+    category: 'HANDICRAFT' | 'TEXTILES' | 'FOOD' | 'HERBAL';
+    isFoodSeller: boolean;
+    fssaiNumber?: string;
+    district: string;
+  };
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SellerOnboardingPayload {
+  phone?: string;
+  taxDetails: {
+    hasGst: boolean;
+    gstin?: string;
+    hasEnrolmentId: boolean;
+    enrolmentId?: string;
+    panNumber: string;
+    businessName: string;
+    email: string;
+  };
+  pickupAddress: {
+    streetAddress: string;
+    locality?: string;
+    city: string;
+    state: string;
+    pincode: string;
+    landmark?: string;
+  };
+  bankDetails: {
+    accountHolderName: string;
+    bankName?: string;
+    accountNumber: string;
+    ifscCode: string;
+    accountType: 'SAVINGS' | 'CURRENT';
+  };
+  supplierDetails: {
+    shgCode?: string;
+    shgName: string;
+    shgLeaderName: string;
+    numberOfMembers: number;
+    category: 'HANDICRAFT' | 'TEXTILES' | 'FOOD' | 'HERBAL';
+    isFoodSeller: boolean;
+    fssaiNumber?: string;
+    district: string;
+  };
+}
+
+export interface ShgLookupResult {
+  code: string;
+  shgName: string;
+  leaderName: string;
+  memberCount: number;
+  category: 'HANDICRAFT' | 'TEXTILES' | 'FOOD' | 'HERBAL';
+  isVerified: boolean;
+}
+
+export interface DeliveryPartnerRecord {
+  _id?: string;
+  userId: string;
+  partnerId: string;
+  operatingCity: string;
+  status: 'ACTIVE' | 'SUSPENDED';
+  isAvailable: boolean;
+  personalDetails: {
+    fullName: string;
+    phone: string;
+    emergencyPhone: string;
+    dob: string;
+  };
+  vehicleDetails: {
+    vehicleType: 'BIKE' | 'EV' | 'CYCLE';
+    dlNumber?: string;
+    rcNumber?: string;
+    isVerified: boolean;
+  };
+  kycDetails: {
+    panNumber: string;
+    aadharNumber: string;
+    isPanVerified: boolean;
+    isAadharVerified: boolean;
+  };
+  bankDetails: {
+    accountHolderName: string;
+    bankName: string;
+    branchName: string;
+    accountNumber: string;
+    ifscCode: string;
+    isVerified: boolean;
+  };
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface DamohDeliveryPartnerOnboardingPayload {
+  fullName: string;
+  phone: string;
+  emergencyPhone: string;
+  dob: string;
+  vehicleType: 'BIKE' | 'EV' | 'CYCLE';
+  dlNumber?: string;
+  rcNumber?: string;
+  panNumber: string;
+  aadharNumber: string;
+  bankDetails: {
+    accountHolderName: string;
+    bankName: string;
+    branchName: string;
+    accountNumber: string;
+    confirmAccountNumber: string;
+    ifscCode: string;
+  };
+}
+
+export interface CityAdminRemittancePartner {
+  partnerId: string;
+  name: string;
+  phoneE164: string;
+  isOnline: boolean;
+  availabilityStatus: 'available' | 'busy' | 'offline';
+  unremittedCashPaise: number;
+  unremittedCashRupees: string;
+  orderCount: number;
+  orders: Array<{
+    orderId: string;
+    orderReference: string;
+    customerName: string;
+    totalPaise: number;
+    totalRupees: string;
+  }>;
+  exceedsThreshold: boolean;
+}
+
+export interface CityAdminRemittanceSummary {
+  city: string;
+  totalOutstandingPaise: number;
+  totalOutstandingRupees: string;
+  thresholdLimitRupees: string;
+  partners: CityAdminRemittancePartner[];
+  recentVouchers: Array<{
+    _id: string;
+    receiptNumber: string;
+    riderName: string;
+    riderPhone: string;
+    amountRupees: string;
+    orderCount: number;
+    orderReferences: string[];
+    handshakePinUsed: string;
+    settledByAdminName: string;
+    settledAt: string;
+  }>;
+}
+
+export interface SettleRemittanceResponse {
+  success: boolean;
+  receiptNumber: string;
+  settledAmountPaise: number;
+  settledAmountRupees: string;
+  settledOrdersCount: number;
+  voucherId: string;
+  settledAt: string;
+}
+
+export type SellerProductDraft = {
+  categoryId: string;
+  subcategoryId: string;
+  productType: string;
+  name: string;
+  slug: string;
+  slugEdited: boolean;
+  description: string;
+  price: string;
+  stock: string;
+  lowStockThreshold: string;
+  imageUrl: string;
+};

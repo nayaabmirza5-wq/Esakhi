@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { requireAuth } from '../../middleware/requireAuth.js';
+import { requireAuth, optionalAuth } from '../../middleware/requireAuth.js';
 import { requireRole } from '../../middleware/requireRole.js';
+import { completeDeliveryPartnerOnboarding } from '../cityAdmin/deliveryPartnerApplication.controller.js';
 import {
   addInternalNote,
   assignDeliveryPartner,
@@ -26,6 +27,8 @@ import {
   reportPartnerDeliveryFailure,
   updatePartnerOrderStatus,
   updatePartnerReverseOrderStatus,
+  partnerRemitCashViaUpi,
+  regeneratePartnerRemittancePin,
   upsertCustomerBankAccount,
 } from './order.controller.js';
 
@@ -43,9 +46,12 @@ customerOrderRoutes.post('/:id/cancellation-requests', requestOrderCancellation)
 customerOrderRoutes.post('/:id/cancel-direct', cancelOrderDirect);
 customerOrderRoutes.post('/:id/return-request', submitCustomerReturnRequest);
 
+deliveryPartnerRoutes.post('/onboard', optionalAuth, completeDeliveryPartnerOnboarding);
 deliveryPartnerRoutes.use(requireAuth, requireRole('delivery_partner'));
 deliveryPartnerRoutes.get('/profile', getPartnerProfile);
 deliveryPartnerRoutes.patch('/availability', updatePartnerAvailability);
+deliveryPartnerRoutes.post('/remit-cash-upi', partnerRemitCashViaUpi);
+deliveryPartnerRoutes.post('/remittance-pin/regenerate', regeneratePartnerRemittancePin);
 deliveryPartnerRoutes.get('/orders', listAssignedPartnerOrders);
 deliveryPartnerRoutes.get('/orders/history', listPartnerDeliveryHistory);
 deliveryPartnerRoutes.get('/settlements', getPartnerSettlements);

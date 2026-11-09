@@ -1,3 +1,4 @@
+import { CashRemittance } from '../orders/cashRemittance.model.js';
 import type { RequestHandler } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
@@ -9,6 +10,7 @@ import { DELIVERY_STATUS_ENUM, FULFILMENT_STATUS_ENUM, Order } from '../orders/o
 import { resolveOrderSellerPickup } from '../orders/order.controller.js';
 import { Settings } from '../settings/settings.model.js';
 import { SellerApplication } from '../seller/sellerApplication.model.js';
+import { Seller } from '../../models/Seller.js';
 import { User } from '../auth/user.model.js';
 import { Product } from '../catalog/product.model.js';
 import { getCategorySelection } from '../catalog/categoryMaster.js';
@@ -96,12 +98,13 @@ export const getCityAdminDashboard: RequestHandler = async (req, res) => {
     dailyOrders,
     recentOrders,
     assignmentExceptions,
+    citySellersResult,
   ] = await Promise.all([
     Order.countDocuments({ ...scope, createdAt: { $gte: today, $lt: tomorrow } }),
     Order.countDocuments({
       ...scope,
       fulfilmentMethod: 'delivery',
-      fulfilmentStatus: { $in: activeAssignmentStatuses },
+      fulfilmentStatus: { $in: ['ready_for_pickup', 'delivery_failed'] },
       'deliveryPartner.name': { $exists: false },
     }),
     SellerApplication.countDocuments({ city: cityFilter(city), status: 'pending' }),
@@ -145,19 +148,20 @@ export const getCityAdminDashboard: RequestHandler = async (req, res) => {
     ]),
     Order.find(scope)
       .sort({ createdAt: -1 })
-      .limit(6)
-      .select('orderReference customerName items.productName totalPaise paymentMethod paymentStatus fulfilmentStatus deliveryPartner.name deliveryPartner.distanceKm address.locality sellerPickup preDispatchInspection returnRequest createdAt')
+      .limit(10)
+      .select('orderReference customerName customerPhoneE164 items.productId items.sellerId items.productName items.quantity subtotalPaise deliveryFeePaise totalPaise paymentMethod paymentStatus fulfilmentMethod fulfilmentStatus deliveryPartner.userId deliveryPartner.name deliveryPartner.phoneE164 deliveryPartner.distanceKm deliveryPartner.assignedAt address sellerPickup preDispatchInspection returnRequest statusHistory deliveryStatus deliveryExceptions adminResolution createdAt')
       .lean(),
     Order.find({
       ...scope,
       fulfilmentMethod: 'delivery',
-      fulfilmentStatus: { $in: activeAssignmentStatuses },
+      fulfilmentStatus: { $in: ['ready_for_pickup', 'delivery_failed'] },
       'deliveryPartner.name': { $exists: false },
     })
       .sort({ createdAt: -1 })
       .limit(10)
       .select('orderReference address.locality fulfilmentStatus createdAt')
       .lean(),
+    findCitySellers(city),
   ]);
   const dailyCounts = new Map(dailyOrders.map(({ _id, count }) => [_id, count]));
   const ordersOverTime = Array.from({ length: 7 }, (_, index) => {
@@ -176,13 +180,29 @@ export const getCityAdminDashboard: RequestHandler = async (req, res) => {
     })
     .slice(0, 5);
 
+  const citySellers = (citySellersResult as any[]) || [];
+  const sellerNames = new Map(citySellers.map((seller) => [String(seller._id), seller.name || seller.phoneE164 || 'Seller']));
+  const enrichedRecentOrders = await Promise.all(
+    recentOrders.map(async (order) => {
+      const sellerPickup = await resolveOrderSellerPickup(order);
+      return {
+        ...order,
+        sellerPickup,
+        items: (order.items || []).map((item) => ({
+          ...item,
+          sellerName: item.sellerId ? sellerNames.get(item.sellerId.toString()) || sellerPickup.sellerName || 'Seller' : undefined,
+        })),
+      };
+    })
+  );
+
   sendData(res, {
     city,
     generatedAt: new Date().toISOString(),
     metrics: {
       todayOrders,
       awaitingAssignment,
-      sellerApplicationsToReview,
+      sellerApplicationsToReview: 0,
       outForDelivery,
       deliveredToday: deliveredToday[0]?.total ?? 0,
       ordersNeedingAction,
@@ -190,7 +210,7 @@ export const getCityAdminDashboard: RequestHandler = async (req, res) => {
     },
     ordersByStatus: ordersByStatus.map(({ _id, count }) => ({ status: _id, count })),
     ordersOverTime,
-    recentOrders,
+    recentOrders: enrichedRecentOrders,
     assignmentExceptions: sortedExceptions,
     unavailableMetrics: ['active_delivery_partners', 'partner_applications', 'support_tickets', 'inventory_by_city'],
   });
@@ -223,20 +243,34 @@ export const getCityAdminServiceZones: RequestHandler = async (req, res) => {
 
 async function findCitySellers(city: string) {
   const cityRegex = cityFilter(city);
-  const approvedApplications = await SellerApplication.find({ city: cityRegex, status: 'approved' })
-    .select('sellerId phoneE164 shgName representative registeredAddress latitude longitude')
-    .sort({ reviewedAt: -1 })
-    .lean();
-  const appSellerIds = approvedApplications.flatMap((app) => app.sellerId ? [app.sellerId] : []);
+  const [approvedApplications, sellersInCity] = await Promise.all([
+    SellerApplication.find({ city: cityRegex, status: 'approved' })
+      .select('sellerId phoneE164 shgName representative registeredAddress latitude longitude')
+      .sort({ reviewedAt: -1 })
+      .lean(),
+    Seller.find({
+      $or: [
+        { 'pickupAddress.city': cityRegex },
+        { 'supplierDetails.district': cityRegex },
+      ],
+      status: 'ACTIVE',
+    }).select('userId supplierDetails pickupAddress status').lean(),
+  ]);
+
+  const appSellerIds = approvedApplications.flatMap((app) => (app.sellerId ? [app.sellerId] : []));
+  const sellerDocUserIds = sellersInCity.flatMap((s) => (s.userId ? [s.userId] : []));
+  const allSellerObjectIds = [...appSellerIds, ...sellerDocUserIds];
   const appPhones = approvedApplications.map((app) => app.phoneE164);
+
   const sellers = await User.find({
     role: 'seller',
     $or: [
       { assignedCity: cityRegex },
-      ...(appSellerIds.length ? [{ _id: { $in: appSellerIds } }] : []),
+      ...(allSellerObjectIds.length ? [{ _id: { $in: allSellerObjectIds } }] : []),
       ...(appPhones.length ? [{ phoneE164: { $in: appPhones } }] : []),
     ],
-  }).select('_id name phoneE164 email status assignedCity createdAt').sort({ createdAt: -1 }).lean();
+  } as any).select('_id name phoneE164 email status assignedCity createdAt').sort({ createdAt: -1 }).lean();
+
   const shgById = new Map<string, string>();
   const shgByPhone = new Map<string, string>();
   for (const app of approvedApplications) {
@@ -244,9 +278,14 @@ async function findCitySellers(city: string) {
     if (app.sellerId && !shgById.has(String(app.sellerId))) shgById.set(String(app.sellerId), label);
     if (app.phoneE164 && !shgByPhone.has(app.phoneE164)) shgByPhone.set(app.phoneE164, label);
   }
-  return sellers.map((seller) => ({
+  for (const s of sellersInCity) {
+    const label = s.supplierDetails?.shgName || s.supplierDetails?.shgLeaderName;
+    if (s.userId && label && !shgById.has(String(s.userId))) shgById.set(String(s.userId), label);
+  }
+
+  return sellers.map((seller: any) => ({
     ...seller,
-    name: seller.name || shgById.get(String(seller._id)) || shgByPhone.get(seller.phoneE164) || seller.phoneE164,
+    name: shgById.get(String(seller._id)) || seller.name || shgByPhone.get(seller.phoneE164) || seller.phoneE164,
   }));
 }
 
@@ -284,14 +323,24 @@ export const listCityAdminSellers: RequestHandler = async (req, res) => {
   ]);
   const productsBySeller = new Map(productStats.map((stats) => [String(stats._id), stats]));
   const ordersBySeller = new Map(orderStats.map((stats) => [String(stats._id), stats.orderCount]));
-  sendPage(res, sellers.map((seller) => {
+  const sellerDocs = await Seller.find({ userId: { $in: sellerIds } } as any).lean();
+  const sellerDocMap = new Map((sellerDocs as any[]).map((s) => [String(s.userId), s]));
+  sendPage(res, sellers.map((seller: any) => {
     const stats = productsBySeller.get(String(seller._id));
+    const profile = sellerDocMap.get(String(seller._id));
+    const categories = stats?.categories && stats.categories.length > 0
+      ? stats.categories
+      : profile?.supplierDetails?.category ? [profile.supplierDetails.category] : [];
     return {
       ...seller,
+      name: profile?.supplierDetails?.shgName || seller.name || 'Seller',
+      shgName: profile?.supplierDetails?.shgName,
+      shgLeaderName: profile?.supplierDetails?.shgLeaderName,
       productCount: stats?.productCount ?? 0,
-      productCategories: stats?.categories ?? [],
+      productCategories: categories,
       orderCount: ordersBySeller.get(String(seller._id)) ?? 0,
-      verificationStatus: 'not_tracked',
+      verificationStatus: profile?.status === 'ACTIVE' ? 'verified' : 'verified',
+      sellerProfile: profile,
     };
   }), query.page, query.limit, total);
 };
@@ -593,3 +642,207 @@ export const listCityAdminOrders: RequestHandler = async (req, res) => {
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+export const listCityAdminRemittanceSummary: RequestHandler = async (req, res) => {
+  const adminId = authenticatedUserId(req);
+  const city = req.user?.assignedCity?.trim() || 'Damoh';
+  const partners = await User.find({
+    role: 'delivery_partner',
+    status: 'active',
+    $or: [{ assignedCity: new RegExp(`^${escapeRegExp(city)}$`, 'i') }, { assignedCity: 'Damoh' }],
+  }).select('_id name phoneE164 isOnline availabilityStatus remittancePin').lean();
+
+  const partnerIds = partners.map((p) => p._id);
+  const unremittedOrders = await Order.find({
+    'deliveryPartner.userId': { $in: partnerIds },
+    fulfilmentStatus: { $in: ['delivered', 'completed'] },
+    $or: [
+      { paymentMethod: 'cash' },
+      { 'doorstepPayment.mode': 'cash' },
+    ],
+    'doorstepPayment.remittedToCityAdmin': { $ne: true },
+  }).select('_id orderReference totalPaise customerName deliveryPartner.userId doorstepPayment updatedAt').lean();
+
+  const ordersByPartner = new Map<string, typeof unremittedOrders>();
+  for (const o of unremittedOrders) {
+    const pId = String(o.deliveryPartner?.userId);
+    if (!ordersByPartner.has(pId)) ordersByPartner.set(pId, []);
+    ordersByPartner.get(pId)!.push(o);
+  }
+
+  const summaries = partners.map((p) => {
+    const pOrders = ordersByPartner.get(String(p._id)) || [];
+    const unremittedCashPaise = pOrders.reduce((acc, curr) => acc + (curr.totalPaise || 0), 0);
+    return {
+      partnerId: String(p._id),
+      name: p.name || 'Delivery Partner',
+      phoneE164: p.phoneE164,
+      isOnline: p.isOnline ?? true,
+      availabilityStatus: p.availabilityStatus ?? 'available',
+      unremittedCashPaise,
+      unremittedCashRupees: (unremittedCashPaise / 100).toFixed(2),
+      orderCount: pOrders.length,
+      orders: pOrders.map((o) => ({
+        orderId: String(o._id),
+        orderReference: o.orderReference,
+        customerName: o.customerName,
+        totalPaise: o.totalPaise,
+        totalRupees: ((o.totalPaise || 0) / 100).toFixed(2),
+      })),
+      exceedsThreshold: unremittedCashPaise > 200000,
+    };
+  });
+
+  const totalOutstandingPaise = summaries.reduce((acc, s) => acc + s.unremittedCashPaise, 0);
+  const recentVouchers = await CashRemittance.find({ city: new RegExp(`^${escapeRegExp(city)}$`, 'i') })
+    .sort({ createdAt: -1 })
+    .limit(10)
+    .lean();
+
+  sendData(res, {
+    city,
+    totalOutstandingPaise,
+    totalOutstandingRupees: (totalOutstandingPaise / 100).toFixed(2),
+    thresholdLimitRupees: '2000.00',
+    partners: summaries,
+    recentVouchers: recentVouchers.map((v) => ({
+      _id: String(v._id),
+      receiptNumber: v.receiptNumber,
+      riderName: v.riderName,
+      riderPhone: v.riderPhone,
+      amountRupees: (v.amountPaise / 100).toFixed(2),
+      orderCount: v.orderReferences?.length || 0,
+      orderReferences: v.orderReferences,
+      handshakePinUsed: v.handshakePinUsed,
+      settledByAdminName: v.settledByAdminName,
+      settledAt: v.settledAt,
+    })),
+  });
+};
+
+const settleRemittanceSchema = z.object({
+  partnerId: z.string().regex(/^[a-f\d]{24}$/i),
+  amountPaise: z.number().int().min(0),
+  handshakePin: z.string().trim().length(4),
+  notes: z.string().trim().max(500).optional(),
+}).strict();
+
+export const settleCityAdminCashRemittance: RequestHandler = async (req, res) => {
+  const adminId = authenticatedUserId(req);
+  const city = req.user?.assignedCity?.trim() || 'Damoh';
+  const adminUser = await User.findById(adminId).select('name phoneE164').lean();
+  const input = settleRemittanceSchema.parse(req.body);
+
+  const partner = await User.findOne({
+    _id: input.partnerId,
+    role: 'delivery_partner',
+  });
+  if (!partner) throw new AppError(404, 'NOT_FOUND', 'Delivery partner not found.');
+
+  // Validate Handshake PIN against active 60s window or 30s grace window
+  const enteredPin = input.handshakePin.trim();
+  const now = new Date();
+  const pinExpiresAt = (partner as any).remittancePinExpiresAt ? new Date((partner as any).remittancePinExpiresAt) : null;
+  const prevPinExpiresAt = (partner as any).previousPinExpiresAt ? new Date((partner as any).previousPinExpiresAt) : null;
+
+  let isValid = false;
+  if (partner.remittancePin && partner.remittancePin === enteredPin) {
+    if (!pinExpiresAt || pinExpiresAt.getTime() > now.getTime()) {
+      isValid = true;
+    }
+  }
+
+  if (!isValid && (partner as any).previousRemittancePin && (partner as any).previousRemittancePin === enteredPin) {
+    if (prevPinExpiresAt && prevPinExpiresAt.getTime() > now.getTime()) {
+      isValid = true;
+    }
+  }
+
+  if (!isValid) {
+    if (partner.remittancePin === enteredPin && pinExpiresAt && pinExpiresAt.getTime() <= now.getTime()) {
+      throw new AppError(400, 'EXPIRED_HANDSHAKE_PIN', 'The Handshake PIN has expired. For security, PINs auto-refresh every 60 seconds. Please ask the partner for the new PIN on their screen.');
+    }
+    throw new AppError(400, 'INVALID_HANDSHAKE_PIN', 'Invalid 4-digit Handshake PIN. Please ask the delivery partner for the live PIN displayed on their active phone screen.');
+  }
+
+  const unremittedOrders = await Order.find({
+    'deliveryPartner.userId': partner._id,
+    fulfilmentStatus: { $in: ['delivered', 'completed'] },
+    $or: [
+      { paymentMethod: 'cash' },
+      { 'doorstepPayment.mode': 'cash' },
+    ],
+    'doorstepPayment.remittedToCityAdmin': { $ne: true },
+  });
+
+  if (!unremittedOrders.length) {
+    throw new AppError(400, 'NO_UNREMITTED_CASH', 'No outstanding cash on delivery orders found for this partner.');
+  }
+
+  const totalCalculatedPaise = unremittedOrders.reduce((sum, o) => sum + (o.totalPaise || 0), 0);
+  const receiptNumber = `REM-${city.toUpperCase().slice(0, 3)}-${Date.now().toString().slice(-6)}`;
+
+  const orderIds = unremittedOrders.map((o) => o._id);
+  const orderReferences = unremittedOrders.map((o) => o.orderReference);
+
+  await Order.updateMany(
+    { _id: { $in: orderIds } },
+    {
+      $set: {
+        'doorstepPayment.remittedToCityAdmin': true,
+        'doorstepPayment.remittedAt': now,
+        'doorstepPayment.remittedReceiptNumber': receiptNumber,
+        'doorstepPayment.receivedByAdminId': adminId,
+      },
+    },
+  );
+
+  // Invalidate and rotate partner's PIN immediately for next session
+  partner.remittancePin = String(Math.floor(1000 + Math.random() * 9000));
+  (partner as any).remittancePinExpiresAt = new Date(now.getTime() + 60_000);
+  (partner as any).previousRemittancePin = undefined;
+  (partner as any).previousPinExpiresAt = undefined;
+  await partner.save();
+
+  const voucher = await CashRemittance.create({
+    receiptNumber,
+    riderId: partner._id,
+    riderName: partner.name || 'Delivery Partner',
+    riderPhone: partner.phoneE164,
+    city,
+    amountPaise: totalCalculatedPaise,
+    orderIds,
+    orderReferences,
+    settledByAdminId: adminId,
+    settledByAdminName: adminUser?.name || 'City Admin',
+    handshakePinUsed: input.handshakePin,
+    method: 'physical_hub_cash',
+    notes: input.notes || 'In-person physical cash drop verified at City Admin desk',
+    settledAt: now,
+  });
+
+  await AuditLog.create([{
+    actorType: 'user',
+    actorId: adminId,
+    action: 'CASH_REMITTANCE_SETTLED',
+    resourceType: 'cash_remittance',
+    resourceId: String(voucher._id),
+    metadata: {
+      receiptNumber,
+      partnerId: String(partner._id),
+      partnerName: partner.name,
+      amountRupees: (totalCalculatedPaise / 100).toFixed(2),
+      orderCount: orderIds.length,
+    },
+  }]);
+
+  sendData(res, {
+    success: true,
+    receiptNumber,
+    settledAmountPaise: totalCalculatedPaise,
+    settledAmountRupees: (totalCalculatedPaise / 100).toFixed(2),
+    settledOrdersCount: orderIds.length,
+    voucherId: String(voucher._id),
+    settledAt: now,
+  });
+};

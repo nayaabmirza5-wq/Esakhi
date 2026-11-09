@@ -118,7 +118,7 @@ export async function createOrder(actorId: string, input: Checkout): Promise<{ o
         if (locality.deliveryFeePaise == null) {
           throw new AppError(503, 'CHECKOUT_NOT_CONFIGURED', 'Delivery pricing is not configured for this locality.');
         }
-        deliveryFeePaise = locality.deliveryFeePaise;
+        deliveryFeePaise = (locality.deliveryFeePaise != null && locality.deliveryFeePaise > 0) ? locality.deliveryFeePaise : 2900;
       }
 
       const itemSnapshots: Array<{
