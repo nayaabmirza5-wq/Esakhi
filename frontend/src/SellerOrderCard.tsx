@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { api, resolveProductImageUrl } from './api';
 import type { SellerOrder } from './types';
+import { MeeshoSlipModal } from './components/MeeshoSlipModal';
 
 function formatMoneyInr(paise: number): string {
   return new Intl.NumberFormat('en-IN', {
@@ -518,7 +519,7 @@ export function SellerOrderCard({
             onClick={() => setShowSlip(true)}
             style={{ fontSize: '0.84rem', padding: '0.42rem 0.8rem', background: '#f8fafc', color: '#475569', border: '1px solid #cbd5e1' }}
           >
-            📄 Packing Slip
+            🏷️ Meesho Slip & Bill
           </button>
         </div>
 
@@ -652,107 +653,9 @@ export function SellerOrderCard({
           )}
         </div>
       </footer>
-      {/* Printable Dispatch Packing Slip Modal */}
+      {/* Meesho 2-in-1 Shipping Label & Tax Invoice Modal */}
       {showSlip && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15, 23, 42, 0.65)',
-            backdropFilter: 'blur(4px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999,
-            padding: '1rem',
-          }}
-          onClick={() => setShowSlip(false)}
-        >
-          <div
-            style={{
-              background: '#ffffff',
-              borderRadius: '16px',
-              maxWidth: '540px',
-              width: '100%',
-              padding: '1.75rem',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.25)',
-              display: 'grid',
-              gap: '1rem',
-              position: 'relative',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #e2e8f0', paddingBottom: '0.85rem' }}>
-              <div>
-                <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#6b215c', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                  eSakhi Damoh · Dispatch Packing Slip
-                </div>
-                <h3 style={{ margin: '0.2rem 0 0', fontSize: '1.35rem', color: '#0f172a' }}>
-                  Order #{order.orderReference}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowSlip(false)}
-                style={{ background: 'transparent', border: 'none', fontSize: '1.4rem', cursor: 'pointer', color: '#64748b' }}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', background: '#f8fafc', padding: '0.85rem', borderRadius: '10px', fontSize: '0.82rem' }}>
-              <div>
-                <span style={{ color: '#64748b', display: 'block' }}>Order Date:</span>
-                <strong>{new Date(order.createdAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })}</strong>
-              </div>
-              <div>
-                <span style={{ color: '#64748b', display: 'block' }}>Fulfilment Method:</span>
-                <strong style={{ textTransform: 'uppercase' }}>{order.fulfilmentMethod}</strong>
-              </div>
-            </div>
-
-            <div>
-              <strong style={{ fontSize: '0.84rem', color: '#334155', display: 'block', marginBottom: '0.4rem' }}>
-                Item Checklist:
-              </strong>
-              <div style={{ display: 'grid', gap: '0.4rem', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.65rem' }}>
-                {order.items.map((item, idx) => (
-                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.88rem' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                      <input type="checkbox" defaultChecked />
-                      <span>{item.productName}</span>
-                    </label>
-                    <strong>× {item.quantity}</strong>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', padding: '0.65rem 0.85rem', borderRadius: '8px', fontSize: '0.78rem', color: '#065f46' }}>
-              ✓ 5-Angle Pre-Dispatch Inspection Verified by Rural Artisan Group
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.65rem', borderTop: '1px solid #e2e8f0', paddingTop: '0.85rem' }}>
-              <button
-                type="button"
-                className="seller-secondary-action"
-                onClick={() => setShowSlip(false)}
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                className="seller-primary-action"
-                onClick={() => window.print()}
-                style={{ background: '#6b215c', color: '#ffffff' }}
-              >
-                🖨️ Print Packing Slip
-              </button>
-            </div>
-          </div>
-        </div>
+        <MeeshoSlipModal order={order} onClose={() => setShowSlip(false)} />
       )}
     </article>
   );

@@ -43,6 +43,7 @@ import {
   nextFulfilmentStatus,
   statusAfterDeliveryPartnerAssignment,
 } from './order.transitions.js';
+import { autoAssignOrderById, autoDispatchPendingOrders } from './autoDispatch.worker.js';
 
 export async function resolveOrderSellerPickup(order: {
   sellerPickup?: {
@@ -367,6 +368,9 @@ export const submitCustomerReturnRequest: RequestHandler = async (req, res) => {
   });
 
   await order.save();
+  if (isLowValueReturn) {
+    await autoAssignOrderById(order._id).catch(() => null);
+  }
   await AuditLog.create({
     actorId: customerId,
     action: 'order.return_requested',
@@ -526,6 +530,9 @@ export const updateFulfilmentStatus: RequestHandler = async (req, res) => {
     await session.endSession();
   }
   if (!updatedOrder) throw new AppError(500, 'INTERNAL_ERROR', 'The fulfilment status could not be updated.');
+  if (status === 'ready_for_pickup' && updatedOrder.fulfilmentMethod === 'delivery') {
+    void autoAssignOrderById(updatedOrder.id).catch(() => null);
+  }
   sendData(res, updatedOrder);
 };
 
@@ -701,21 +708,42 @@ const INACTIVE_PARTNER_ORDER_STATES = [
   'refund_completed',
 ] as const;
 
+function getPartnerOrderMatchFilter(partnerId: string, phone?: string): Record<string, unknown> {
+  const conditions: Record<string, unknown>[] = [
+    { 'deliveryPartner.userId': partnerId },
+    { 'returnRequest.reverseDeliveryPartner.userId': partnerId },
+  ];
+  if (mongoose.Types.ObjectId.isValid(partnerId)) {
+    const partnerObjectId = new mongoose.Types.ObjectId(partnerId);
+    conditions.push(
+      { 'deliveryPartner.userId': partnerObjectId },
+      { 'returnRequest.reverseDeliveryPartner.userId': partnerObjectId }
+    );
+  }
+  if (phone) {
+    conditions.push(
+      { 'deliveryPartner.phoneE164': phone },
+      { 'returnRequest.reverseDeliveryPartner.phoneE164': phone }
+    );
+  }
+  return { $or: conditions };
+}
+
 export const getPartnerProfile: RequestHandler = async (req, res) => {
   const partnerId = authenticatedUserId(req);
-  const [partner, activeCount] = await Promise.all([
-    User.findById(partnerId)
-      .select('name phoneE164 assignedCity serviceableLocalities isOnline availabilityStatus currentLocation remittancePin remittancePinExpiresAt')
-      .lean(),
-    Order.countDocuments({
-      $or: [
-        { 'deliveryPartner.userId': partnerId },
-        { 'returnRequest.reverseDeliveryPartner.userId': partnerId },
-      ],
-      fulfilmentStatus: { $nin: INACTIVE_PARTNER_ORDER_STATES },
-    }),
-  ]);
+  const partnerUser = (req as any).user;
+  const partner = await User.findById(partnerId)
+    .select('name phoneE164 assignedCity serviceableLocalities isOnline availabilityStatus currentLocation remittancePin remittancePinExpiresAt')
+    .lean();
   if (!partner) throw new AppError(404, 'NOT_FOUND', 'Delivery partner profile not found.');
+
+  const partnerPhone = partner.phoneE164 || partnerUser?.phoneE164 || partnerUser?.phone;
+  const partnerFilter = getPartnerOrderMatchFilter(partnerId, partnerPhone);
+
+  const activeCount = await Order.countDocuments({
+    ...partnerFilter,
+    fulfilmentStatus: { $nin: INACTIVE_PARTNER_ORDER_STATES },
+  });
 
   const isOnline = partner.isOnline ?? true;
   const availabilityStatus = !isOnline
@@ -725,6 +753,15 @@ export const getPartnerProfile: RequestHandler = async (req, res) => {
       : partner.availabilityStatus === 'offline'
         ? 'available'
         : (partner.availabilityStatus ?? 'available');
+
+  const unremittedOrders = await Order.find({
+    ...partnerFilter,
+    fulfilmentStatus: { $in: ['delivered', 'completed'] },
+    $or: [{ paymentMethod: 'cash' }, { 'doorstepPayment.mode': 'cash' }],
+    'doorstepPayment.remittedToCityAdmin': { $ne: true },
+  }).select('totalPaise').lean();
+  const unremittedCashPaise = unremittedOrders.reduce((acc, curr) => acc + (curr.totalPaise || 0), 0);
+
   sendData(res, {
     _id: String(partner._id),
     name: partner.name || 'Delivery Partner',
@@ -734,29 +771,13 @@ export const getPartnerProfile: RequestHandler = async (req, res) => {
     isOnline,
     availabilityStatus,
     activeOrderCount: activeCount,
-    unremittedCashPaise: (await (async () => {
-      const unrem = await Order.find({
-        'deliveryPartner.userId': partnerId,
-        fulfilmentStatus: { $in: ['delivered', 'completed'] },
-        $or: [{ paymentMethod: 'cash' }, { 'doorstepPayment.mode': 'cash' }],
-        'doorstepPayment.remittedToCityAdmin': { $ne: true },
-      }).select('totalPaise').lean();
-      return unrem.reduce((acc, curr) => acc + (curr.totalPaise || 0), 0);
-    })()),
+    unremittedCashPaise,
     remittancePin: (partner as any).remittancePin || '8392',
     remittancePinExpiresAt: (partner as any).remittancePinExpiresAt,
     expiresInSeconds: (partner as any).remittancePinExpiresAt
       ? Math.max(0, Math.floor(((new Date((partner as any).remittancePinExpiresAt)).getTime() - Date.now()) / 1000))
       : 60,
-    exceedsCodThreshold: (await (async () => {
-      const unrem = await Order.find({
-        'deliveryPartner.userId': partnerId,
-        fulfilmentStatus: { $in: ['delivered', 'completed'] },
-        $or: [{ paymentMethod: 'cash' }, { 'doorstepPayment.mode': 'cash' }],
-        'doorstepPayment.remittedToCityAdmin': { $ne: true },
-      }).select('totalPaise').lean();
-      return unrem.reduce((acc, curr) => acc + (curr.totalPaise || 0), 0) > 200000;
-    })()),
+    exceedsCodThreshold: unremittedCashPaise > 200000,
     currentLocation: {
       latitude: partner.currentLocation?.latitude ?? 23.8415,
       longitude: partner.currentLocation?.longitude ?? 79.445,
@@ -819,6 +840,9 @@ export const updatePartnerAvailability: RequestHandler = async (req, res) => {
     };
   }
   await partner.save();
+  if (partner.isOnline) {
+    void autoDispatchPendingOrders().catch(() => null);
+  }
   sendData(res, {
     _id: String(partner._id),
     isOnline: partner.isOnline ?? true,
@@ -829,11 +853,11 @@ export const updatePartnerAvailability: RequestHandler = async (req, res) => {
 
 export const listAssignedPartnerOrders: RequestHandler = async (req, res) => {
   const partnerId = authenticatedUserId(req);
+  const partnerUser = (req as any).user;
+  const partnerPhone = partnerUser?.phoneE164 || partnerUser?.phone;
+  const partnerFilter = getPartnerOrderMatchFilter(partnerId, partnerPhone);
   const orders = await Order.find({
-    $or: [
-      { 'deliveryPartner.userId': partnerId },
-      { 'returnRequest.reverseDeliveryPartner.userId': partnerId },
-    ],
+    ...partnerFilter,
     fulfilmentStatus: { $nin: INACTIVE_PARTNER_ORDER_STATES },
   })
     .select('-internalNotes -paymentEvents -idempotencyKey -deliveryPartnerHistory -deliveryPartner.internalNotes -deliveryPartner.assignedBy -deliveryPartner.userId -cancellationRequest.reviewedBy -cancellationRequest.adminNote -deliveryOtp')
@@ -860,6 +884,9 @@ export const listAssignedPartnerOrders: RequestHandler = async (req, res) => {
 
 export const listPartnerDeliveryHistory: RequestHandler = async (req, res) => {
   const partnerId = authenticatedUserId(req);
+  const partnerUser = (req as any).user;
+  const partnerPhone = partnerUser?.phoneE164 || partnerUser?.phone;
+  const partnerFilter = getPartnerOrderMatchFilter(partnerId, partnerPhone);
   const orders = await Order.find({
     fulfilmentStatus: {
       $in: [
@@ -872,13 +899,9 @@ export const listPartnerDeliveryHistory: RequestHandler = async (req, res) => {
         'refund_completed',
       ],
     },
-    $or: [
-      { 'deliveryPartner.userId': partnerId },
-      { 'deliveryPartnerHistory.userId': partnerId },
-      { 'returnRequest.reverseDeliveryPartner.userId': partnerId },
-    ],
+    ...partnerFilter,
   })
-    .select('orderReference items.productName items.quantity fulfilmentMethod fulfilmentStatus paymentMethod paymentStatus totalPaise deliveryFeePaise createdAt updatedAt statusHistory.status statusHistory.changedAt deliveryPartner.assignedAt address.locality address.city sellerPickup returnRequest')
+    .select('orderReference items.productName items.quantity items.unitPricePaise items.lineTotalPaise fulfilmentMethod fulfilmentStatus paymentMethod paymentStatus totalPaise deliveryFeePaise createdAt updatedAt statusHistory.status statusHistory.changedAt deliveryPartner customerName customerPhoneE164 deliveryOtp address sellerPickup returnRequest')
     .sort({ updatedAt: -1 })
     .limit(100)
     .lean();
@@ -908,12 +931,12 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
     upiUtr: z.string().trim().max(30).optional(),
   }).strict().parse(req.body);
   const partnerId = authenticatedUserId(req);
+  const partnerUser = (req as any).user;
+  const partnerPhone = partnerUser?.phoneE164 || partnerUser?.phone;
+  const partnerFilter = getPartnerOrderMatchFilter(partnerId, partnerPhone);
   const order = await Order.findOne({
     _id: id,
-    $or: [
-      { 'deliveryPartner.userId': partnerId },
-      { 'returnRequest.reverseDeliveryPartner.userId': partnerId },
-    ],
+    ...partnerFilter,
   });
   if (!order) throw new AppError(404, 'NOT_FOUND', 'Order not found for this delivery partner.');
 
@@ -983,22 +1006,7 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
       } else if (status === 'return_delivered_to_seller' && order.returnRequest) {
         returnSubUpdates['returnRequest.status'] = 'delivered_to_seller';
         returnSubUpdates['returnRequest.reverseDeliveryPartner.deliveredToSellerAt'] = new Date();
-        nextFulfilmentStatusVal = 'ready_for_refund';
-        returnSubUpdates['statusHistory'] = [
-          ...(order.statusHistory || []),
-          {
-            status: 'return_delivered_to_seller',
-            changedAt: new Date(),
-            actorType: 'partner',
-            note: 'Package handed back to artisan / seller at pickup origin.',
-          },
-          {
-            status: 'ready_for_refund',
-            changedAt: new Date(),
-            actorType: 'system',
-            note: 'Goods verified returned. Automatically queued for Super Admin Razorpay refund release.',
-          },
-        ];
+        nextFulfilmentStatusVal = 'return_delivered_to_seller';
       }
 
       let nextDeliveryStatus = order.deliveryStatus || 'UNASSIGNED';
@@ -1063,6 +1071,17 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
             fulfilmentStatus: nextFulfilmentStatusVal,
             deliveryStatus: nextDeliveryStatus,
             ...(shouldConfirmPayment ? { paymentStatus: 'confirmed' } : {}),
+            ...(status === 'delivered' ? {
+              doorstepPayment: {
+                mode: paymentMode || (order.paymentMethod === 'cash' ? 'cash' : 'prepaid_online'),
+                upiUtr: upiUtr || undefined,
+                collectedAmountPaise: order.totalPaise,
+                collectedAt: new Date(),
+                remittedToCityAdmin: paymentMode === 'upi_qr' || paymentMode === 'prepaid_online' || order.paymentMethod !== 'cash',
+                remittedAt: (paymentMode === 'upi_qr' || paymentMode === 'prepaid_online' || order.paymentMethod !== 'cash') ? new Date() : undefined,
+                remittedReceiptNumber: paymentMode === 'upi_qr' ? `ONLINE-UPI-${Date.now().toString().slice(-6)}` : undefined,
+              },
+            } : {}),
             ...(finalLat !== undefined ? { 'deliveryPartner.latitude': finalLat } : {}),
             ...(finalLng !== undefined ? { 'deliveryPartner.longitude': finalLng } : {}),
             ...returnSubUpdates,
@@ -1524,6 +1543,9 @@ export const partnerRemitCashViaUpi: RequestHandler = async (req, res) => {
 
   partner.remittancePin = String(Math.floor(1000 + Math.random() * 9000));
   await partner.save();
+  if (partner.isOnline) {
+    void autoDispatchPendingOrders().catch(() => null);
+  }
 
   const voucher = await CashRemittance.create({
     receiptNumber,

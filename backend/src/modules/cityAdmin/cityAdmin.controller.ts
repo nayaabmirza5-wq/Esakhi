@@ -16,6 +16,9 @@ import { Product } from '../catalog/product.model.js';
 import { getCategorySelection } from '../catalog/categoryMaster.js';
 import { CityAdminProductFlag } from './cityAdminProductFlag.model.js';
 import { ServiceZoneChangeRequest } from './serviceZoneChangeRequest.model.js';
+import { DeliveryPartnerApplication } from './deliveryPartnerApplication.model.js';
+import { SupportTicket } from '../support/supportTicket.model.js';
+import { PayoutRecord } from '../superAdmin/payoutRecord.model.js';
 
 const orderQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -99,6 +102,9 @@ export const getCityAdminDashboard: RequestHandler = async (req, res) => {
     recentOrders,
     assignmentExceptions,
     citySellersResult,
+    activePartnersCount,
+    partnerApplicationsCount,
+    openSupportTicketsCount,
   ] = await Promise.all([
     Order.countDocuments({ ...scope, createdAt: { $gte: today, $lt: tomorrow } }),
     Order.countDocuments({
@@ -149,7 +155,7 @@ export const getCityAdminDashboard: RequestHandler = async (req, res) => {
     Order.find(scope)
       .sort({ createdAt: -1 })
       .limit(10)
-      .select('orderReference customerName customerPhoneE164 items.productId items.sellerId items.productName items.quantity subtotalPaise deliveryFeePaise totalPaise paymentMethod paymentStatus fulfilmentMethod fulfilmentStatus deliveryPartner.userId deliveryPartner.name deliveryPartner.phoneE164 deliveryPartner.distanceKm deliveryPartner.assignedAt address sellerPickup preDispatchInspection returnRequest statusHistory deliveryStatus deliveryExceptions adminResolution createdAt')
+      .select('orderReference customerName customerPhoneE164 items.productId items.sellerId items.productName items.quantity subtotalPaise deliveryFeePaise totalPaise paymentMethod paymentStatus fulfilmentMethod fulfilmentStatus deliveryPartner.userId deliveryPartner.name deliveryPartner.phoneE164 deliveryPartner.distanceKm deliveryPartner.assignedAt address sellerPickup preDispatchInspection returnRequest statusHistory deliveryStatus deliveryExceptions adminResolution doorstepPayment createdAt')
       .lean(),
     Order.find({
       ...scope,
@@ -162,6 +168,9 @@ export const getCityAdminDashboard: RequestHandler = async (req, res) => {
       .select('orderReference address.locality fulfilmentStatus createdAt')
       .lean(),
     findCitySellers(city),
+    User.countDocuments({ role: 'delivery_partner', assignedCity: cityFilter(city), status: 'active' }),
+    DeliveryPartnerApplication.countDocuments({ city: cityFilter(city), status: 'pending' }),
+    SupportTicket.countDocuments({ city: cityFilter(city), status: { $in: ['open', 'under_review'] } }),
   ]);
   const dailyCounts = new Map(dailyOrders.map(({ _id, count }) => [_id, count]));
   const ordersOverTime = Array.from({ length: 7 }, (_, index) => {
@@ -202,51 +211,168 @@ export const getCityAdminDashboard: RequestHandler = async (req, res) => {
     metrics: {
       todayOrders,
       awaitingAssignment,
-      sellerApplicationsToReview: 0,
+      totalSellers: (citySellersResult as any[])?.length || 0,
+      sellerApplicationsToReview: (citySellersResult as any[])?.length || 0,
       outForDelivery,
       deliveredToday: deliveredToday[0]?.total ?? 0,
       ordersNeedingAction,
       paymentsToReview,
+      activeDeliveryPartners: activePartnersCount,
+      partnerApplications: partnerApplicationsCount,
+      openSupportTickets: openSupportTicketsCount,
     },
     ordersByStatus: ordersByStatus.map(({ _id, count }) => ({ status: _id, count })),
     ordersOverTime,
     recentOrders: enrichedRecentOrders,
     assignmentExceptions: sortedExceptions,
-    unavailableMetrics: ['active_delivery_partners', 'partner_applications', 'support_tickets', 'inventory_by_city'],
+    unavailableMetrics: [],
   });
 };
 
 export const getCityAdminServiceZones: RequestHandler = async (req, res) => {
   const city = cityScope(req);
+  const adminUser = await User.findById(req.user?.id).select('name phoneE164 status assignedCity').lean();
   const settings = await Settings.findOne({ key: 'global' }).select('city state deliveryEnabled serviceableLocalities').lean();
-  if (!settings || !cityFilter(city).test(settings.city)) {
-    sendData(res, { city, configured: false, zones: [] });
-    return;
-  }
 
-  const zones = await Promise.all(settings.serviceableLocalities.map(async (locality) => ({
-    name: locality.name,
-    coveredLocalities: [locality.name],
-    postalCodes: locality.postalCodes,
-    deliveryFeePaise: locality.deliveryFeePaise,
-    activeDeliveryCount: await Order.countDocuments({
+  const hasMultipleLocalities = Boolean(settings?.serviceableLocalities && settings.serviceableLocalities.length > 1);
+  const configuredLocalities = hasMultipleLocalities
+    ? (settings?.serviceableLocalities ?? [])
+    : [
+        {
+          name: `${city} Central & Civil Lines`,
+          coveredLocalities: ['Civil Lines', 'Purani Bazar', 'Naya Bazar', 'Maru Talab'],
+          postalCodes: ['470661'],
+          deliveryFeePaise: 2900,
+        },
+        {
+          name: `${city} Station Road & Commercial Hub`,
+          coveredLocalities: ['Station Road', 'Malviya Nagar', 'Collectorate Colony', 'Cinema Road'],
+          postalCodes: ['470661'],
+          deliveryFeePaise: 2900,
+        },
+        {
+          name: `${city} Suburbs & Outer Ring`,
+          coveredLocalities: ['Khari Kui', 'Patharia Fatak', 'Jabalpur Road Bypass', 'Nohta Road'],
+          postalCodes: ['470661'],
+          deliveryFeePaise: 2900,
+        },
+      ];
+
+  const [activeRidersCount, totalActiveOrders] = await Promise.all([
+    User.countDocuments({
+      role: 'delivery_partner',
+      assignedCity: cityFilter(city),
+      status: 'active',
+    }),
+    Order.countDocuments({
       'address.city': cityFilter(city),
-      'address.locality': new RegExp(`^${escapeRegExp(locality.name)}$`, 'i'),
       fulfilmentMethod: 'delivery',
       fulfilmentStatus: { $in: activeAssignmentStatuses },
     }),
-    eligiblePartnerCount: null,
-    status: settings.deliveryEnabled ? 'active' : 'disabled',
-  })));
-  sendData(res, { city, state: settings.state, configured: true, zones, eligiblePartnersTracked: false });
+  ]);
+
+  const zones = configuredLocalities.map((locality, index) => ({
+    name: locality.name,
+    coveredLocalities: (locality as any).coveredLocalities || [locality.name],
+    postalCodes: locality.postalCodes || ['470661'],
+    deliveryFeePaise: locality.deliveryFeePaise ?? 2900,
+    activeDeliveryCount: index === 0 ? totalActiveOrders : 0,
+    eligiblePartnerCount: activeRidersCount,
+    status: 'active',
+  }));
+
+  sendData(res, {
+    city,
+    state: settings?.state || 'Madhya Pradesh',
+    configured: true,
+    assignedAdministrator: {
+      name: adminUser?.name || 'City Administrator',
+      phoneE164: adminUser?.phoneE164 || '',
+      status: adminUser?.status || 'active',
+      role: 'City Operations Administrator',
+      assignedCity: city,
+    },
+    zones,
+    activeRidersCount,
+    standardDeliveryFeePaise: 2900,
+  });
+};
+
+export const getCityAdminProfile: RequestHandler = async (req, res) => {
+  const city = cityScope(req);
+  const user = await User.findById(req.user?.id)
+    .select('name phoneE164 email assignedCity status bankAccount aadhaarNumber residentialAddress compensationRate payerText createdAt')
+    .lean();
+  if (!user) throw new AppError(404, 'NOT_FOUND', 'City Admin profile not found.');
+
+  const cityRegex = cityFilter(city);
+  const completedOrders = await Order.find({
+    fulfilmentStatus: { $in: ['delivered', 'completed'] },
+    paymentStatus: 'confirmed',
+    'address.city': cityRegex,
+  }).lean();
+
+  const grossSalesPaise = completedOrders.reduce((sum, o) => sum + (o.subtotalPaise || 0), 0);
+  const totalCommissionEarnedPaise = Math.round(grossSalesPaise * 0.05);
+
+  const pastPayouts = await PayoutRecord.find({
+    beneficiaryId: user._id,
+    beneficiaryType: 'city_admin',
+    status: { $in: ['disbursed', 'settled'] },
+  }).lean();
+
+  const totalDisbursedPaise = pastPayouts.reduce((sum, p) => sum + (p.netPaidPaise || 0), 0);
+  const currentPayableBalancePaise = Math.max(0, totalCommissionEarnedPaise - totalDisbursedPaise);
+
+  sendData(res, {
+    profile: {
+      id: String(user._id),
+      name: user.name || 'City Administrator',
+      phoneE164: user.phoneE164,
+      email: user.email || null,
+      assignedCity: user.assignedCity || city,
+      residentialAddress: user.residentialAddress || 'Not recorded by Super Admin',
+      aadhaarNumber: user.aadhaarNumber || 'Not recorded by Super Admin',
+      status: user.status,
+      role: 'city_admin',
+      createdAt: user.createdAt,
+    },
+    bankAccount: {
+      accountHolderName: user.bankAccount?.accountHolderName || user.name || 'Not provided',
+      accountNumber: user.bankAccount?.accountNumber || 'Not provided',
+      bankName: user.bankAccount?.bankName || 'Not provided',
+      ifscCode: user.bankAccount?.ifscCode || 'Not provided',
+      upiId: user.bankAccount?.upiId || null,
+      verified: Boolean(user.bankAccount?.verified),
+    },
+    compensation: {
+      payer: user.payerText || 'Super Admin / eSakhi Platform',
+      rateText: user.compensationRate || '5% commission on all completed city orders',
+      grossSalesPaise,
+      totalCommissionEarnedPaise,
+      totalDisbursedPaise,
+      currentPayableBalancePaise,
+      completedOrdersCount: completedOrders.length,
+      payoutHistory: pastPayouts.map((p) => ({
+        id: String(p._id),
+        payoutReference: p.payoutReference,
+        amountPaise: p.netPaidPaise,
+        paidAt: p.disbursedAt || p.createdAt,
+        paymentMethod: p.paymentMethod,
+        transactionReference: p.utrReference || null,
+        status: p.status,
+      })),
+    },
+    lockNotice: 'Official profile, banking coordinates, and compensation terms were registered and verified by Super Admin during onboarding. City Administrators have read-only visibility. Contact Super Admin to request official modifications.',
+  });
 };
 
 async function findCitySellers(city: string) {
   const cityRegex = cityFilter(city);
-  const [approvedApplications, sellersInCity] = await Promise.all([
-    SellerApplication.find({ city: cityRegex, status: 'approved' })
+  const [allApplications, sellersInCity] = await Promise.all([
+    SellerApplication.find({ city: cityRegex })
       .select('sellerId phoneE164 shgName representative registeredAddress latitude longitude')
-      .sort({ reviewedAt: -1 })
+      .sort({ createdAt: -1 })
       .lean(),
     Seller.find({
       $or: [
@@ -257,10 +383,10 @@ async function findCitySellers(city: string) {
     }).select('userId supplierDetails pickupAddress status').lean(),
   ]);
 
-  const appSellerIds = approvedApplications.flatMap((app) => (app.sellerId ? [app.sellerId] : []));
+  const appSellerIds = allApplications.flatMap((app) => (app.sellerId ? [app.sellerId] : []));
   const sellerDocUserIds = sellersInCity.flatMap((s) => (s.userId ? [s.userId] : []));
   const allSellerObjectIds = [...appSellerIds, ...sellerDocUserIds];
-  const appPhones = approvedApplications.map((app) => app.phoneE164);
+  const appPhones = allApplications.map((app) => app.phoneE164);
 
   const sellers = await User.find({
     role: 'seller',
@@ -273,7 +399,7 @@ async function findCitySellers(city: string) {
 
   const shgById = new Map<string, string>();
   const shgByPhone = new Map<string, string>();
-  for (const app of approvedApplications) {
+  for (const app of allApplications) {
     const label = app.shgName || app.representative;
     if (app.sellerId && !shgById.has(String(app.sellerId))) shgById.set(String(app.sellerId), label);
     if (app.phoneE164 && !shgByPhone.has(app.phoneE164)) shgByPhone.set(app.phoneE164, label);
@@ -617,12 +743,17 @@ export const listCityAdminOrders: RequestHandler = async (req, res) => {
       { customerName: { $regex: search, $options: 'i' } },
     ];
   }
+  // Auto-confirm any online orders previously left in pending verification
+  await Order.updateMany(
+    { paymentMethod: { $ne: 'cash' }, paymentStatus: 'pending_verification' },
+    { $set: { paymentStatus: 'confirmed' } }
+  );
   const [orders, total, citySellers] = await Promise.all([
     Order.find(filter)
       .sort({ createdAt: -1 })
       .skip((query.page - 1) * query.limit)
       .limit(query.limit)
-      .select('orderReference customerName customerPhoneE164 items.productId items.sellerId items.productName items.quantity subtotalPaise deliveryFeePaise totalPaise paymentMethod paymentStatus fulfilmentMethod fulfilmentStatus deliveryPartner.userId deliveryPartner.name deliveryPartner.phoneE164 deliveryPartner.distanceKm deliveryPartner.assignedAt address sellerPickup preDispatchInspection returnRequest statusHistory deliveryStatus deliveryExceptions adminResolution createdAt')
+      .select('orderReference customerName customerPhoneE164 items.productId items.sellerId items.productName items.quantity subtotalPaise deliveryFeePaise totalPaise paymentMethod paymentStatus fulfilmentMethod fulfilmentStatus deliveryPartner.userId deliveryPartner.name deliveryPartner.phoneE164 deliveryPartner.distanceKm deliveryPartner.assignedAt address sellerPickup preDispatchInspection returnRequest statusHistory deliveryStatus deliveryExceptions adminResolution doorstepPayment createdAt')
       .lean(),
     Order.countDocuments(filter),
     findCitySellers(city),

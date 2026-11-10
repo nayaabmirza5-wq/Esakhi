@@ -5,6 +5,7 @@ const serviceLocalitySchema = new Schema(
     name: { type: String, trim: true, required: true, maxlength: 100 },
     postalCodes: { type: [String], default: [] },
     deliveryFeePaise: { type: Number, min: 0 },
+    coveredLocalities: { type: [String], default: [] },
   },
   { _id: false },
 );

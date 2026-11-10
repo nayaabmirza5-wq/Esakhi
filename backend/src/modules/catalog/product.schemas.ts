@@ -46,6 +46,7 @@ const productCreateBaseSchema = z.object({
   subcategoryId: subcategoryIdSchema,
   productType: z.string().trim().min(1).max(160),
   pricePaise: z.number().int().min(1).max(100_000_000),
+  basePricePaise: z.number().int().min(1).max(100_000_000).optional(),
   imageUrls: z.array(imageUrlSchema).max(10).default([]),
   stock: z.number().int().min(0).default(0),
   lowStockThreshold: z.number().int().min(0).max(100_000).default(5),

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/requireAuth.js';
 import { requireRole } from '../../middleware/requireRole.js';
-import { createCityAdminServiceZoneChangeRequest, listCityAdminRemittanceSummary, settleCityAdminCashRemittance, flagCityAdminProduct, getCityAdminDashboard, getCityAdminServiceZones, listCityAdminOrders, listCityAdminProducts, listCityAdminSellers, reviewCityAdminProduct } from './cityAdmin.controller.js';
+import { createCityAdminServiceZoneChangeRequest, listCityAdminRemittanceSummary, settleCityAdminCashRemittance, flagCityAdminProduct, getCityAdminDashboard, getCityAdminProfile, getCityAdminServiceZones, listCityAdminOrders, listCityAdminProducts, listCityAdminSellers, reviewCityAdminProduct } from './cityAdmin.controller.js';
 import { listCityAdminDeliveryPartnerApplications, listCityAdminDeliveryPartners, reviewCityAdminDeliveryPartnerApplication } from './deliveryPartnerApplication.controller.js';
 import {
   arbitrateCityAdminReturnDispute,
@@ -13,10 +13,15 @@ import {
   getCityAdminOrder,
   trackCityAdminOrderPartner,
 } from './cityAdminOrder.controller.js';
+import {
+  listCityAdminSupportTickets,
+  createCityAdminSupportTicket,
+} from '../support/supportTicket.controller.js';
 
 export const cityAdminRoutes = Router();
 
 cityAdminRoutes.use(requireAuth, requireRole('city_admin'));
+cityAdminRoutes.get('/profile', getCityAdminProfile);
 cityAdminRoutes.get('/dashboard', getCityAdminDashboard);
 cityAdminRoutes.get('/service-zones', getCityAdminServiceZones);
 cityAdminRoutes.post('/service-zone-change-requests', createCityAdminServiceZoneChangeRequest);
@@ -30,6 +35,10 @@ cityAdminRoutes.post('/remittance/settle', settleCityAdminCashRemittance);
 
 cityAdminRoutes.get('/delivery-partner-applications', listCityAdminDeliveryPartnerApplications);
 cityAdminRoutes.patch('/delivery-partner-applications/:applicationId/review', reviewCityAdminDeliveryPartnerApplication);
+
+// City Admin <-> Super Admin support tickets
+cityAdminRoutes.get('/support-tickets', listCityAdminSupportTickets);
+cityAdminRoutes.post('/support-tickets', createCityAdminSupportTicket);
 
 // Static / collection order endpoints MUST precede parameterized :orderId
 cityAdminRoutes.get('/orders', listCityAdminOrders);

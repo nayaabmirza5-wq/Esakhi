@@ -17,6 +17,7 @@ import {
   haversineDistanceKm,
   statusAfterDeliveryPartnerAssignment,
 } from '../orders/order.transitions.js';
+import { autoAssignBestPartnerForOrder, autoAssignOrderById } from '../orders/autoDispatch.worker.js';
 
 const orderParamsSchema = z.object({ orderId: z.string().regex(/^[a-f\d]{24}$/i) });
 const assignPartnerSchema = z.object({
@@ -520,6 +521,9 @@ export const arbitrateCityAdminReturnDispute: RequestHandler = async (req, res) 
   }
 
   await order.save();
+  if (input.decision === 'approved' && order.fulfilmentStatus === 'return_accepted') {
+    await autoAssignBestPartnerForOrder(order).catch(() => null);
+  }
   await AuditLog.create({
     actorId,
     action: `order.return_${input.decision}`,

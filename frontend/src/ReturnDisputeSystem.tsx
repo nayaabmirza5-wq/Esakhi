@@ -617,6 +617,15 @@ export const CustomerReturnAndCancelPanel: React.FC<{
             </div>
           )}
 
+          {order.fulfilmentStatus === 'return_partner_assigned' && (
+            <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, color: '#15803D', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>🛵</span>
+              <span>
+                Agent Assigned: <strong>{order.returnRequest?.reverseDeliveryPartner?.name || order.deliveryPartner?.name || 'Delivery Partner'}</strong>
+                {order.deliveryPartner?.phoneE164 ? ` (${order.deliveryPartner.phoneE164})` : ''} has been assigned for pickup from your location.
+              </span>
+            </div>
+          )}
           {order.fulfilmentStatus === 'return_picked_up' && (
             <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, color: '#1E40AF' }}>
               🚚 Item Picked Up from your location — Delivery Partner ({order.deliveryPartner?.name || 'Assigned Agent'}) is in transit to Seller.
@@ -748,8 +757,6 @@ export const CityAdminDisputeArbitrationPanel: React.FC<{
     }
   };
 
-  if (disputeOrders.length === 0) return null;
-
   const pendingArbitrationCount = disputeOrders.filter((o) => o.fulfilmentStatus === 'return_requested').length;
 
   return (
@@ -765,19 +772,34 @@ export const CityAdminDisputeArbitrationPanel: React.FC<{
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <span
-            style={{
-              background: '#EA580C',
-              color: '#FFFFFF',
-              padding: '4px 10px',
-              borderRadius: 999,
-              fontSize: 11,
-              fontWeight: 800,
-              letterSpacing: '0.06em',
-            }}
-          >
-            🚨 REVERSE LOGISTICS & DISPUTE ARBITRATION CENTER ({pendingArbitrationCount} PENDING REVIEW)
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span
+              style={{
+                background: '#EA580C',
+                color: '#FFFFFF',
+                padding: '4px 10px',
+                borderRadius: 999,
+                fontSize: 11,
+                fontWeight: 800,
+                letterSpacing: '0.06em',
+              }}
+            >
+              🚨 REVERSE LOGISTICS & DISPUTE ARBITRATION CENTER ({pendingArbitrationCount} PENDING REVIEW)
+            </span>
+            <span
+              style={{
+                background: '#DCFCE7',
+                color: '#166534',
+                border: '1px solid #86EFAC',
+                padding: '4px 10px',
+                borderRadius: 999,
+                fontSize: 11,
+                fontWeight: 800,
+              }}
+            >
+              Auto-Approved (≤ ₹300 Policy) Active
+            </span>
+          </div>
           <h3 style={{ margin: '8px 0 4px', fontSize: 18, color: '#7C2D12' }}>
             Return Discrepancy Comparison, Penalty Fixation & Reverse Dispatch
           </h3>
@@ -801,6 +823,63 @@ export const CityAdminDisputeArbitrationPanel: React.FC<{
           }}
         >
           {feedback.text}
+        </div>
+      )}
+
+      {/* ZERO OPEN RETURN DISPUTES CARD (INVESTOR SPECIFICATION PAGE 4) */}
+      {disputeOrders.length === 0 && (
+        <div
+          style={{
+            marginTop: 14,
+            padding: '18px 20px',
+            borderRadius: 12,
+            background: '#F0FDF4',
+            border: '2px solid #86EFAC',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 14,
+          }}
+        >
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: 16, color: '#14532D' }}>✓ Zero Open Return Disputes</strong>
+              <span
+                style={{
+                  background: '#DCFCE7',
+                  color: '#166534',
+                  border: '1px solid #86EFAC',
+                  padding: '3px 10px',
+                  borderRadius: 999,
+                  fontSize: 11,
+                  fontWeight: 800,
+                }}
+              >
+                Auto-Approved (≤ ₹300 Policy)
+              </span>
+              <span
+                style={{
+                  background: '#EFF6FF',
+                  color: '#1D4ED8',
+                  border: '1px solid #BFDBFE',
+                  padding: '3px 10px',
+                  borderRadius: 999,
+                  fontSize: 11,
+                  fontWeight: 800,
+                }}
+              >
+                100% Autonomous
+              </span>
+            </div>
+            <p style={{ margin: '8px 0 0', fontSize: 12, color: '#166534', lineHeight: 1.5, maxWidth: 720 }}>
+              The autonomous policy engine checks <code>totalPaise &le; 30000</code>. Micro-claims on items under ₹300 (e.g. ₹20 clay items, ₹100 bamboo crafts) bypass manual arbitration completely and are refunded immediately with zero human clicks, saving 15–20 minutes per investigation.
+            </p>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <span style={{ fontSize: '32px' }}>🛡️</span>
+            <div style={{ fontSize: '11px', color: '#15803d', fontWeight: 700 }}>Management-by-Exception</div>
+          </div>
         </div>
       )}
 
@@ -839,6 +918,51 @@ export const CityAdminDisputeArbitrationPanel: React.FC<{
                 <span style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>
                   {formatRupees(order.totalPaise)}
                 </span>
+                {order.totalPaise <= 30000 && (
+                  <span
+                    style={{
+                      background: '#DCFCE7',
+                      color: '#166534',
+                      border: '1px solid #86EFAC',
+                      padding: '2px 8px',
+                      borderRadius: 999,
+                      fontSize: 10,
+                      fontWeight: 800,
+                    }}
+                  >
+                    Auto-Approved (≤ ₹300 Policy)
+                  </span>
+                )}
+                {order.fulfilmentStatus === 'return_partner_assigned' && (
+                  <span
+                    style={{
+                      background: '#EFF6FF',
+                      color: '#1D4ED8',
+                      border: '1px solid #93C5FD',
+                      padding: '2px 8px',
+                      borderRadius: 999,
+                      fontSize: 10,
+                      fontWeight: 800,
+                    }}
+                  >
+                    Reverse Courier Auto-Dispatched
+                  </span>
+                )}
+                {order.fulfilmentStatus === 'return_delivered_to_seller' && (
+                  <span
+                    style={{
+                      background: '#E0E7FF',
+                      color: '#3730A3',
+                      border: '1px solid #A5B4FC',
+                      padding: '2px 8px',
+                      borderRadius: 999,
+                      fontSize: 10,
+                      fontWeight: 800,
+                    }}
+                  >
+                    Awaiting Super Admin Refund
+                  </span>
+                )}
               </div>
               <div style={{ fontSize: 12, color: '#475569', marginTop: 4 }}>
                 Customer: <strong>{order.customerName}</strong> · Reason:{' '}

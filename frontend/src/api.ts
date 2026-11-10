@@ -10,6 +10,7 @@ import type {
   CityAdminOrder,
   CityAdminProduct,
   CityAdminSeller,
+  CityAdminProfileData,
   CityAdminServiceZones,
   CustomerBankAccount,
   DeliveryPartnerApplication,
@@ -17,6 +18,7 @@ import type {
   DamohDeliveryPartnerOnboardingPayload,
   Dashboard,
   DeliveryPartner,
+  Locality,
   Order,
   PartnerLiveTrackingResponse,
   PartnerProfile,
@@ -43,6 +45,11 @@ import type {
   SuperAdminOrder,
   SuperAdminSettlementsLedgerResponse,
   User,
+  SupportTicketItem,
+  CityAdminSettlementItem,
+  SellerPayoutSettlementItem,
+  PartnerPayoutSettlementItem,
+  PayoutRecordItem,
 } from './types';
 
 const baseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
@@ -215,13 +222,93 @@ export const api = {
   superAdminOrders: (query: URLSearchParams = new URLSearchParams()) => request<PageResult<SuperAdminOrder>>(`/api/v1/super-admin/orders${query.size ? `?${query}` : ''}`),
   superAdminCities: () => request<SuperAdminCitySummary[]>('/api/v1/super-admin/cities'),
   superAdminCity: (city: string) => request<SuperAdminCity>(`/api/v1/super-admin/cities/${encodeURIComponent(city)}`),
+  superAdminAddCityZone: (city: string, payload: { name: string; coveredLocalities: string[] | string; postalCodes?: string[] | string; deliveryFeePaise?: number }) =>
+    request<{ success: boolean; serviceableLocalities: Locality[] }>(`/api/v1/super-admin/cities/${encodeURIComponent(city)}/zones`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  superAdminUpdateCityZone: (city: string, index: number, payload: { name: string; coveredLocalities: string[] | string; postalCodes?: string[] | string; deliveryFeePaise?: number }) =>
+    request<{ success: boolean; serviceableLocalities: Locality[] }>(`/api/v1/super-admin/cities/${encodeURIComponent(city)}/zones/${index}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  superAdminDeleteCityZone: (city: string, index: number) =>
+    request<{ success: boolean; serviceableLocalities: Locality[] }>(`/api/v1/super-admin/cities/${encodeURIComponent(city)}/zones/${index}`, {
+      method: 'DELETE',
+    }),
   superAdminCityAdmins: (page = 1, limit = 20) => request<PageResult<User>>(`/api/v1/super-admin/city-admins?page=${page}&limit=${limit}`),
   superAdminCityAdmin: (id: string) => request<User>(`/api/v1/super-admin/city-admins/${encodeURIComponent(id)}`),
-  createCityAdmin: (payload: { phone: string; name?: string; email?: string; city?: string }) => request<User>('/api/v1/super-admin/city-admins', { method: 'POST', body: JSON.stringify(payload) }),
-  updateCityAdmin: (id: string, payload: { city?: string; name?: string; email?: string; status?: 'active' | 'disabled' }) => request<User>(`/api/v1/super-admin/city-admins/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  createCityAdmin: (payload: {
+    phone: string;
+    name: string;
+    city: string;
+    email?: string;
+    residentialAddress?: string;
+    aadhaarNumber?: string;
+    compensationRate?: string;
+    payerText?: string;
+    bankAccount: {
+      accountHolderName: string;
+      accountNumber: string;
+      ifscCode: string;
+      bankName: string;
+      upiId?: string;
+    };
+  }) => request<User>('/api/v1/super-admin/city-admins', { method: 'POST', body: JSON.stringify(payload) }),
+  updateCityAdmin: (id: string, payload: {
+    city?: string;
+    name?: string;
+    email?: string;
+    status?: 'active' | 'disabled';
+    bankAccount?: {
+      accountHolderName?: string;
+      accountNumber?: string;
+      ifscCode?: string;
+      bankName?: string;
+      upiId?: string;
+    };
+  }) => request<User>(`/api/v1/super-admin/city-admins/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   superAdminSellers: (page = 1, limit = 20) => request<PageResult<User>>(`/api/v1/super-admin/sellers?page=${page}&limit=${limit}`),
   superAdminSeller: (id: string) => request<User>(`/api/v1/super-admin/sellers/${encodeURIComponent(id)}`),
   superAdminAuditLogs: (page = 1, limit = 20) => request<PageResult<AuditLogEntry>>(`/api/v1/super-admin/audit-logs?page=${page}&limit=${limit}`),
+  superAdminSupportTickets: (status?: string, category?: string, city?: string) => {
+    const q = new URLSearchParams();
+    if (status) q.set('status', status);
+    if (category) q.set('category', category);
+    if (city) q.set('city', city);
+    return request<SupportTicketItem[]>(`/api/v1/super-admin/support-tickets${q.size ? `?${q}` : ''}`);
+  },
+  resolveSuperAdminSupportTicket: (id: string, payload: { status: 'action_taken' | 'resolved' | 'closed'; decisionNote: string; actionTaken?: string }) =>
+    request<SupportTicketItem>(`/api/v1/super-admin/support-tickets/${encodeURIComponent(id)}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  superAdminCityAdminSettlements: () => request<CityAdminSettlementItem[]>('/api/v1/super-admin/settlements/city-admins'),
+  superAdminSellerSettlements: () => request<SellerPayoutSettlementItem[]>('/api/v1/super-admin/settlements/sellers'),
+  superAdminPartnerSettlements: () => request<PartnerPayoutSettlementItem[]>('/api/v1/super-admin/settlements/delivery-partners'),
+  recordSuperAdminDisbursement: (payload: {
+    beneficiaryType: 'city_admin' | 'seller' | 'delivery_partner';
+    beneficiaryId: string;
+    paymentMethod: 'upi_intent' | 'bank_transfer' | 'razorpay_manual';
+    utrReference: string;
+    notes?: string;
+  }) => request<PayoutRecordItem>('/api/v1/super-admin/settlements/disburse', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  cityAdminSupportTickets: () => request<SupportTicketItem[]>('/api/v1/city-admin/support-tickets'),
+  createCityAdminSupportTicket: (payload: {
+    category: string;
+    priority: string;
+    subject: string;
+    description: string;
+    relatedOrderReference?: string;
+    relatedParty?: { partyType: string; name?: string; phoneE164?: string };
+  }) => request<SupportTicketItem>('/api/v1/city-admin/support-tickets', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  cityAdminProfile: () => request<CityAdminProfileData>('/api/v1/city-admin/profile'),
   cityAdminDashboard: () => request<CityAdminDashboard>('/api/v1/city-admin/dashboard'),
   cityAdminServiceZones: () => request<CityAdminServiceZones>('/api/v1/city-admin/service-zones'),
   requestCityAdminServiceZoneChange: (requestText: string) => request<{ id: string; city: string; status: string; createdAt: string }>('/api/v1/city-admin/service-zone-change-requests', { method: 'POST', body: JSON.stringify({ requestText }) }),

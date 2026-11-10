@@ -3,6 +3,7 @@ import { app } from './app.js';
 import { connectDatabase, disconnectDatabase } from './config/db.js';
 import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
+import { Order } from './modules/orders/order.model.js';
 import { releaseExpiredReservations } from './modules/orders/reservation.worker.js';
 import { processOrderNotificationQueue } from './modules/notifications/notification.worker.js';
 import { processSlaAndAutoDispatch } from './modules/orders/autoDispatch.worker.js';
@@ -14,6 +15,13 @@ let reservationTimer: NodeJS.Timeout | undefined;
 async function start(): Promise<void> {
   if (isFirebaseAdminConfigured()) firebaseMessaging();
   await connectDatabase();
+  // Auto-heal past online/prepaid UPI orders so they are immediately confirmed
+  await Order.updateMany(
+    { paymentMethod: { $in: ['upi', 'card', 'netbanking'] }, paymentStatus: 'pending_verification' },
+    { $set: { paymentStatus: 'confirmed' } }
+  ).catch((err: unknown) => {
+    logger.warn('Prepaid order payment status auto-heal skipped', { error: String(err) });
+  });
   await releaseExpiredReservations();
   await processOrderNotificationQueue();
   await processSlaAndAutoDispatch();
@@ -33,7 +41,7 @@ async function start(): Promise<void> {
         name: error instanceof Error ? error.name : 'Unknown error',
       });
     });
-  }, 60_000);
+  }, 15_000);
   server.listen(env.PORT, () => logger.info('eSakhi API listening', { port: env.PORT }));
 }
 

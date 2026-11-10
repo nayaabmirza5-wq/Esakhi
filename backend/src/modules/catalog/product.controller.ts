@@ -258,7 +258,10 @@ export const createProduct: RequestHandler = async (req, res) => {
   let product: InstanceType<typeof Product> | null = null;
   try {
     product = await session.withTransaction(async () => {
-      const { sellerId, categoryId, subcategoryId, productType, isActive, ...productFields } = input;
+      const { sellerId, categoryId, subcategoryId, productType, isActive, basePricePaise, ...productFields } = input;
+      const basePrice = basePricePaise ?? Math.round(productFields.pricePaise / 1.10);
+      const platformFee = Math.round(basePrice * 0.05);
+      const cityAdminFee = Math.round(basePrice * 0.05);
       const uniqueSlug = await resolveUniqueProductSlug(productFields.slug, session);
       const foodComplianceStatus = selection.isFoodProduct
         ? (await isFoodSellerVerified(sellerId, session) ? 'verified' : 'pending')
@@ -266,6 +269,9 @@ export const createProduct: RequestHandler = async (req, res) => {
       assertFoodPublicationAllowed(selection.isFoodProduct, foodComplianceStatus, isActive);
       const [created] = await Product.create([{
         ...productFields,
+        basePricePaise: basePrice,
+        platformFeePaise: platformFee,
+        cityAdminFeePaise: cityAdminFee,
         slug: uniqueSlug,
         category: selection.categoryName,
         ...selection,
@@ -308,8 +314,18 @@ export const createSellerProduct: RequestHandler = async (req, res) => {
       }
       const knownProductType = isKnownProductType(selection.categoryId, selection.subcategoryId, selection.productType);
       const uniqueSlug = await resolveUniqueProductSlug(input.slug, session);
+      const { basePricePaise: inputBasePrice, pricePaise: _ignoredPrice, ...sellerFields } = input;
+      const basePricePaise = inputBasePrice ?? Math.round(input.pricePaise / 1.10);
+      const platformFeePaise = Math.round(basePricePaise * 0.05);
+      const cityAdminFeePaise = Math.round(basePricePaise * 0.05);
+      const finalPricePaise = input.pricePaise || (basePricePaise + platformFeePaise + cityAdminFeePaise);
+
       const [created] = await Product.create([{
-        ...input,
+        pricePaise: finalPricePaise,
+        basePricePaise,
+        platformFeePaise,
+        cityAdminFeePaise,
+        ...sellerFields,
         slug: uniqueSlug,
         category: selection.categoryName,
         ...selection,

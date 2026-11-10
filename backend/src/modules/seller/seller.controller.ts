@@ -24,7 +24,7 @@ import {
   sellerProfileUpdateSchema,
 } from './seller.schemas.js';
 import { enqueueOrderStatusNotification } from '../notifications/orderNotification.service.js';
-import { autoDispatchPendingOrders } from '../orders/autoDispatch.worker.js';
+import { autoAssignOrderById, autoDispatchPendingOrders } from '../orders/autoDispatch.worker.js';
 import { logger } from '../../utils/logger.js';
 
 const DEFAULT_5_INSPECTION_IMAGES = [
@@ -119,13 +119,23 @@ function sellerOrderSummary(order: {
   orderReference: string;
   fulfilmentMethod: string;
   fulfilmentStatus: string;
+  paymentMethod?: string | null;
   paymentStatus: string;
+  totalPaise?: number | null;
+  deliveryFeePaise?: number | null;
+  customerName?: string | null;
+  customerPhoneE164?: string | null;
+  address?: Record<string, unknown> | null;
+  sellerPickup?: Record<string, unknown> | null;
+  deliveryOtp?: string | null;
   sellerId: string;
   items: Array<{
     sellerId?: unknown;
     productName: string;
     quantity: number;
+    unitPricePaise?: number;
     lineTotalPaise: number;
+    variantAttributes?: Record<string, string> | Map<string, string> | null;
   }>;
   deliveryPartner?: {
     name?: string | null;
@@ -170,7 +180,13 @@ function sellerOrderSummary(order: {
 }) {
   const matchingItems = (order.items ?? []).filter((item) => item.sellerId?.toString() === order.sellerId);
   const effectiveItems = matchingItems.length > 0 ? matchingItems : (order.items ?? []);
-  const items = effectiveItems.map(({ productName, quantity, lineTotalPaise }) => ({ productName, quantity, lineTotalPaise }));
+  const items = effectiveItems.map(({ productName, quantity, lineTotalPaise, unitPricePaise, variantAttributes }) => ({
+    productName,
+    quantity,
+    unitPricePaise: unitPricePaise ?? Math.round(lineTotalPaise / (quantity || 1)),
+    lineTotalPaise,
+    ...(variantAttributes ? { variantAttributes: variantAttributes instanceof Map ? Object.fromEntries(variantAttributes) : variantAttributes } : {}),
+  }));
   const reversedHistory = [...(order.statusHistory ?? [])].reverse();
   const findStatusTime = (status: string) => reversedHistory.find((entry) => entry.status === status)?.changedAt;
 
@@ -186,7 +202,15 @@ function sellerOrderSummary(order: {
     orderReference: order.orderReference,
     fulfilmentMethod: order.fulfilmentMethod,
     fulfilmentStatus: order.fulfilmentStatus,
+    paymentMethod: order.paymentMethod || 'cash',
     paymentStatus: order.paymentStatus,
+    totalPaise: order.totalPaise ?? items.reduce((sum, item) => sum + item.lineTotalPaise, 0),
+    deliveryFeePaise: order.deliveryFeePaise ?? 0,
+    ...(order.customerName ? { customerName: order.customerName } : {}),
+    ...(order.customerPhoneE164 ? { customerPhoneE164: order.customerPhoneE164 } : {}),
+    ...(order.address ? { address: order.address } : {}),
+    ...(order.sellerPickup ? { sellerPickup: order.sellerPickup } : {}),
+    ...(order.deliveryOtp ? { deliveryOtp: order.deliveryOtp } : {}),
     items,
     subtotalPaise: items.reduce((sum, item) => sum + item.lineTotalPaise, 0),
     ...(order.deliveryPartner?.name ? {
@@ -338,7 +362,7 @@ export const getSellerDashboard: RequestHandler = async (req, res) => {
     Order.find({ ...sellerOrdersFilter(sellerId), fulfilmentStatus: { $nin: [...terminalStatuses] } })
       .sort({ createdAt: -1 })
       .limit(5)
-      .select('orderReference fulfilmentMethod fulfilmentStatus paymentStatus items.sellerId items.productName items.quantity items.lineTotalPaise deliveryPartner.name deliveryPartner.phoneE164 deliveryPartner.distanceKm deliveryPartner.assignedAt preDispatchInspection returnRequest statusHistory createdAt')
+      .select('orderReference fulfilmentMethod fulfilmentStatus paymentMethod paymentStatus totalPaise deliveryFeePaise customerName customerPhoneE164 address sellerPickup deliveryOtp items.sellerId items.productName items.quantity items.unitPricePaise items.lineTotalPaise items.variantAttributes deliveryPartner.name deliveryPartner.phoneE164 deliveryPartner.distanceKm deliveryPartner.assignedAt preDispatchInspection returnRequest statusHistory createdAt')
       .lean(),
     SellerApplication.findOne({ sellerId, status: 'approved' })
       .sort({ reviewedAt: -1, createdAt: -1 })
@@ -452,6 +476,7 @@ export const completeSellerOnboarding: RequestHandler = async (req, res) => {
     accountNumber: input.bankDetails.accountNumber,
     ifscCode: input.bankDetails.ifscCode.toUpperCase(),
     bankName: input.bankDetails.bankName || 'Bank',
+    ...(input.bankDetails.upiId ? { upiId: input.bankDetails.upiId.trim() } : {}),
     verified: true,
     linkedAt: new Date(),
   };
@@ -1551,7 +1576,7 @@ export const listSellerOrders: RequestHandler = async (req, res) => {
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
-      .select('orderReference fulfilmentMethod fulfilmentStatus paymentStatus items.sellerId items.productName items.quantity items.lineTotalPaise deliveryPartner.name deliveryPartner.phoneE164 deliveryPartner.distanceKm deliveryPartner.assignedAt preDispatchInspection returnRequest statusHistory createdAt')
+      .select('orderReference fulfilmentMethod fulfilmentStatus paymentMethod paymentStatus totalPaise deliveryFeePaise customerName customerPhoneE164 address sellerPickup deliveryOtp items.sellerId items.productName items.quantity items.unitPricePaise items.lineTotalPaise items.variantAttributes deliveryPartner.name deliveryPartner.phoneE164 deliveryPartner.distanceKm deliveryPartner.assignedAt preDispatchInspection returnRequest statusHistory createdAt')
       .lean(),
     Order.countDocuments(filter),
   ]);
@@ -1752,6 +1777,9 @@ export const updateSellerOrderStatus: RequestHandler = async (req, res) => {
 
   if (!updatedSummary) {
     throw new AppError(500, 'INTERNAL_ERROR', 'The order status could not be updated.');
+  }
+  if (status === 'ready_for_pickup') {
+    void autoAssignOrderById(orderId).catch(() => null);
   }
   sendData(res, updatedSummary);
 };

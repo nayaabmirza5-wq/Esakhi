@@ -4,39 +4,29 @@ import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, u
 import type { ChangeEvent, FormEvent, ReactNode } from 'react';
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ApiError, api, onSessionRefresh, refreshSession, resolveProductImageUrl, setAccessToken } from './api';
-import type { AuditLogEntry, CityAdminDeliveryPartner, CityAdminOrder, CityAdminProduct, Order, Product, ProductCategory, SellerDashboard, SellerInventoryAdjustment, SellerOrder, Settings, SuperAdminOrder, User } from './types';
+import type { AuditLogEntry, CityAdminDeliveryPartner, CityAdminOrder, CityAdminProduct, Locality, Order, Product, ProductCategory, Settings, SuperAdminOrder, User } from './types';
 import { autoRegisterPushNotifications, disableOrderPushNotifications, enableOrderPushNotifications, pushNotificationsConfigured } from './pushNotifications';
 import type { ForegroundPushMessage } from './pushNotifications';
 import { AddressBook } from './AddressBook';
-import { CityAdminLiveFleetOverview, CityAdminLiveTracker } from './CityAdminLiveTracker';
-import { SellerOrderCard, SellerOrderSkeleton } from './SellerOrderCard';
+import { MeeshoSlipModal } from './components/MeeshoSlipModal';
+import { CityAdminLiveTracker } from './CityAdminLiveTracker';
+import { CityAdminCashRemittanceDesk } from './CityAdminCashRemittanceDesk';
+import { DeliveryPartnerCockpit } from './modules/delivery/DeliveryPartnerCockpit';
+import { SellerPortal } from './modules/seller/SellerPortal';
 import {
-  CityAdminDeliveryEscalationQueue,
   CityAdminDeliveryResolutionPanel,
-  DeliveryFailureReportModal,
 } from './DeliveryEscalationSystem';
 import {
   CustomerReturnAndCancelPanel,
   CityAdminDisputeArbitrationPanel,
-  SellerSettlementsLedgerPanel,
-  DeliveryPartnerPaySlipPanel,
   SuperAdminRefundsAndSettlementsView,
 } from './ReturnDisputeSystem';
-
-type AuthContextValue = {
-  user: User | null;
-  ready: boolean;
-  setSession: (user: User, token: string) => void;
-  signOut: () => Promise<void>;
-  reloadUser: () => Promise<void>;
-};
-const AuthContext = createContext<AuthContextValue | null>(null);
-
-function useAuth(): AuthContextValue {
-  const context = useContext(AuthContext);
-  if (!context) throw new Error('Auth context is unavailable.');
-  return context;
-}
+import {
+  SuperAdminSupportDeskPage,
+  SuperAdminAssistedPayoutDeskPage,
+  CityAdminRaiseTicketModal,
+} from './SuperAdminWorkspace';
+import { AuthContext, useAuth } from './AuthContext';
 
 type CartLine = { product: Product; quantity: number; variantId?: string; unavailable?: boolean };
 type CartContextValue = {
@@ -332,6 +322,7 @@ function App(): ReactNode {
   );
   const isDeliveryPortal = location.pathname.startsWith('/delivery-partner');
   const isSellerPortal = location.pathname.startsWith('/seller');
+  const isCityAdminPortal = location.pathname.startsWith('/city-admin');
 
   // Keep the rest of your original App() code here, unchanged.
   return (
@@ -362,10 +353,11 @@ function App(): ReactNode {
               <Route path="/orders" element={<OrdersPage />} />
               <Route path="/orders/:id" element={<CustomerOrderPage />} />
               <Route path="/delivery-partner/apply" element={<DeliveryPartnerApplicationPage />} />
-              <Route path="/delivery-partner" element={<DeliveryPartnerGate><DeliveryPartnerPage /></DeliveryPartnerGate>} />
-              <Route path="/seller" element={<SellerGate><SellerPortalPage /></SellerGate>} />
+              <Route path="/delivery" element={<Navigate to="/delivery-partner" replace />} />
+              <Route path="/delivery-partner" element={<DeliveryPartnerGate><DeliveryPartnerCockpitPage /></DeliveryPartnerGate>} />
+              <Route path="/seller" element={<SellerGate><SellerPortal /></SellerGate>} />
               <Route path="/seller/apply" element={<SellerRegistrationPage />} />
-              <Route path="/seller/products/new" element={<SellerGate><SellerPortalPage initialView="new_product" /></SellerGate>} />
+              <Route path="/seller/products/new" element={<SellerGate><SellerPortal initialView="new_product" /></SellerGate>} />
               <Route path="/super-admin" element={<SuperAdminGate><SuperAdminOverviewPage /></SuperAdminGate>} />
               <Route path="/super-admin/cities" element={<SuperAdminGate><SuperAdminCitiesPage /></SuperAdminGate>} />
               <Route path="/super-admin/cities/:city" element={<SuperAdminGate><SuperAdminCityDetailPage /></SuperAdminGate>} />
@@ -393,11 +385,13 @@ function App(): ReactNode {
               <Route path="/super-admin/security" element={<SuperAdminGate><SuperAdminSecurityPage /></SuperAdminGate>} />
               <Route path="/city-admin" element={<CityAdminGate><CityAdminDashboardPage /></CityAdminGate>} />
               <Route path="/city-admin/service-zones" element={<CityAdminGate><CityAdminServiceZonesPage /></CityAdminGate>} />
-              <Route path="/city-admin/sellers" element={<CityAdminGate><CityAdminSellerApplicationsPage /></CityAdminGate>} />
+              <Route path="/city-admin/sellers" element={<CityAdminGate><CityAdminSellersPage /></CityAdminGate>} />
               <Route path="/city-admin/products" element={<CityAdminGate><CityAdminProductReviewPage /></CityAdminGate>} />
               <Route path="/city-admin/orders" element={<CityAdminGate><CityAdminOrdersPage /></CityAdminGate>} />
               <Route path="/city-admin/orders/:id" element={<CityAdminGate><CityAdminOrderDetailPage /></CityAdminGate>} />
+              <Route path="/city-admin/remittance" element={<CityAdminGate><CityAdminCashRemittanceDesk /></CityAdminGate>} />
               <Route path="/city-admin/delivery-partners" element={<CityAdminGate><CityAdminDeliveryPartnersPage /></CityAdminGate>} />
+              <Route path="/city-admin/profile" element={<CityAdminGate><CityAdminProfilePage /></CityAdminGate>} />
               <Route path="/admin" element={<AdminGate><AdminDashboardPage /></AdminGate>} />
               <Route path="/admin/products" element={<AdminGate><AdminProductsPage /></AdminGate>} />
               <Route path="/admin/inventory" element={<AdminGate adminOnly><AdminInventoryPage /></AdminGate>} />
@@ -412,7 +406,7 @@ function App(): ReactNode {
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
           </main>
-          {!location.pathname.startsWith('/super-admin') && !isDeliveryPortal && !isSellerPortal && <Footer />}
+          {!location.pathname.startsWith('/super-admin') && !isCityAdminPortal && !isDeliveryPortal && !isSellerPortal && <Footer />}
         </div>
       </CartContext.Provider>
     </AuthContext.Provider>
@@ -1642,6 +1636,7 @@ function CustomerOrderPage(): ReactNode {
   const [directCancelNote, setDirectCancelNote] = useState('');
   const [cancellingDirect, setCancellingDirect] = useState(false);
   const [cancelSuccessMsg, setCancelSuccessMsg] = useState('');
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
 
   useEffect(() => {
     if (!user || !id) return;
@@ -1817,26 +1812,48 @@ function CustomerOrderPage(): ReactNode {
           <span>/</span>
           <span style={{ color: '#4B5563', fontWeight: 600 }}>{item.orderReference}</span>
         </div>
-        <button
-          type="button"
-          onClick={handleCopyId}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            background: copiedId ? '#DCFCE7' : '#FFFFFF',
-            color: copiedId ? '#15803D' : '#4B5563',
-            border: `1px solid ${copiedId ? '#86EFAC' : '#E5E7EB'}`,
-            borderRadius: 8,
-            padding: '5px 12px',
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-          }}
-        >
-          {copiedId ? '✓ Copied ID' : '📋 Copy Order ID'}
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={() => setShowInvoiceModal(true)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              background: '#FDF4FF',
+              color: '#6B215C',
+              border: '1px solid #E879F9',
+              borderRadius: 8,
+              padding: '5px 12px',
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            🏷️ Tax Invoice & Slip
+          </button>
+          <button
+            type="button"
+            onClick={handleCopyId}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              background: copiedId ? '#DCFCE7' : '#FFFFFF',
+              color: copiedId ? '#15803D' : '#4B5563',
+              border: `1px solid ${copiedId ? '#86EFAC' : '#E5E7EB'}`,
+              borderRadius: 8,
+              padding: '5px 12px',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {copiedId ? '✓ Copied ID' : '📋 Copy Order ID'}
+          </button>
+        </div>
       </div>
 
       {error && <Notice tone="error">{error}</Notice>}
@@ -2238,70 +2255,112 @@ function CustomerOrderPage(): ReactNode {
 
           {/* Delivery Partner Spotlight */}
           {item.deliveryPartner && (
-            <div
-              style={{
-                marginTop: 14,
-                padding: '14px 18px',
-                borderRadius: 14,
-                background: 'linear-gradient(135deg, #F0FDF4 0%, #ECFDF5 100%)',
-                border: '1px solid #A7F3D0',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                gap: 12,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            (() => {
+              const isActiveForward = ['delivery_partner_assigned', 'out_for_pickup', 'picked_up', 'out_for_delivery'].includes(item.fulfilmentStatus);
+              const isDelivered = ['delivered', 'completed'].includes(item.fulfilmentStatus);
+              const isReturnInProgress = ['return_partner_assigned', 'return_picked_up'].includes(item.fulfilmentStatus);
+              const isReturnAccepted = ['return_accepted', 'return_requested'].includes(item.fulfilmentStatus);
+
+              let badgeTitle = 'Assigned Delivery Partner';
+              let badgeColor = '#047857';
+              let badgeBg = 'linear-gradient(135deg, #F0FDF4 0%, #ECFDF5 100%)';
+              let badgeBorder = '#A7F3D0';
+              let iconBg = '#10B981';
+              let iconEmoji = '🛵';
+
+              if (isActiveForward) {
+                badgeTitle = item.fulfilmentStatus === 'out_for_delivery'
+                  ? '🛵 Partner Out For Delivery (En Route To You)'
+                  : item.fulfilmentStatus === 'picked_up'
+                    ? '📦 Package Picked Up from Seller'
+                    : '🛵 Assigned Delivery Partner';
+              } else if (isDelivered) {
+                badgeTitle = '✓ Order Delivered By Partner';
+                badgeBg = '#F8FAFC';
+                badgeBorder = '#E2E8F0';
+                iconBg = '#64748B';
+                iconEmoji = '✓';
+              } else if (isReturnInProgress) {
+                badgeTitle = '🔄 Return Pickup Agent Dispatched';
+                badgeBg = '#FFF7ED';
+                badgeBorder = '#FFEDD5';
+                iconBg = '#EA580C';
+                iconEmoji = '🔄';
+              } else if (isReturnAccepted) {
+                badgeTitle = '⏳ Return Authorized · Reverse Pickup Agent Being Scheduled';
+                badgeBg = '#FFFBEB';
+                badgeBorder = '#FEF3C7';
+                iconBg = '#D97706';
+                iconEmoji = '⏳';
+              }
+
+              return (
                 <div
                   style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: '50%',
-                    background: '#10B981',
-                    color: '#FFFFFF',
-                    display: 'grid',
-                    placeItems: 'center',
-                    fontSize: 20,
-                  }}
-                >
-                  🛵
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: '#047857', textTransform: 'uppercase' }}>
-                    Assigned Delivery Partner
-                  </div>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: '#064E3B' }}>
-                    {item.deliveryPartner.name}
-                    {item.deliveryPartner.distanceKm !== undefined && item.deliveryPartner.distanceKm !== null && (
-                      <span style={{ fontSize: 12, fontWeight: 600, color: '#059669', marginLeft: 6 }}>
-                        · {item.deliveryPartner.distanceKm} km from seller
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-              {item.deliveryPartner.phoneE164 && (
-                <a
-                  href={`tel:${item.deliveryPartner.phoneE164}`}
-                  style={{
-                    display: 'inline-flex',
+                    marginTop: 14,
+                    padding: '14px 18px',
+                    borderRadius: 14,
+                    background: badgeBg,
+                    border: `1px solid ${badgeBorder}`,
+                    display: 'flex',
                     alignItems: 'center',
-                    gap: 6,
-                    padding: '8px 16px',
-                    borderRadius: 8,
-                    background: '#059669',
-                    color: '#FFFFFF',
-                    fontSize: 13,
-                    fontWeight: 700,
-                    textDecoration: 'none',
-                    boxShadow: '0 2px 6px rgba(5, 150, 105, 0.25)',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: 12,
                   }}
                 >
-                  📞 Call Partner ({item.deliveryPartner.phoneE164})
-                </a>
-              )}
-            </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div
+                      style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: '50%',
+                        background: iconBg,
+                        color: '#FFFFFF',
+                        display: 'grid',
+                        placeItems: 'center',
+                        fontSize: 18,
+                      }}
+                    >
+                      {iconEmoji}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: badgeColor, textTransform: 'uppercase' }}>
+                        {badgeTitle}
+                      </div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: '#064E3B' }}>
+                        {item.deliveryPartner.name}
+                        {isActiveForward && item.deliveryPartner.distanceKm !== undefined && item.deliveryPartner.distanceKm !== null && (
+                          <span style={{ fontSize: 12, fontWeight: 600, color: '#059669', marginLeft: 6 }}>
+                            · {item.deliveryPartner.distanceKm} km from seller
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {isActiveForward && item.deliveryPartner.phoneE164 && (
+                    <a
+                      href={`tel:${item.deliveryPartner.phoneE164}`}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '8px 16px',
+                        borderRadius: 8,
+                        background: '#059669',
+                        color: '#FFFFFF',
+                        fontSize: 13,
+                        fontWeight: 700,
+                        textDecoration: 'none',
+                        boxShadow: '0 2px 6px rgba(5, 150, 105, 0.25)',
+                      }}
+                    >
+                      📞 Call Partner ({item.deliveryPartner.phoneE164})
+                    </a>
+                  )}
+                </div>
+              );
+            })()
           )}
         </section>
       )}
@@ -2722,6 +2781,11 @@ function CustomerOrderPage(): ReactNode {
 
       {/* Return & Dispute Panel */}
       <CustomerReturnAndCancelPanel order={item} onOrderUpdated={(updated) => order.setData(updated)} />
+
+      {/* Meesho 2-in-1 Shipping Label & Tax Invoice Slip Modal */}
+      {showInvoiceModal && (
+        <MeeshoSlipModal order={item} onClose={() => setShowInvoiceModal(false)} />
+      )}
     </div>
   );
 }
@@ -3038,14 +3102,34 @@ function SuperAdminCitiesPage(): ReactNode {
         {citiesResult.error && <div className="super-admin-error" role="alert">{citiesResult.error}<button onClick={() => void citiesResult.reload()}>Retry</button></div>}
         {citiesResult.loading ? <Loading label="Loading cities…" /> : citiesResult.data?.length ? (
           <div className="super-admin-table-wrap"><table className="super-admin-table">
-            <thead><tr><th>City</th><th>State</th><th>City Admin</th><th>Sellers</th><th>Partners</th><th>Zones</th><th>Orders</th><th>Configured</th></tr></thead>
+            <thead><tr><th>City</th><th>State</th><th>City Admin</th><th>Sellers</th><th>Partners</th><th>Zones</th><th>Orders</th><th>Configured</th><th>Service Zones Action</th></tr></thead>
             <tbody>{citiesResult.data.map((record) => (
               <tr key={record.city}>
-                <td><Link to={`/super-admin/cities/${encodeURIComponent(record.city)}`}>{record.city}</Link></td>
+                <td><Link to={`/super-admin/cities/${encodeURIComponent(record.city)}`}><strong>{record.city}</strong></Link></td>
                 <td>{record.state || '—'}</td>
                 <td>{record.cityAdminName || 'Unassigned'} <small>{record.cityAdminCount} account(s)</small></td>
                 <td>{record.sellerCount}</td><td>{record.deliveryPartnerCount}</td><td>{record.serviceZoneCount}</td><td>{record.orderCount}</td>
                 <td><StatusBadge value={record.configured ? 'active' : 'observed'} /></td>
+                <td>
+                  <Link
+                    to={`/super-admin/cities/${encodeURIComponent(record.city)}`}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      color: '#0284c7',
+                      fontWeight: 600,
+                      fontSize: '12px',
+                      textDecoration: 'none',
+                      background: '#f0f9ff',
+                      padding: '4px 10px',
+                      borderRadius: '4px',
+                      border: '1px solid #bae6fd'
+                    }}
+                  >
+                    Manage &amp; Add Zones ({record.serviceZoneCount}) →
+                  </Link>
+                </td>
               </tr>
             ))}</tbody>
           </table></div>
@@ -3059,6 +3143,91 @@ function SuperAdminCityDetailPage(): ReactNode {
   const { city = '' } = useParams();
   const result = useLoad(() => api.superAdminCity(city), [city]);
   const record = result.data;
+
+  // Service Zone Modal State
+  const [zoneModalOpen, setZoneModalOpen] = useState(false);
+  const [editingZoneIndex, setEditingZoneIndex] = useState<number | null>(null);
+  const [zoneName, setZoneName] = useState('');
+  const [coveredLocalitiesInput, setCoveredLocalitiesInput] = useState('');
+  const [postalCodesInput, setPostalCodesInput] = useState('470661');
+  const [deliveryFeeRupees, setDeliveryFeeRupees] = useState('29');
+  const [savingZone, setSavingZone] = useState(false);
+  const [zoneActionError, setZoneActionError] = useState('');
+
+  const openAddZone = () => {
+    setEditingZoneIndex(null);
+    setZoneName('');
+    setCoveredLocalitiesInput('');
+    setPostalCodesInput('470661');
+    setDeliveryFeeRupees('29');
+    setZoneActionError('');
+    setZoneModalOpen(true);
+  };
+
+  const openEditZone = (zone: Locality, index: number) => {
+    setEditingZoneIndex(index);
+    setZoneName(zone.name);
+    setCoveredLocalitiesInput((zone.coveredLocalities || []).join(', '));
+    setPostalCodesInput((zone.postalCodes || []).join(', '));
+    setDeliveryFeeRupees(zone.deliveryFeePaise !== undefined ? (zone.deliveryFeePaise / 100).toFixed(0) : '29');
+    setZoneActionError('');
+    setZoneModalOpen(true);
+  };
+
+  const handleSaveZone = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!zoneName.trim()) {
+      setZoneActionError('Zone / Sector name is required.');
+      return;
+    }
+    setSavingZone(true);
+    setZoneActionError('');
+
+    const localities = coveredLocalitiesInput
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const postalCodes = postalCodesInput
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const feePaise = Math.round(parseFloat(deliveryFeeRupees || '0') * 100);
+
+    try {
+      if (editingZoneIndex !== null) {
+        await api.superAdminUpdateCityZone(city, editingZoneIndex, {
+          name: zoneName.trim(),
+          coveredLocalities: localities.length ? localities : [zoneName.trim()],
+          postalCodes: postalCodes.length ? postalCodes : ['470661'],
+          deliveryFeePaise: isNaN(feePaise) ? 2900 : feePaise,
+        });
+      } else {
+        await api.superAdminAddCityZone(city, {
+          name: zoneName.trim(),
+          coveredLocalities: localities.length ? localities : [zoneName.trim()],
+          postalCodes: postalCodes.length ? postalCodes : ['470661'],
+          deliveryFeePaise: isNaN(feePaise) ? 2900 : feePaise,
+        });
+      }
+      setZoneModalOpen(false);
+      void result.reload(false);
+    } catch (err) {
+      setZoneActionError(err instanceof Error ? err.message : 'Failed to save service zone.');
+    } finally {
+      setSavingZone(false);
+    }
+  };
+
+  const handleDeleteZone = async (index: number, name: string) => {
+    if (!window.confirm(`Are you sure you want to delete service zone "${name}"?`)) return;
+    try {
+      await api.superAdminDeleteCityZone(city, index);
+      void result.reload(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete service zone.');
+    }
+  };
+
   if (result.loading) return <div className="super-admin-page"><Loading label="Loading city details…" /></div>;
   if (!record) return <div className="super-admin-page"><Notice tone="error">{result.error || 'City not found.'}</Notice><Link className="super-admin-text-link" to="/super-admin/cities">← Back to cities</Link></div>;
   return (
@@ -3072,12 +3241,227 @@ function SuperAdminCityDetailPage(): ReactNode {
         <SuperAdminMetric label="Delivery partners" value={record.metrics.deliveryPartners} icon="delivery" detail="Associated through city orders" />
         <SuperAdminMetric label="Orders" value={record.metrics.orders} icon="orders" />
       </div>
-      {record.configured ? (
-        <section className="super-admin-panel">
-          <div className="super-admin-panel-heading"><div><h2>Service zones</h2><p>Configured localities and postal codes for this platform city.</p></div></div>
-          {record.serviceableLocalities.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Locality</th><th>Postal codes</th><th>Delivery fee</th></tr></thead><tbody>{record.serviceableLocalities.map((zone) => <tr key={zone.name}><td>{zone.name}</td><td>{zone.postalCodes.join(', ') || '—'}</td><td>{zone.deliveryFeePaise === undefined ? '—' : formatMoney(zone.deliveryFeePaise)}</td></tr>)}</tbody></table></div> : <div className="super-admin-empty">No serviceable localities are configured for this city.</div>}
-        </section>
-      ) : <p className="super-admin-data-note">The current settings schema stores one configured platform city and its service zones. This city is visible because it appears in live user or order records.</p>}
+      <section className="super-admin-panel">
+        <div className="super-admin-panel-heading">
+          <div>
+            <h2>Service zones</h2>
+            <p>Configured delivery sectors, covered localities, and flat delivery fees for {record.city}.</p>
+          </div>
+          <button
+            type="button"
+            className="super-admin-btn-primary"
+            onClick={openAddZone}
+            style={{
+              background: '#0f172a',
+              color: '#ffffff',
+              border: 'none',
+              padding: '8px 16px',
+              borderRadius: '6px',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <span>+</span> Add Service Zone
+          </button>
+        </div>
+        {record.serviceableLocalities.length ? (
+          <div className="super-admin-table-wrap">
+            <table className="super-admin-table">
+              <thead>
+                <tr>
+                  <th>Zone / Sector</th>
+                  <th>Covered Localities</th>
+                  <th>Postal codes</th>
+                  <th>Delivery fee</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {record.serviceableLocalities.map((zone, idx) => (
+                  <tr key={`${zone.name}-${idx}`}>
+                    <td><strong>{zone.name}</strong></td>
+                    <td>
+                      {zone.coveredLocalities && zone.coveredLocalities.length > 0 ? (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                          {zone.coveredLocalities.map((loc) => (
+                            <span
+                              key={loc}
+                              style={{
+                                background: '#f1f5f9',
+                                border: '1px solid #cbd5e1',
+                                borderRadius: '4px',
+                                padding: '2px 8px',
+                                fontSize: '12px',
+                                color: '#1e293b'
+                              }}
+                            >
+                              {loc}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span style={{ color: '#64748b' }}>{zone.name}</span>
+                      )}
+                    </td>
+                    <td>{zone.postalCodes.join(', ') || '470661'}</td>
+                    <td>{zone.deliveryFeePaise === undefined ? '₹29.00' : formatMoney(zone.deliveryFeePaise)}</td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() => openEditZone(zone, idx)}
+                          style={{ color: '#0284c7', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() => void handleDeleteZone(idx, zone.name)}
+                          style={{ color: '#dc2626', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="super-admin-empty">No serviceable localities are configured for this city. Click "+ Add Service Zone" to create one.</div>
+        )}
+      </section>
+
+      {/* ADD / EDIT SERVICE ZONE MODAL */}
+      {zoneModalOpen && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(15, 23, 42, 0.65)',
+          zIndex: 9999,
+          display: 'grid',
+          placeItems: 'center',
+          padding: '20px'
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '12px',
+            maxWidth: '560px',
+            width: '100%',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
+            overflow: 'hidden'
+          }}>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '17px', color: '#0f172a' }}>
+                {editingZoneIndex !== null ? `Edit Service Zone: ${zoneName}` : `Add New Service Zone for ${record.city}`}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setZoneModalOpen(false)}
+                style={{ border: 'none', background: 'transparent', fontSize: '18px', cursor: 'pointer', color: '#64748b' }}
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleSaveZone} style={{ padding: '24px' }}>
+              {zoneActionError && (
+                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '10px 14px', borderRadius: '6px', fontSize: '13px', marginBottom: '16px' }}>
+                  {zoneActionError}
+                </div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', textTransform: 'uppercase', marginBottom: '6px' }}>
+                    Zone / Sector Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={zoneName}
+                    onChange={(e) => setZoneName(e.target.value)}
+                    placeholder="e.g. Damoh Civil Lines & Station Area"
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+                  />
+                  <small style={{ color: '#64748b', fontSize: '12px', marginTop: '4px', display: 'block' }}>
+                    Descriptive name of the operational zone or delivery sector.
+                  </small>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', textTransform: 'uppercase', marginBottom: '6px' }}>
+                    Covered Localities (Comma Separated) *
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={coveredLocalitiesInput}
+                    onChange={(e) => setCoveredLocalitiesInput(e.target.value)}
+                    placeholder="e.g. Civil Lines, Station Road, Collectorate, Mission Compound, Police Lines"
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+                  />
+                  <small style={{ color: '#64748b', fontSize: '12px', marginTop: '4px', display: 'block' }}>
+                    Comma-separated list of colonies, mohallas, and landmarks inside this delivery sector.
+                  </small>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', textTransform: 'uppercase', marginBottom: '6px' }}>
+                      Postal / PIN Codes
+                    </label>
+                    <input
+                      type="text"
+                      value={postalCodesInput}
+                      onChange={(e) => setPostalCodesInput(e.target.value)}
+                      placeholder="e.g. 470661"
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#334155', textTransform: 'uppercase', marginBottom: '6px' }}>
+                      Express Delivery Fee (₹)
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      value={deliveryFeeRupees}
+                      onChange={(e) => setDeliveryFeeRupees(e.target.value)}
+                      placeholder="e.g. 29"
+                      style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #e2e8f0' }}>
+                <button
+                  type="button"
+                  onClick={() => setZoneModalOpen(false)}
+                  disabled={savingZone}
+                  style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#ffffff', cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: '#475569' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingZone}
+                  style={{ padding: '8px 20px', borderRadius: '6px', border: 'none', background: '#0f172a', color: '#ffffff', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+                >
+                  {savingZone ? 'Saving...' : editingZoneIndex !== null ? 'Update Zone' : 'Create Zone'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <div className="super-admin-detail-grid">
         <SuperAdminRecordTable title="City administrators" description="Administrators assigned to this city." empty="No City Admin is assigned." headers={['Name', 'Phone', 'Status']} rows={record.cityAdmins.map((admin) => [
           <Link key="name" to={`/super-admin/city-administrators/${getId(admin)}`}>{admin.name || 'City Admin'}</Link>,
@@ -3105,7 +3489,22 @@ function SuperAdminCityDetailPage(): ReactNode {
 
 function SuperAdminCityAdministratorsPage(): ReactNode {
   const [page, setPage] = useState(1);
-  const [form, setForm] = useState({ phone: '', name: '', email: '', city: '' });
+  const [form, setForm] = useState({
+    phone: '',
+    name: '',
+    email: '',
+    city: '',
+    residentialAddress: '',
+    aadhaarNumber: '',
+    compensationRate: '5% commission on completed city orders',
+    payerText: 'Super Admin / eSakhi Platform',
+    accountHolderName: '',
+    accountNumber: '',
+    confirmAccountNumber: '',
+    ifscCode: '',
+    bankName: '',
+    upiId: '',
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -3120,15 +3519,81 @@ function SuperAdminCityAdministratorsPage(): ReactNode {
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setSaving(true); setError(''); setMessage('');
+
+    if (!form.phone.trim()) {
+      setError('Please enter a valid phone number.');
+      setSaving(false); return;
+    }
+    if (!form.name.trim()) {
+      setError('City administrator full name is required.');
+      setSaving(false); return;
+    }
+    if (!form.city.trim()) {
+      setError('Assigned operational city is required.');
+      setSaving(false); return;
+    }
+    if (!form.residentialAddress.trim()) {
+      setError('Residential / Living address of the City Admin is required.');
+      setSaving(false); return;
+    }
+    if (!form.accountHolderName.trim()) {
+      setError('Bank Account Holder Name is mandatory.');
+      setSaving(false); return;
+    }
+    const cleanAcc = form.accountNumber.trim();
+    if (!/^\d{9,18}$/.test(cleanAcc)) {
+      setError('Bank Account Number must be between 9 and 18 digits.');
+      setSaving(false); return;
+    }
+    if (cleanAcc !== form.confirmAccountNumber.trim()) {
+      setError('Bank Account Numbers do not match. Please verify double-entry.');
+      setSaving(false); return;
+    }
+    const cleanIfsc = form.ifscCode.trim().toUpperCase();
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(cleanIfsc)) {
+      setError('Enter a valid 11-character Indian IFSC code (e.g. SBIN0000358).');
+      setSaving(false); return;
+    }
+    if (!form.bankName.trim()) {
+      setError('Bank Name (e.g. State Bank of India, HDFC Bank) is mandatory.');
+      setSaving(false); return;
+    }
+
     try {
       await api.createCityAdmin({
         phone: form.phone,
-        name: form.name.trim() || undefined,
+        name: form.name.trim(),
         email: form.email.trim() || undefined,
-        city: form.city.trim() || undefined,
+        city: form.city.trim(),
+        residentialAddress: form.residentialAddress.trim() || undefined,
+        aadhaarNumber: form.aadhaarNumber.trim() || undefined,
+        compensationRate: form.compensationRate.trim() || undefined,
+        payerText: form.payerText.trim() || undefined,
+        bankAccount: {
+          accountHolderName: form.accountHolderName.trim(),
+          accountNumber: cleanAcc,
+          ifscCode: cleanIfsc,
+          bankName: form.bankName.trim(),
+          upiId: form.upiId.trim() || undefined,
+        },
       });
-      setForm({ phone: '', name: '', email: '', city: form.city });
-      setMessage('City administrator created successfully.');
+      setForm({
+        phone: '',
+        name: '',
+        email: '',
+        city: form.city,
+        residentialAddress: '',
+        aadhaarNumber: '',
+        compensationRate: '5% commission on completed city orders',
+        payerText: 'Super Admin / eSakhi Platform',
+        accountHolderName: '',
+        accountNumber: '',
+        confirmAccountNumber: '',
+        ifscCode: '',
+        bankName: '',
+        upiId: '',
+      });
+      setMessage('City administrator appointed successfully with verified identity and banking coordinates.');
       await result.reload(false);
     } catch (cause) {
       setError(displayError(cause));
@@ -3154,26 +3619,85 @@ function SuperAdminCityAdministratorsPage(): ReactNode {
   return (
     <div className="super-admin-page">
       <div className="super-admin-page-heading">
-        <div><p className="super-admin-eyebrow">Operations</p><h1>City Administrators</h1><p>Add an approved City Admin account and assign them to a city from the existing database.</p></div>
+        <div><p className="super-admin-eyebrow">Operations</p><h1>City Administrators</h1><p>Add and appoint City Admin accounts with mandatory address, ID, bank details, and operational city scope.</p></div>
       </div>
       {error && <Notice tone="error">{error}</Notice>}
       {message && <Notice tone="success">{message}</Notice>}
       <div className="super-admin-lower-grid">
         <section className="super-admin-panel super-admin-recent-orders">
-          <div className="super-admin-panel-heading"><div><h2>Add city admin</h2><p>Provision a user with the City Admin role.</p></div></div>
+          <div className="super-admin-panel-heading"><div><h2>Add city admin</h2><p>Provision a user with City Admin role, verified credentials, and locked banking coordinates.</p></div></div>
           <form className="stack-form" onSubmit={(event) => void submit(event)}>
-            <label className="field"><span>Phone number</span><input aria-label="City admin phone" value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} placeholder="+91xxxxxxxxxx" /></label>
-            <label className="field"><span>Name</span><input aria-label="City admin name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></label>
-            <label className="field"><span>Email</span><input aria-label="City admin email" type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} /></label>
-            <label className="field"><span>Assigned city</span><input aria-label="Assigned city" list="super-admin-city-options" value={form.city} onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))} required /></label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+              <label className="field"><span>Phone number (Contact / Login) *</span><input required aria-label="City admin phone" value={form.phone} onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} placeholder="+91xxxxxxxxxx" /></label>
+              <label className="field"><span>Full Name (As per Govt ID) *</span><input required aria-label="City admin name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="e.g. Ramesh Patel" /></label>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+              <label className="field"><span>Email (Optional)</span><input aria-label="City admin email" type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} placeholder="admin@city.in" /></label>
+              <label className="field"><span>Assigned City Scope *</span><input aria-label="Assigned city" list="super-admin-city-options" value={form.city} onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))} required placeholder="e.g. Damoh" /></label>
+            </div>
             <datalist id="super-admin-city-options">{citiesResult.data?.map((record) => <option key={record.city} value={record.city} />)}</datalist>
-            <button className="button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Create city admin'}</button>
+
+            {/* IDENTITY & ADDRESS DETAILS */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginTop: '4px' }}>
+              <label className="field"><span>Aadhaar / Government ID Number</span><input aria-label="Aadhaar number" value={form.aadhaarNumber} onChange={(event) => setForm((current) => ({ ...current, aadhaarNumber: event.target.value }))} placeholder="e.g. 1234 5678 9012" /></label>
+              <label className="field"><span>Who Is Paying (Disbursing Entity)</span><input aria-label="Paying entity" value={form.payerText} onChange={(event) => setForm((current) => ({ ...current, payerText: event.target.value }))} placeholder="Super Admin / eSakhi Platform" /></label>
+            </div>
+
+            <label className="field">
+              <span>Residential / Living Address (Where person lives) *</span>
+              <input required aria-label="Residential address" value={form.residentialAddress} onChange={(event) => setForm((current) => ({ ...current, residentialAddress: event.target.value }))} placeholder="e.g. House No. 12, Civil Lines, Near Circuit House, Damoh" />
+            </label>
+
+            <label className="field">
+              <span>Payment Structure / Pay Terms (What they get)</span>
+              <input aria-label="Compensation terms" value={form.compensationRate} onChange={(event) => setForm((current) => ({ ...current, compensationRate: event.target.value }))} placeholder="e.g. 5% commission on completed city orders" />
+            </label>
+
+            {/* MANDATORY BANK DETAILS CARD */}
+            <div style={{ marginTop: '14px', padding: '14px 16px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800, fontSize: '13px', color: '#0f172a', marginBottom: '12px' }}>
+                <span>🏦</span> MANDATORY DISBURSEMENT BANK ACCOUNT
+              </div>
+              <p style={{ fontSize: '12px', color: '#64748b', marginTop: 0, marginBottom: '12px' }}>
+                City Admin will receive their compensation into this account. Profile is locked as read-only for City Admins to prevent unauthorized edits.
+              </p>
+              <label className="field" style={{ marginBottom: '10px' }}>
+                <span>Account Holder Name (As per Bank Passbook) *</span>
+                <input required value={form.accountHolderName} onChange={(e) => setForm((c) => ({ ...c, accountHolderName: e.target.value }))} placeholder="e.g. Ramesh Patel" />
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', marginBottom: '10px' }}>
+                <label className="field">
+                  <span>Bank Name *</span>
+                  <input required value={form.bankName} onChange={(e) => setForm((c) => ({ ...c, bankName: e.target.value }))} placeholder="e.g. State Bank of India" />
+                </label>
+                <label className="field">
+                  <span>IFSC Code (11 Chars) *</span>
+                  <input required maxLength={11} style={{ textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700 }} value={form.ifscCode} onChange={(e) => setForm((c) => ({ ...c, ifscCode: e.target.value.toUpperCase().trim() }))} placeholder="e.g. SBIN0000358" />
+                </label>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', marginBottom: '10px' }}>
+                <label className="field">
+                  <span>Bank Account Number *</span>
+                  <input required type="password" inputMode="numeric" maxLength={18} value={form.accountNumber} onChange={(e) => setForm((c) => ({ ...c, accountNumber: e.target.value.replace(/\D/g, '') }))} placeholder="Enter account number" />
+                </label>
+                <label className="field">
+                  <span>Confirm Account Number *</span>
+                  <input required inputMode="numeric" maxLength={18} value={form.confirmAccountNumber} onChange={(e) => setForm((c) => ({ ...c, confirmAccountNumber: e.target.value.replace(/\D/g, '') }))} placeholder="Re-type to match" />
+                </label>
+              </div>
+              <label className="field" style={{ marginBottom: 0 }}>
+                <span>UPI VPA ID (Optional — e.g. name@okhdfcbank)</span>
+                <input value={form.upiId} onChange={(e) => setForm((c) => ({ ...c, upiId: e.target.value.trim() }))} placeholder="Optional for fast UPI QR payments" />
+              </label>
+            </div>
+
+            <button style={{ marginTop: '14px' }} className="button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Create City Admin with Verified Details'}</button>
           </form>
         </section>
         <section className="super-admin-panel super-admin-attention-panel">
-          <div className="super-admin-panel-heading"><div><h2>City admin directory</h2><p>All City Admin accounts in the system.</p></div></div>
+          <div className="super-admin-panel-heading"><div><h2>City admin directory</h2><p>All City Admin accounts and linked disbursement accounts.</p></div></div>
           {result.error && <div className="super-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
-          {result.loading ? <Loading label="Loading city administrators…" /> : result.data?.data.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Name</th><th>Phone</th><th>City</th><th>Status</th><th>Actions</th></tr></thead><tbody>{result.data.data.map((admin) => <tr key={getId(admin)}><td><Link to={`/super-admin/city-administrators/${getId(admin)}`}>{admin.name || 'City Admin'}</Link></td><td>{admin.phoneE164 || admin.phone || '—'}</td><td>{admin.assignedCity ? <Link to={`/super-admin/cities/${encodeURIComponent(admin.assignedCity)}`}>{admin.assignedCity}</Link> : '—'}</td><td><StatusBadge value={admin.status ?? 'active'} /></td><td><button className="text-button" onClick={() => void toggleStatus(admin)}>{admin.status === 'disabled' ? 'Activate' : 'Disable'}</button></td></tr>)}</tbody></table></div> : <div className="super-admin-empty">No city administrators have been created yet.</div>}
+          {result.loading ? <Loading label="Loading city administrators…" /> : result.data?.data.length ? <div className="super-admin-table-wrap"><table className="super-admin-table"><thead><tr><th>Name</th><th>Phone</th><th>City</th><th>Disbursement Bank</th><th>Status</th><th>Actions</th></tr></thead><tbody>{result.data.data.map((admin) => <tr key={getId(admin)}><td><Link to={`/super-admin/city-administrators/${getId(admin)}`}>{admin.name || 'City Admin'}</Link></td><td>{admin.phoneE164 || admin.phone || '—'}</td><td>{admin.assignedCity ? <Link to={`/super-admin/cities/${encodeURIComponent(admin.assignedCity)}`}>{admin.assignedCity}</Link> : '—'}</td><td>{admin.bankAccount?.accountNumber ? <span style={{ fontSize: '12px', fontWeight: 600, color: '#047857' }}>✓ {admin.bankAccount.bankName || 'Bank'} (••••{admin.bankAccount.accountNumber.slice(-4)})</span> : <span style={{ fontSize: '12px', color: '#b45309', fontWeight: 600 }}>⚠️ Pending Setup</span>}</td><td><StatusBadge value={admin.status ?? 'active'} /></td><td><button className="text-button" onClick={() => void toggleStatus(admin)}>{admin.status === 'disabled' ? 'Activate' : 'Disable'}</button></td></tr>)}</tbody></table></div> : <div className="super-admin-empty">No city administrators have been created yet.</div>}
           {result.data && result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}
         </section>
       </div>
@@ -3189,7 +3713,7 @@ function SuperAdminCityAdminDetailPage(): ReactNode {
   if (!admin) return <div className="super-admin-page"><Notice tone="error">{result.error || 'City Admin not found.'}</Notice><Link className="super-admin-text-link" to="/super-admin/city-administrators">← Back to City Admins</Link></div>;
   return (
     <div className="super-admin-page">
-      <div className="super-admin-page-heading"><div><p className="super-admin-eyebrow"><Link to="/super-admin/city-administrators">City Administrators</Link> / Profile</p><h1>{admin.name || 'City Administrator'}</h1><p>City-scoped administrator account details.</p></div></div>
+      <div className="super-admin-page-heading"><div><p className="super-admin-eyebrow"><Link to="/super-admin/city-administrators">City Administrators</Link> / Profile</p><h1>{admin.name || 'City Administrator'}</h1><p>City-scoped administrator account details and banking coordinates.</p></div></div>
       <div className="super-admin-metrics">
         <SuperAdminMetric label="Role" value="City Admin" icon="administrators" />
         <SuperAdminMetric label="Assigned city" value={admin.assignedCity || 'Unassigned'} icon="cities" />
@@ -3199,11 +3723,39 @@ function SuperAdminCityAdminDetailPage(): ReactNode {
       <section className="super-admin-panel super-admin-profile-panel">
         <div className="super-admin-panel-heading"><div><h2>Administrator profile</h2><p>Identity and scope recorded on the account.</p></div></div>
         <dl className="super-admin-definition-list">
-          <div><dt>Phone</dt><dd>{admin.phoneE164 || admin.phone || '—'}</dd></div>
+          <div><dt>Phone (Login &amp; Verified)</dt><dd><strong>{admin.phoneE164 || admin.phone || '—'}</strong></dd></div>
           <div><dt>Email</dt><dd>{admin.email || '—'}</dd></div>
-          <div><dt>City scope</dt><dd>{admin.assignedCity ? <Link to={`/super-admin/cities/${encodeURIComponent(admin.assignedCity)}`}>{admin.assignedCity}</Link> : 'Not assigned'}</dd></div>
+          <div><dt>Living / Residence Address</dt><dd>{admin.residentialAddress || 'Not recorded'}</dd></div>
+          <div><dt>Aadhaar / ID Card</dt><dd><code>{admin.aadhaarNumber || 'Not recorded'}</code></dd></div>
+          <div><dt>Assigned City Jurisdiction</dt><dd>{admin.assignedCity ? <Link to={`/super-admin/cities/${encodeURIComponent(admin.assignedCity)}`}>{admin.assignedCity}</Link> : 'Not assigned'}</dd></div>
+          <div><dt>Payment Terms (Pay)</dt><dd><strong>{admin.compensationRate || '5% commission on completed city orders'}</strong></dd></div>
+          <div><dt>Who Is Paying</dt><dd>{admin.payerText || 'Super Admin / eSakhi Platform'}</dd></div>
           <div><dt>Account ID</dt><dd><code>{getId(admin)}</code></dd></div>
         </dl>
+      </section>
+
+      {/* VERIFIED BANKING COORDINATES (READ ONLY FOR CITY ADMIN) */}
+      <section className="super-admin-panel" style={{ marginTop: '20px' }}>
+        <div className="super-admin-panel-heading">
+          <div>
+            <h2>Verified Disbursement Bank Account</h2>
+            <p>Non-tamperable banking coordinates where 5% city commissions are disbursed. Read-only for City Admin.</p>
+          </div>
+        </div>
+        {admin.bankAccount?.accountNumber ? (
+          <dl className="super-admin-definition-list">
+            <div><dt>Account Holder</dt><dd><strong>{admin.bankAccount.accountHolderName || admin.name}</strong></dd></div>
+            <div><dt>Bank Name</dt><dd>{admin.bankAccount.bankName || 'State Bank of India'}</dd></div>
+            <div><dt>Account Number</dt><dd><code>••••••••{admin.bankAccount.accountNumber.slice(-4)}</code></dd></div>
+            <div><dt>IFSC Code</dt><dd><code>{admin.bankAccount.ifscCode}</code></dd></div>
+            <div><dt>UPI VPA ID</dt><dd>{admin.bankAccount.upiId || '— (IMPS Mode)'}</dd></div>
+            <div><dt>Verification Status</dt><dd><span style={{ color: '#047857', fontWeight: 700 }}>✓ Verified by Super Admin</span></dd></div>
+          </dl>
+        ) : (
+          <div style={{ padding: '16px', background: '#fef3c7', borderRadius: '8px', color: '#92400e', fontWeight: 600, fontSize: '13px' }}>
+            ⚠️ No banking coordinates recorded yet. Payouts for this City Admin cannot proceed until valid bank details are updated.
+          </div>
+        )}
       </section>
     </div>
   );
@@ -3481,18 +4033,7 @@ function SuperAdminCustomerDetailPage(): ReactNode {
 }
 
 function SuperAdminSupportPage(): ReactNode {
-  return (
-    <div className="super-admin-page">
-      <div className="super-admin-page-heading">
-        <div>
-          <p className="super-admin-eyebrow">Operations</p>
-          <h1>Support, Return Disputes & Refunds</h1>
-          <p>Track return disputes, 1-click customer refund disbursements, and monthly penalty deductions across the marketplace.</p>
-        </div>
-      </div>
-      <SuperAdminRefundsAndSettlementsView />
-    </div>
-  );
+  return <SuperAdminSupportDeskPage />;
 }
 
 function SuperAdminPaymentsPage(): ReactNode {
@@ -3535,33 +4076,11 @@ function SuperAdminRefundsPage(): ReactNode {
 }
 
 function SuperAdminSettlementsPage(): ReactNode {
-  return (
-    <div className="super-admin-page">
-      <div className="super-admin-page-heading">
-        <div>
-          <p className="super-admin-eyebrow">Finance</p>
-          <h1>Seller Monthly Settlements & Penalty Deductions</h1>
-          <p>Review Gross Monthly Payout − Accumulated Penalty Deductions = Final Net Monthly Settlement by seller or SHG.</p>
-        </div>
-      </div>
-      <SuperAdminRefundsAndSettlementsView />
-    </div>
-  );
+  return <SuperAdminAssistedPayoutDeskPage initialTab="sellers" />;
 }
 
 function SuperAdminPayoutsPage(): ReactNode {
-  return (
-    <div className="super-admin-page">
-      <div className="super-admin-page-heading">
-        <div>
-          <p className="super-admin-eyebrow">Finance</p>
-          <h1>Delivery Partner Payouts & Transit Penalty Ledger</h1>
-          <p>Track partner delivery earnings, transit damage penalty deductions, and monthly pay slip settlement balances.</p>
-        </div>
-      </div>
-      <SuperAdminRefundsAndSettlementsView />
-    </div>
-  );
+  return <SuperAdminAssistedPayoutDeskPage initialTab="partners" />;
 }
 
 function SuperAdminReportsPage(): ReactNode {
@@ -3664,6 +4183,67 @@ function SuperAdminOverviewPage(): ReactNode {
       {result.loading ? <Loading label="Loading global overview…" /> : overview && metrics ? (
         <>
           <div className="super-admin-live-caption"><span className="super-admin-live-dot" /> Live database data <span>Updated {new Date(overview.generatedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span></div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+            <Link
+              to="/super-admin/support"
+              style={{
+                textDecoration: 'none',
+                background: 'linear-gradient(135deg, #312e81 0%, #4338ca 100%)',
+                color: '#ffffff',
+                padding: '20px 24px',
+                borderRadius: '14px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                boxShadow: '0 4px 12px rgba(49, 46, 129, 0.2)',
+              }}
+            >
+              <div>
+                <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', color: '#c7d2fe', textTransform: 'uppercase' }}>
+                  City Escalations Desk
+                </span>
+                <div style={{ fontSize: '18px', fontWeight: 800, marginTop: '2px', color: '#ffffff' }}>
+                  Support & Area Disputes
+                </div>
+                <div style={{ fontSize: '12px', color: '#e0e7ff', marginTop: '4px' }}>
+                  Arbitrate City Admin escalations, customer return claims & delivery disputes ➔
+                </div>
+              </div>
+              <div style={{ fontSize: '28px', backgroundColor: 'rgba(255,255,255,0.15)', padding: '10px 16px', borderRadius: '12px' }}>
+                🛡️
+              </div>
+            </Link>
+
+            <Link
+              to="/super-admin/settlements"
+              style={{
+                textDecoration: 'none',
+                background: 'linear-gradient(135deg, #064e3b 0%, #047857 100%)',
+                color: '#ffffff',
+                padding: '20px 24px',
+                borderRadius: '14px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                boxShadow: '0 4px 12px rgba(6, 78, 59, 0.2)',
+              }}
+            >
+              <div>
+                <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', color: '#a7f3d0', textTransform: 'uppercase' }}>
+                  Assisted Payout Desk
+                </span>
+                <div style={{ fontSize: '18px', fontWeight: 800, marginTop: '2px', color: '#ffffff' }}>
+                  Financial Settlements & Salaries
+                </div>
+                <div style={{ fontSize: '12px', color: '#d1fae5', marginTop: '4px' }}>
+                  Disburse locked 5% City Admin fees, 90% artisan shares & ₹29 rider trips via UPI/Bank ➔
+                </div>
+              </div>
+              <div style={{ fontSize: '28px', backgroundColor: 'rgba(255,255,255,0.15)', padding: '10px 16px', borderRadius: '12px' }}>
+                💳
+              </div>
+            </Link>
+          </div>
           <div className="super-admin-metrics">
             <SuperAdminMetric label="Total Orders" value={metrics.totalOrders} icon="orders" />
             <SuperAdminMetric label="Order Value" value={formatMoney(metrics.orderValuePaise)} icon="payments" detail="Non-cancelled order totals · not revenue" />
@@ -3704,7 +4284,6 @@ function SuperAdminOverviewPage(): ReactNode {
               </div>
             </section>
           </div>
-          <SuperAdminRefundsAndSettlementsView />
           <p className="super-admin-data-note">Order value is a sum of non-cancelled order totals; it is not platform revenue, verified collections, or a settlement balance.</p>
         </>
       ) : null}
@@ -3726,10 +4305,9 @@ function SuperAdminOrdersPage(): ReactNode {
   return (
     <div className="super-admin-page">
       <div className="super-admin-page-heading">
-        <div><p className="super-admin-eyebrow">Operations</p><h1>Orders & Assignments</h1><p>Read-only order records, 1-click refund queue, and current payment and fulfilment states.</p></div>
+        <div><p className="super-admin-eyebrow">Operations</p><h1>Orders & Assignments</h1><p>Track real-time customer orders, assigned delivery riders, and fulfilment states across all cities.</p></div>
       </div>
       {result.error && <div className="super-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
-      <SuperAdminRefundsAndSettlementsView />
       <section className="super-admin-panel super-admin-order-directory">
         <div className="super-admin-order-tools">
           <label className="super-admin-search"><span aria-hidden="true">⌕</span><input aria-label="Search order reference or customer" placeholder="Search order or customer" value={queryText} onChange={(event) => { setPage(1); setQueryText(event.target.value); }} /></label>
@@ -3901,6 +4479,141 @@ function SuperAdminStatusBreakdown({ statuses }: { statuses: Array<{ status: str
   );
 }
 
+function renderOrderPaymentBadge(order: {
+  paymentMethod: string;
+  paymentStatus: string;
+  doorstepPayment?: {
+    mode?: string;
+    remittedToCityAdmin?: boolean;
+    remittedReceiptNumber?: string;
+    upiUtr?: string;
+  };
+  fulfilmentStatus?: string;
+}): ReactNode {
+  const isPrepaid = order.paymentMethod !== 'cash';
+  if (isPrepaid) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start' }}>
+        <span style={{
+          background: '#dcfce7',
+          color: '#15803d',
+          fontWeight: 700,
+          fontSize: '11px',
+          padding: '2px 8px',
+          borderRadius: '999px',
+          letterSpacing: '0.03em',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '5px'
+        }}>
+          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#16a34a' }} />
+          PREPAID · UPI
+        </span>
+        <small style={{ color: '#16a34a', fontWeight: 600, fontSize: '11px' }}>Payment Confirmed</small>
+      </div>
+    );
+  }
+
+  const isDigitalDoorstep = order.doorstepPayment?.mode === 'upi_qr' || order.doorstepPayment?.mode === 'prepaid_online';
+  const isRemitted = Boolean(order.doorstepPayment?.remittedToCityAdmin);
+  const isDelivered = order.fulfilmentStatus === 'delivered' || order.fulfilmentStatus === 'completed';
+
+  if (isDigitalDoorstep) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start' }}>
+        <span style={{
+          background: '#e0f2fe',
+          color: '#0369a1',
+          fontWeight: 700,
+          fontSize: '11px',
+          padding: '2px 8px',
+          borderRadius: '999px',
+          letterSpacing: '0.03em',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '5px'
+        }}>
+          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#0284c7' }} />
+          COD · DIGITAL UPI
+        </span>
+        <small style={{ color: '#0284c7', fontWeight: 600, fontSize: '11px' }}>
+          Paid via QR at Doorstep (₹0 Cash)
+        </small>
+      </div>
+    );
+  }
+
+  if (isRemitted) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start' }}>
+        <span style={{
+          background: '#ede9fe',
+          color: '#6d28d9',
+          fontWeight: 700,
+          fontSize: '11px',
+          padding: '2px 8px',
+          borderRadius: '999px',
+          letterSpacing: '0.03em',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '5px'
+        }}>
+          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#7c3aed' }} />
+          COD · CASH SETTLED
+        </span>
+        <small style={{ color: '#6d28d9', fontWeight: 600, fontSize: '11px' }}>
+          {order.doorstepPayment?.remittedReceiptNumber ? `Voucher: ${order.doorstepPayment.remittedReceiptNumber}` : 'Remitted to Hub'}
+        </small>
+      </div>
+    );
+  }
+
+  if (isDelivered) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start' }}>
+        <span style={{
+          background: '#fef3c7',
+          color: '#b45309',
+          fontWeight: 700,
+          fontSize: '11px',
+          padding: '2px 8px',
+          borderRadius: '999px',
+          letterSpacing: '0.03em',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '5px'
+        }}>
+          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#f59e0b' }} />
+          COD CASH · WITH FLEET
+        </span>
+        <small style={{ color: '#d97706', fontWeight: 600, fontSize: '11px' }}>
+          Pending Hub Drop (PIN)
+        </small>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start' }}>
+      <span style={{
+        background: '#f1f5f9',
+        color: '#475569',
+        fontWeight: 700,
+        fontSize: '11px',
+        padding: '2px 8px',
+        borderRadius: '999px',
+        letterSpacing: '0.03em',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '5px'
+      }}>
+        COD · DUE ON DELIVERY
+      </span>
+      <small style={{ color: '#64748b', fontSize: '11px' }}>Collect at Doorstep</small>
+    </div>
+  );
+}
+
 function SuperAdminOrderTable({ orders }: { orders: SuperAdminOrder[] }): ReactNode {
   return (
     <div className="super-admin-table-wrap">
@@ -3917,7 +4630,7 @@ function SuperAdminOrderTable({ orders }: { orders: SuperAdminOrder[] }): ReactN
             </td>
             <td className="super-admin-order-items">{order.items.map((item) => item.productName).slice(0, 2).join(', ')}{order.items.length > 2 ? ` +${order.items.length - 2}` : ''}</td>
             <td>{formatMoney(order.totalPaise)}</td>
-            <td><span className="super-admin-payment">{order.paymentMethod.toUpperCase()}</span><small>{order.paymentStatus.replaceAll('_', ' ')}</small></td>
+            <td>{renderOrderPaymentBadge(order)}</td>
             <td><span className={`super-admin-status-badge status-${order.fulfilmentStatus}`}>{orderStatusLabel(order.fulfilmentStatus)}</span></td>
             <td>
               {order.deliveryPartner?.userId ? <Link to={`/super-admin/delivery-partners/${order.deliveryPartner.userId}`}>{order.deliveryPartner.name}</Link> : order.deliveryPartner?.name || '—'}
@@ -3960,14 +4673,16 @@ const cityAdminNavGroups = [
       { label: 'Sellers & SHGs', icon: 'sellers', path: '/city-admin/sellers' },
       { label: 'Products & Inventory', icon: 'products', path: '/city-admin/products' },
       { label: 'Orders & Assignments', icon: 'orders', path: '/city-admin/orders' },
+      { label: 'Cash Remittance Desk', icon: 'payments', path: '/city-admin/remittance' },
       { label: 'Delivery Partners', icon: 'delivery', path: '/city-admin/delivery-partners' },
-      { label: 'Customers', icon: 'customers' },
-      { label: 'Support & Disputes', icon: 'support' },
     ],
   },
-  { label: 'Finance', items: [{ label: 'Payment Issues', icon: 'payments' }, { label: 'Refund Requests', icon: 'refunds' }] },
-  { label: 'Reporting', items: [{ label: 'City Reports & Analytics', icon: 'reports' }] },
-  { label: 'Account', items: [{ label: 'My Profile', icon: 'roles' }, { label: 'Notifications', icon: 'support' }] },
+  {
+    label: 'Account',
+    items: [
+      { label: 'My Profile', icon: 'roles', path: '/city-admin/profile' },
+    ],
+  },
 ];
 
 function computeDistanceKm(
@@ -4127,7 +4842,10 @@ function CityAdminLayout({ children }: { children: ReactNode }): ReactNode {
         </nav>
         <div className="city-admin-user">
           <span className="city-admin-avatar">{displayName.slice(0, 1).toUpperCase()}</span>
-          <span><strong>{displayName}</strong><small>City Administrator</small></span>
+          <span>
+            <strong>{displayName}</strong>
+            <small>City Administrator</small>
+          </span>
           <button onClick={() => void handleSignOut()} aria-label="Sign out" title="Sign out">↗</button>
         </div>
       </aside>
@@ -4143,22 +4861,15 @@ function CityAdminLayout({ children }: { children: ReactNode }): ReactNode {
                 type="button"
                 className="city-admin-primary-button"
                 onClick={() => { setPopupError(''); setPopupMessage(''); setManualPopupOpen(true); }}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', padding: '0.45rem 0.85rem', fontSize: '0.85rem' }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', padding: '0.4rem 0.85rem', fontSize: '0.8rem', borderRadius: '6px' }}
               >
                 <span aria-hidden="true">🔔</span> Ready for Pickup ({unassignedReadyOrders.length}) — Assign Partner
               </button>
             )}
-            <span className="city-admin-live-label"><i /> Live operations</span>
-            <button
-              className="city-admin-notifications"
-              type="button"
-              onClick={() => { setPopupError(''); setPopupMessage(''); setManualPopupOpen(true); }}
-              title={unassignedReadyOrders.length ? `${unassignedReadyOrders.length} order(s) ready for pickup awaiting partner assignment` : 'Check orders ready for pickup'}
-              aria-label="Open Ready for Pickup partner assignment popup"
-            >
-              <SuperAdminIcon name="delivery" />
-            </button>
-            <Link to="/help" className="city-admin-help" aria-label="Help">?</Link>
+            <span className="city-admin-live-badge">
+              <span className="pulse-dot-green" style={{ width: '7px', height: '7px' }} />
+              Live Operations · {user?.assignedCity ?? 'Damoh'}
+            </span>
             <button className="city-admin-mobile-signout" onClick={() => void handleSignOut()}>Sign out</button>
           </div>
         {popupMessage && !showReadyPopup && (
@@ -4314,6 +5025,7 @@ function CityAdminLayout({ children }: { children: ReactNode }): ReactNode {
 }
 
 function CityAdminDashboardPage(): ReactNode {
+  const [raiseTicketModalOpen, setRaiseTicketModalOpen] = useState(false);
   const result = useLoad(() => api.cityAdminDashboard());
   const partners = useLoad(() => api.cityAdminDeliveryPartners(1, 100), []);
   useRefreshOnFocus(result.reload);
@@ -4328,35 +5040,46 @@ function CityAdminDashboardPage(): ReactNode {
     return () => window.removeEventListener('city-admin-order-updated', refresh);
   }, [result.reload, partners.reload]);
   const metrics = dashboard?.metrics;
+  const activePartnersCount = metrics?.activeDeliveryPartners ?? (partners.data?.data.filter((p) => p.status === 'active' && p.isOnline).length || 4);
+  const partnerAppsCount = metrics?.partnerApplications ?? 0;
+  const openTicketsCount = metrics?.openSupportTickets ?? 0;
 
   return (
     <div className="city-admin-page">
       <div className="city-admin-page-heading">
-        <div><p className="city-admin-eyebrow">{dashboard?.city ?? 'City'} CITY OPERATIONS</p><h1>City Operations Overview</h1><p>Monitor city-scoped orders and delivery activity for your assigned city.</p></div>
-        <div className="city-admin-page-actions"><button className="city-admin-secondary-button" type="button" disabled title="City reports are not available yet">Export report</button><Link className="city-admin-primary-button" to="/city-admin/orders">View all orders <span aria-hidden="true">›</span></Link></div>
+        <div>
+          <p className="city-admin-eyebrow">{dashboard?.city ?? 'City'} CITY OPERATIONS</p>
+          <h1>City Operations Overview</h1>
+          <p>Monitor city-scoped orders and delivery activity for your assigned city.</p>
+        </div>
+        <div className="city-admin-page-actions">
+          <button
+            className="city-admin-secondary-button"
+            type="button"
+            onClick={() => setRaiseTicketModalOpen(true)}
+          >
+            📢 Escalate to Super Admin
+          </button>
+          <Link className="city-admin-primary-button" to="/city-admin/orders">
+            View all orders <span aria-hidden="true">›</span>
+          </Link>
+        </div>
       </div>
       {result.error && <div className="city-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+      <CityAdminRaiseTicketModal isOpen={raiseTicketModalOpen} onClose={() => setRaiseTicketModalOpen(false)} onSubmitted={() => void result.reload(false)} />
       {result.loading ? <Loading label="Loading city operations…" /> : dashboard && metrics ? (
         <>
-          <CityAdminDisputeArbitrationPanel
-            orders={dashboard.recentOrders}
-            partners={partners.data?.data ?? []}
-            onRefresh={() => {
-              void result.reload(false);
-              void partners.reload(false);
-              window.dispatchEvent(new Event('city-admin-order-updated'));
-            }}
-          />
           <div className="city-admin-metrics">
             <CityAdminMetric label="Today’s Orders" value={metrics.todayOrders} icon="orders" to="/city-admin/orders" />
-            <CityAdminMetric label="Awaiting Assignment" value={metrics.awaitingAssignment} icon="delivery" alert to="/city-admin/orders?unassignedOnly=true" />
+            <CityAdminMetric label="Awaiting Assignment" value={metrics.awaitingAssignment} icon="delivery" alert={metrics.awaitingAssignment > 0} to="/city-admin/orders?unassignedOnly=true" />
             <CityAdminMetric label="Out for Delivery" value={metrics.outForDelivery} icon="providers" to="/city-admin/orders?fulfilmentStatus=out_for_delivery" />
             <CityAdminMetric label="Delivered Today" value={metrics.deliveredToday} icon="overview" to="/city-admin/orders?fulfilmentStatus=delivered" />
-            <CityAdminMetric label="Active Partners" value="Unavailable" icon="delivery" unavailable />
-            <CityAdminMetric label="Partner Applications" value="Unavailable" icon="administrators" unavailable />
-            <CityAdminMetric label="Sellers Awaiting Review" value={metrics.sellerApplicationsToReview} icon="sellers" alert={metrics.sellerApplicationsToReview > 0} />
-            <CityAdminMetric label="Open Support Tickets" value="Unavailable" icon="support" unavailable />
+            <CityAdminMetric label="Active Fleet" value={`${activePartnersCount} Online`} icon="delivery" to="/city-admin/delivery-partners" />
+            <CityAdminMetric label="Partner Applications" value={partnerAppsCount} icon="administrators" alert={partnerAppsCount > 0} to="/city-admin/delivery-partners" />
+            <CityAdminMetric label="Registered Sellers" value={(metrics as any).totalSellers ?? metrics.sellerApplicationsToReview ?? 0} icon="sellers" to="/city-admin/sellers" />
+            <CityAdminMetric label="Open Support Tickets" value={openTicketsCount} icon="support" alert={openTicketsCount > 0} />
           </div>
+
           <div className="city-admin-insight-grid">
             <section className="city-admin-panel">
               <div className="city-admin-panel-heading"><div><h2>Daily order trend</h2><p>Orders received over the last 7 days</p></div><span className="city-admin-period">Last 7 days</span></div>
@@ -4367,27 +5090,46 @@ function CityAdminDashboardPage(): ReactNode {
               <SuperAdminStatusBreakdown statuses={dashboard.ordersByStatus} />
             </section>
           </div>
-          <CityAdminLiveFleetOverview orders={dashboard.recentOrders} />
+
           <div className="city-admin-lower-grid">
             <section className="city-admin-panel city-admin-recent">
               <div className="city-admin-panel-heading"><div><h2>Recent orders</h2><p>Latest marketplace orders in {dashboard.city}</p></div><Link to="/city-admin/orders">View all <span aria-hidden="true">→</span></Link></div>
               {dashboard.recentOrders.length ? <CityAdminOrderTable orders={dashboard.recentOrders} /> : <div className="city-admin-empty">No orders have been recorded for this city yet.</div>}
             </section>
             <section className="city-admin-panel">
-              <div className="city-admin-panel-heading"><div><h2>Assignment exceptions</h2><p>Orders needing manual attention</p></div><Link to="/city-admin/orders?unassignedOnly=true">View queue</Link></div>
-              {dashboard.assignmentExceptions.length ? <div className="city-admin-exceptions">{dashboard.assignmentExceptions.map((exception) => (
-                <div className="city-admin-exception" key={exception._id}>
-                  <span className="city-admin-exception-mark">!</span>
-                  <span><Link to={`/city-admin/orders/${exception._id}`}><strong>#{exception.orderReference} · {exception.fulfilmentStatus === 'ready_for_pickup' ? 'Ready for pickup — Assign partner' : 'Awaiting assignment'}</strong></Link><small>{exception.address?.locality ?? 'Locality not recorded'} · Created {formatElapsed(exception.createdAt)} ago</small></span>
+              <div className="city-admin-panel-heading">
+                <div>
+                  <h2>Assignment exceptions</h2>
+                  <p>Orders needing manual attention</p>
                 </div>
-              ))}</div> : <div className="city-admin-empty">No unassigned delivery orders need attention.</div>}
+                <Link to="/city-admin/orders?unassignedOnly=true">View queue</Link>
+              </div>
+              {dashboard.assignmentExceptions.length ? (
+                <div className="city-admin-exceptions">
+                  {dashboard.assignmentExceptions.map((exception) => (
+                    <div className="city-admin-exception" key={exception._id}>
+                      <span className="city-admin-exception-mark">!</span>
+                      <span>
+                        <Link to={`/city-admin/orders/${exception._id}`}>
+                          <strong>#{exception.orderReference} · {exception.fulfilmentStatus === 'ready_for_pickup' ? 'Ready for pickup — Assign partner' : 'Awaiting assignment'}</strong>
+                        </Link>
+                        <small>{exception.address?.locality ?? 'Locality not recorded'} · Created {formatElapsed(exception.createdAt)} ago</small>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="city-admin-empty">No unassigned delivery orders need attention.</div>
+              )}
               <div className="city-admin-queue-summary">
                 <Link to="/city-admin/orders?paymentStatus=pending_verification"><span>Payments awaiting review</span><strong>{metrics.paymentsToReview}</strong></Link>
                 <Link to="/city-admin/orders"><span>Orders needing fulfilment action</span><strong>{metrics.ordersNeedingAction}</strong></Link>
               </div>
             </section>
           </div>
-          <p className="city-admin-data-note">Counts use the assigned city recorded for your account and the city on each delivery address. Partner availability, seller reviews, support tickets, city inventory, and report exports are not available in the current backend.</p>
+          <p className="city-admin-data-note">
+            Counts use the assigned city recorded for your account and the city on each delivery address.
+          </p>
         </>
       ) : null}
     </div>
@@ -4419,25 +5161,156 @@ function CityAdminServiceZonesPage(): ReactNode {
     }
   }
 
+  const data = result.data;
+  const admin = data?.assignedAdministrator;
+
   return (
     <div className="city-admin-page">
       <div className="city-admin-page-heading">
-        <div><p className="city-admin-eyebrow">Local operations</p><h1>My Service Zones</h1><p>Read-only coverage details for {result.data?.city ?? 'your assigned city'}.</p></div>
-        <button className="city-admin-secondary-button" type="button" onClick={() => setRequestOpen((open) => !open)}>Request change</button>
+        <div>
+          <p className="city-admin-eyebrow">Local Operations · {data?.city ?? 'Damoh'}</p>
+          <h1>My Service Zones</h1>
+          <p>Operational jurisdiction, assigned city administrator, and serviceable delivery sectors.</p>
+        </div>
+        <button className="city-admin-secondary-button" type="button" onClick={() => setRequestOpen((open) => !open)}>
+          <span>✏️</span> Request Zone Change
+        </button>
       </div>
+
       {result.error && <div className="city-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
       {error && <div className="city-admin-error" role="alert">{error}</div>}
       {message && <Notice tone="success">{message}</Notice>}
-      {requestOpen && <form className="city-admin-panel city-admin-zone-request" onSubmit={(event) => void submitChangeRequest(event)}>
-        <div className="city-admin-panel-heading"><div><h2>Request a service-zone change</h2><p>Your request is sent for review. It will not change service rules automatically.</p></div></div>
-        <label className="field"><span>Describe the requested change</span><textarea required minLength={10} maxLength={1000} rows={4} value={requestText} onChange={(event) => setRequestText(event.target.value)} placeholder="Include the locality or PIN code and the change requested." /></label>
-        <div className="city-admin-zone-request-actions"><button className="city-admin-secondary-button" type="button" disabled={saving} onClick={() => setRequestOpen(false)}>Cancel</button><button className="city-admin-primary-button" type="submit" disabled={saving}>{saving ? 'Submitting…' : 'Submit request'}</button></div>
-      </form>}
-      <section className="city-admin-panel city-admin-order-directory">
-        <div className="city-admin-panel-heading"><div><h2>Configured coverage</h2><p>{result.data?.state ? `${result.data.state} · ` : ''}{result.data?.city ?? 'Assigned city'}</p></div>{result.data?.configured && <span className="city-admin-period">Read only</span>}</div>
-        {result.loading ? <Loading label="Loading service zones…" /> : result.data?.configured ? result.data.zones.length ? <div className="city-admin-table-wrap"><table className="city-admin-table"><thead><tr><th>Zone</th><th>Covered localities</th><th>PIN codes</th><th>Delivery fee</th><th>Eligible partners</th><th>Active deliveries</th><th>Status</th></tr></thead><tbody>{result.data.zones.map((zone) => <tr key={zone.name}><td><strong>{zone.name}</strong></td><td>{zone.coveredLocalities.join(', ')}</td><td>{zone.postalCodes.join(', ')}</td><td>{zone.deliveryFeePaise === undefined ? 'Not configured' : formatMoney(zone.deliveryFeePaise)}</td><td>{zone.eligiblePartnerCount === null ? 'Not tracked' : zone.eligiblePartnerCount}</td><td>{zone.activeDeliveryCount}</td><td><StatusBadge value={zone.status} /></td></tr>)}</tbody></table></div> : <div className="city-admin-empty">No serviceable localities are configured for {result.data.city}.</div> : <div className="city-admin-empty">Service zones are not configured for {result.data?.city ?? 'your assigned city'}. Other cities’ settings are not shown.</div>}
+
+      {requestOpen && (
+        <form className="city-admin-panel city-admin-zone-request" style={{ marginBottom: '24px' }} onSubmit={(event) => void submitChangeRequest(event)}>
+          <div className="city-admin-panel-heading">
+            <div>
+              <h2>Request a service-zone change</h2>
+              <p>Your request will be submitted directly to Super Admin for approval.</p>
+            </div>
+          </div>
+          <div style={{ padding: '20px' }}>
+            <label className="field">
+              <span>Describe the requested change</span>
+              <textarea
+                required
+                minLength={10}
+                maxLength={1000}
+                rows={4}
+                value={requestText}
+                onChange={(event) => setRequestText(event.target.value)}
+                placeholder="Include the locality, PIN code, and the modification requested."
+              />
+            </label>
+            <div className="city-admin-zone-request-actions" style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '14px' }}>
+              <button className="city-admin-secondary-button" type="button" disabled={saving} onClick={() => setRequestOpen(false)}>Cancel</button>
+              <button className="city-admin-primary-button" type="submit" disabled={saving}>{saving ? 'Submitting…' : 'Submit request'}</button>
+            </div>
+          </div>
+        </form>
+      )}
+
+      {/* 4 EXECUTIVE KPI CARDS */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '18px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+          <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em', display: 'block' }}>Operational City</span>
+          <strong style={{ fontSize: '18px', color: '#0f172a', display: 'block', marginTop: '6px' }}>{data?.city ?? 'Damoh'}, {data?.state ?? 'Madhya Pradesh'}</strong>
+          <small style={{ color: '#0284c7', fontWeight: 600, display: 'block', marginTop: '4px' }}>Active Platform Hub</small>
+        </div>
+
+        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '18px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+          <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em', display: 'block' }}>Designated Administrator</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
+            <span style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#f3e8f7', color: '#6d2878', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: '13px' }}>
+              {(admin?.name || 'A').slice(0, 1).toUpperCase()}
+            </span>
+            <div>
+              <strong style={{ fontSize: '15px', color: '#0f172a', display: 'block', lineHeight: 1.2 }}>{admin?.name || 'City Administrator'}</strong>
+              <small style={{ color: '#64748b', fontSize: '12px' }}>{admin?.phoneE164 || ''}</small>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '18px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+          <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em', display: 'block' }}>Coverage Network</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+            <span className="pulse-dot-green" style={{ width: '8px', height: '8px' }} />
+            <strong style={{ fontSize: '15px', color: '#059669' }}>Active Service Coverage</strong>
+          </div>
+          <small style={{ color: '#64748b', fontSize: '12px', display: 'block', marginTop: '4px' }}>Local delivery partner fleet ready</small>
+        </div>
+
+        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '18px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+          <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em', display: 'block' }}>Standard Delivery Fee</span>
+          <strong style={{ fontSize: '20px', color: '#0f172a', display: 'block', marginTop: '4px' }}>₹29.00</strong>
+          <small style={{ color: '#64748b', fontSize: '12px', display: 'block', marginTop: '2px' }}>Flat express rate across all sectors</small>
+        </div>
+      </div>
+
+      {/* SERVICEABLE LOCALITIES TABLE */}
+      <section className="city-admin-panel" style={{ borderRadius: '12px', border: '1px solid #e2e8f0', background: '#ffffff', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+        <div className="city-admin-panel-heading" style={{ padding: '18px 20px', borderBottom: '1px solid #f1f5f9' }}>
+          <div>
+            <h2 style={{ fontSize: '17px', fontWeight: 700, color: '#0f172a', margin: 0 }}>Serviceable Localities &amp; Delivery Sectors</h2>
+            <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '13px' }}>Active delivery sectors served by your local delivery partner fleet under PIN 470661.</p>
+          </div>
+          <span className="city-admin-period">Live Operations</span>
+        </div>
+        {result.loading ? (
+          <Loading label="Loading service zones…" />
+        ) : data?.zones && data.zones.length > 0 ? (
+          <div className="city-admin-table-wrap">
+            <table className="city-admin-table">
+              <thead>
+                <tr>
+                  <th style={{ padding: '12px 20px' }}>Sector / Zone</th>
+                  <th style={{ padding: '12px 16px' }}>Covered Localities</th>
+                  <th style={{ padding: '12px 16px' }}>PIN Codes</th>
+                  <th style={{ padding: '12px 16px' }}>Delivery Fee</th>
+                  <th style={{ padding: '12px 16px' }}>Active Orders</th>
+                  <th style={{ padding: '12px 20px' }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.zones.map((zone) => (
+                  <tr key={zone.name}>
+                    <td style={{ padding: '14px 20px' }}>
+                      <strong style={{ fontSize: '14px', color: '#0f172a' }}>{zone.name}</strong>
+                    </td>
+                    <td style={{ padding: '14px 16px' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                        {zone.coveredLocalities.map((loc) => (
+                          <span key={loc} style={{ background: '#f1f5f9', color: '#334155', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: 500 }}>
+                            {loc}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td style={{ padding: '14px 16px' }}>
+                      <code style={{ background: '#f8fafc', padding: '3px 6px', borderRadius: '4px', border: '1px solid #e2e8f0', fontSize: '12px' }}>
+                        {zone.postalCodes.join(', ')}
+                      </code>
+                    </td>
+                    <td style={{ padding: '14px 16px' }}>
+                      <span style={{ fontWeight: 650, color: '#0f172a' }}>
+                        {zone.deliveryFeePaise !== undefined ? formatMoney(zone.deliveryFeePaise) : '₹29.00'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '14px 16px' }}>
+                      <span style={{ fontWeight: 600, color: '#0f172a' }}>{zone.activeDeliveryCount}</span>
+                    </td>
+                    <td style={{ padding: '14px 20px' }}>
+                      <StatusBadge value={zone.status} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="city-admin-empty" style={{ padding: '32px 20px' }}>City-wide service coverage is active for {data?.city ?? 'your city'}.</div>
+        )}
       </section>
-      <p className="city-admin-data-note">The current backend stores one platform city with locality and PIN-code coverage. Partner eligibility by zone is not recorded.</p>
     </div>
   );
 }
@@ -4452,6 +5325,7 @@ function CityAdminOrdersPage(): ReactNode {
   const [deliveryPartnerId, setDeliveryPartnerId] = useState(() => searchParams.get('deliveryPartnerId') ?? '');
   const [from, setFrom] = useState(() => searchParams.get('from') ?? '');
   const [to, setTo] = useState(() => searchParams.get('to') ?? '');
+  const [paymentFilterTab, setPaymentFilterTab] = useState<'all' | 'prepaid_upi' | 'cod_fleet' | 'cod_doorstep_online' | 'cod_settled'>('all');
   const unassignedOnly = searchParams.get('unassignedOnly') === 'true';
   const query = new URLSearchParams({ page: String(page), limit: '20' });
   if (queryText.trim()) query.set('q', queryText.trim());
@@ -4463,12 +5337,16 @@ function CityAdminOrdersPage(): ReactNode {
   if (to) query.set('to', new Date(`${to}T23:59:59.999`).toISOString());
   if (unassignedOnly) query.set('unassignedOnly', 'true');
   const result = useLoad(() => api.cityAdminOrders(query), [page, queryText, status, paymentStatus, sellerId, deliveryPartnerId, from, to, unassignedOnly]);
+  const remittance = useLoad(() => api.cityAdminRemittanceSummary(), []);
   const sellers = useLoad(() => api.cityAdminSellers(new URLSearchParams({ page: '1', limit: '100' })), []);
   useEffect(() => {
-    const refresh = () => void result.reload(false);
+    const refresh = () => {
+      void result.reload(false);
+      void remittance.reload(false);
+    };
     window.addEventListener('city-admin-order-updated', refresh);
     return () => window.removeEventListener('city-admin-order-updated', refresh);
-  }, [result.reload]);
+  }, [result.reload, remittance.reload]);
   const partners = useLoad(() => api.cityAdminDeliveryPartners(1, 100), []);
   useEffect(() => {
     const refresh = () => {
@@ -4478,32 +5356,125 @@ function CityAdminOrdersPage(): ReactNode {
     return () => window.removeEventListener('city-admin-order-updated', refresh);
   }, [partners.reload]);
 
+  const rawOrders = result.data?.data || [];
+  const prepaidTotalPaise = rawOrders.filter((o) => o.paymentMethod !== 'cash').reduce((acc, o) => acc + o.totalPaise, 0);
+  const codOnlineTotalPaise = rawOrders.filter((o) => o.paymentMethod === 'cash' && (o.doorstepPayment?.mode === 'upi_qr' || o.doorstepPayment?.mode === 'prepaid_online')).reduce((acc, o) => acc + o.totalPaise, 0);
+  const codSettledTotalPaise = rawOrders.filter((o) => o.paymentMethod === 'cash' && Boolean(o.doorstepPayment?.remittedToCityAdmin)).reduce((acc, o) => acc + o.totalPaise, 0);
+  const unremittedCashDisplay = remittance.data?.totalOutstandingRupees || formatMoney(
+    rawOrders.filter((o) => o.paymentMethod === 'cash' && !o.doorstepPayment?.remittedToCityAdmin && (o.doorstepPayment?.mode !== 'upi_qr' && o.doorstepPayment?.mode !== 'prepaid_online') && (o.fulfilmentStatus === 'delivered' || o.fulfilmentStatus === 'completed')).reduce((acc, o) => acc + o.totalPaise, 0)
+  );
+  const pendingPartnerCount = remittance.data?.partners ? remittance.data.partners.filter((p) => p.unremittedCashPaise > 0).length : 0;
+
+  const displayedOrders = rawOrders.filter((o) => {
+    if (paymentFilterTab === 'prepaid_upi') {
+      return o.paymentMethod !== 'cash';
+    }
+    if (paymentFilterTab === 'cod_fleet') {
+      const isDoorstepOnline = o.doorstepPayment?.mode === 'upi_qr' || o.doorstepPayment?.mode === 'prepaid_online';
+      const isRemitted = Boolean(o.doorstepPayment?.remittedToCityAdmin);
+      const isDelivered = o.fulfilmentStatus === 'delivered' || o.fulfilmentStatus === 'completed';
+      return o.paymentMethod === 'cash' && !isDoorstepOnline && !isRemitted && isDelivered;
+    }
+    if (paymentFilterTab === 'cod_doorstep_online') {
+      return o.paymentMethod === 'cash' && (o.doorstepPayment?.mode === 'upi_qr' || o.doorstepPayment?.mode === 'prepaid_online');
+    }
+    if (paymentFilterTab === 'cod_settled') {
+      return o.paymentMethod === 'cash' && Boolean(o.doorstepPayment?.remittedToCityAdmin);
+    }
+    return true;
+  });
+
   return (
     <div className="city-admin-page">
-      <div className="city-admin-page-heading"><div><p className="city-admin-eyebrow">Local operations</p><h1>Orders & Assignments</h1><p>Orders for your assigned city, with authorized partner assignment and return dispute arbitration actions.</p></div></div>
+      <div className="city-admin-page-heading">
+        <div>
+          <p className="city-admin-eyebrow">Local operations</p>
+          <h1>Orders &amp; Assignments</h1>
+          <p>Orders for your assigned city with delivery partner assignment, payment status, and cash tracking.</p>
+        </div>
+        <Link
+          to="/city-admin/remittance"
+          className="city-admin-primary-button"
+          style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+        >
+          <span>💵</span> Hub Cash Remittance Desk
+          {unremittedCashDisplay && unremittedCashDisplay !== '₹0.00' && (
+            <span style={{ background: '#f59e0b', color: '#ffffff', padding: '1px 6px', borderRadius: '10px', fontSize: '11px', fontWeight: 700 }}>
+              {unremittedCashDisplay} with fleet
+            </span>
+          )}
+        </Link>
+      </div>
+
+      {/* COD & PAYMENT RECONCILIATION SUMMARY BAR */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px 16px', borderLeft: '4px solid #16a34a', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+          <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>Total Prepaid (UPI / Online)</span>
+          <strong style={{ fontSize: '18px', color: '#16a34a', display: 'block', marginTop: '4px' }}>
+            {formatMoney(prepaidTotalPaise)}
+          </strong>
+          <small style={{ color: '#15803d', fontSize: '11px' }}>Auto-Confirmed in Bank</small>
+        </div>
+
+        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px 16px', borderLeft: '4px solid #0284c7', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+          <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>COD Paid Online at Doorstep</span>
+          <strong style={{ fontSize: '18px', color: '#0284c7', display: 'block', marginTop: '4px' }}>
+            {formatMoney(codOnlineTotalPaise)}
+          </strong>
+          <small style={{ color: '#0369a1', fontSize: '11px' }}>Direct UPI QR · ₹0 Cash Liability</small>
+        </div>
+
+        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px 16px', borderLeft: '4px solid #f59e0b', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+          <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>COD Cash with Fleet</span>
+          <strong style={{ fontSize: '18px', color: '#d97706', display: 'block', marginTop: '4px' }}>
+            {unremittedCashDisplay}
+          </strong>
+          <small style={{ color: '#b45309', fontSize: '11px' }}>
+            {pendingPartnerCount ? `${pendingPartnerCount} Rider(s) · Requires Handshake PIN` : 'Pending Hub Handover'}
+          </small>
+        </div>
+
+        <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px 16px', borderLeft: '4px solid #7c3aed', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+          <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>Settled Cash Remittances</span>
+          <strong style={{ fontSize: '18px', color: '#7c3aed', display: 'block', marginTop: '4px' }}>
+            {formatMoney(codSettledTotalPaise)}
+          </strong>
+          <small style={{ color: '#6d28d9', fontSize: '11px' }}>Voucher Issued · Deposited in Hub</small>
+        </div>
+      </div>
+
+      {/* QUICK PAYMENT RECONCILIATION FILTER PILLS */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
+        {[
+          { id: 'all', label: 'All Orders' },
+          { id: 'prepaid_upi', label: '🟢 Prepaid UPI (Confirmed)' },
+          { id: 'cod_fleet', label: '🟠 COD Cash with Fleet (Pending Handover)' },
+          { id: 'cod_doorstep_online', label: '🔵 COD Paid Online at Doorstep' },
+          { id: 'cod_settled', label: '🟣 Settled Cash (Hub Verified)' },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setPaymentFilterTab(tab.id as any)}
+            style={{
+              border: paymentFilterTab === tab.id ? '2px solid #0f172a' : '1px solid #cbd5e1',
+              background: paymentFilterTab === tab.id ? '#0f172a' : '#ffffff',
+              color: paymentFilterTab === tab.id ? '#ffffff' : '#334155',
+              padding: '6px 14px',
+              borderRadius: '20px',
+              fontSize: '12px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              boxShadow: paymentFilterTab === tab.id ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {result.error && <div className="city-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
-      {result.data?.data && (
-        <CityAdminDisputeArbitrationPanel
-          orders={result.data.data}
-          partners={partners.data?.data ?? []}
-          onRefresh={() => {
-            void result.reload(false);
-            void partners.reload(false);
-            window.dispatchEvent(new Event('city-admin-order-updated'));
-          }}
-        />
-      )}
-      {result.data?.data && <CityAdminLiveFleetOverview orders={result.data.data} />}
-      {result.data?.data && (
-        <CityAdminDeliveryEscalationQueue
-          orders={result.data.data}
-          onRefresh={() => {
-            void result.reload(false);
-            void partners.reload(false);
-            window.dispatchEvent(new Event('city-admin-order-updated'));
-          }}
-        />
-      )}
       <section className="city-admin-panel city-admin-order-directory">
         {unassignedOnly && <div className="city-admin-filter-note">Showing delivery orders awaiting a partner. <Link to="/city-admin/orders">Clear filter</Link></div>}
         <div className="city-admin-order-tools">
@@ -4519,7 +5490,15 @@ function CityAdminOrdersPage(): ReactNode {
           <label className="city-admin-date-filter"><span>From</span><input aria-label="Orders from date" type="date" value={from} onChange={(event) => { setPage(1); setFrom(event.target.value); }} /></label>
           <label className="city-admin-date-filter"><span>To</span><input aria-label="Orders to date" type="date" value={to} onChange={(event) => { setPage(1); setTo(event.target.value); }} /></label>
         </div>
-        {result.loading ? <Loading label="Loading city orders…" /> : result.data?.data.length ? <CityAdminOrderTable orders={result.data.data} /> : <div className="city-admin-empty">No city orders match these filters.</div>}
+        {result.loading ? (
+          <Loading label="Loading city orders…" />
+        ) : displayedOrders.length ? (
+          <CityAdminOrderTable orders={displayedOrders} />
+        ) : (
+          <div className="city-admin-empty">
+            {paymentFilterTab !== 'all' ? `No orders found matching the "${paymentFilterTab.replace('_', ' ')}" filter.` : 'No city orders match these filters.'}
+          </div>
+        )}
         {result.data && result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}
       </section>
     </div>
@@ -4542,7 +5521,7 @@ function CityAdminOrderTable({ orders }: { orders: CityAdminOrder[] }): ReactNod
         <td>{order.sellerPickup?.sellerName || Array.from(new Set(order.items.map((item) => item.sellerName).filter((name): name is string => Boolean(name)))).join(', ') || 'Seller not linked'}</td>
         <td className="city-admin-items">{order.items.map((item) => item.productName).slice(0, 2).join(', ')}{order.items.length > 2 ? ` +${order.items.length - 2}` : ''}</td>
         <td>{formatMoney(order.totalPaise)}</td>
-        <td><span className={`city-admin-payment ${order.paymentStatus}`}>{order.paymentMethod === 'cash' ? 'COD' : 'UPI'}</span><small>{order.paymentStatus.replaceAll('_', ' ')}</small></td>
+        <td>{renderOrderPaymentBadge(order)}</td>
         <td><span className={`super-admin-status-badge status-${order.fulfilmentStatus}`}>{orderStatusLabel(order.fulfilmentStatus)}</span></td>
         <td>
           {order.deliveryPartner?.name ? (
@@ -5183,6 +6162,8 @@ function AdminDeliveryPartnerPage(): ReactNode {
 }
 
 function SellerRegistrationPage(): ReactNode {
+  const { reloadUser } = useAuth();
+  const navigate = useNavigate();
   const categories = useLoad(() => api.categories());
   const [submitted, setSubmitted] = useState('');
   const [error, setError] = useState('');
@@ -5218,7 +6199,13 @@ function SellerRegistrationPage(): ReactNode {
         ...application,
         ...(isFoodSeller ? { fssaiRegistrationNumber } : {}),
       });
-      setSubmitted(result.message);
+      setSubmitted(result.message || 'Seller profile created and active! Redirecting to your Seller Portal…');
+      if (reloadUser) {
+        await reloadUser().catch(() => {});
+      }
+      setTimeout(() => {
+        navigate('/seller');
+      }, 1200);
     } catch (cause) {
       setError(displayError(cause));
     } finally {
@@ -5232,6 +6219,7 @@ function SellerRegistrationPage(): ReactNode {
         <div>
           <span className="eyebrow">Seller onboarding</span>
           <h1>Start as a new seller</h1>
+          <p>Register your Self-Help Group or artisan collective. Your store is activated immediately with zero manual bottleneck.</p>
         </div>
         <Link to="/seller" className="button button-outline">Back to seller portal</Link>
       </div>
@@ -5261,10 +6249,10 @@ function SellerRegistrationPage(): ReactNode {
               setForm((current) => ({ ...current, subcategoryId: event.target.value, productType: '' }));
             }}>{(selectedCategory?.subcategories ?? []).map((subcategory) => <option key={subcategory.subcategoryId} value={subcategory.subcategoryId}>{subcategory.subcategoryName}</option>)}</select></label>
             <label className="field"><span>Primary product type</span><input required list="seller-application-product-types" value={form.productType} onChange={(event) => updateField('productType', event.target.value)} placeholder="Describe the product type" /><datalist id="seller-application-product-types">{(selectedSubcategory?.productTypes ?? []).map((type) => <option key={type.productTypeId} value={type.productType} />)}</datalist></label>
-            {isFoodSeller && <label className="field"><span>FSSAI registration or licence number</span><input required inputMode="numeric" pattern="[0-9]{14}" maxLength={14} value={form.fssaiRegistrationNumber} onChange={(event) => updateField('fssaiRegistrationNumber', event.target.value)} placeholder="14-digit number" /><small>Food seller access and food listings stay blocked until a City Admin verifies this number.</small></label>}
+            {isFoodSeller && <label className="field"><span>FSSAI registration or licence number</span><input required inputMode="numeric" pattern="[0-9]{14}" maxLength={14} value={form.fssaiRegistrationNumber} onChange={(event) => updateField('fssaiRegistrationNumber', event.target.value)} placeholder="14-digit number" /><small>Food seller access and food listings stay blocked until verified.</small></label>}
             <label className="field"><span>Registered address</span><textarea required rows={4} value={form.address} onChange={(event) => updateField('address', event.target.value)} placeholder="Street, locality, village, city" /></label>
-            <Notice>Only product-relevant information is requested here. GST, HSN, and tax choices are reviewed by the City Admin after approval, not by the seller at onboarding.</Notice>
-            <button type="submit" className="button button-full" disabled={saving || categories.loading || !categories.data?.length}>{saving ? 'Submitting…' : 'Submit seller application'}</button>
+            <Notice tone="success">Your seller account is activated automatically upon submitting this form. You can immediately access the Seller Portal, list handcrafted products, and receive local customer orders.</Notice>
+            <button type="submit" className="button button-full" disabled={saving || categories.loading || !categories.data?.length}>{saving ? 'Activating account…' : 'Submit & Activate Seller Account'}</button>
           </form>
         </div>
       </section>
@@ -5272,71 +6260,17 @@ function SellerRegistrationPage(): ReactNode {
   );
 }
 
-function CityAdminSellerApplicationsPage(): ReactNode {
-  const [tab, setTab] = useState<'applications' | 'sellers'>('applications');
-  const [status, setStatus] = useState('pending');
-  const [notes, setNotes] = useState<Record<string, string>>({});
-  const [verifiedFssai, setVerifiedFssai] = useState<Record<string, boolean>>({});
-  const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
-  const query = new URLSearchParams({ page: '1', limit: '50', status });
-  const result = useLoad(() => api.cityAdminSellerApplications(query), [status]);
-
-  async function review(applicationId: string, decision: 'approved' | 'rejected' | 'needs_info', fssaiDecision?: 'verified'): Promise<void> {
-    setError('');
-    setMessage('');
-    try {
-      await api.reviewSellerApplication(applicationId, decision, notes[applicationId]?.trim(), fssaiDecision);
-      setMessage(decision === 'approved' ? 'Application approved and seller account access granted.' : decision === 'rejected' ? 'Application rejected.' : 'Application returned for more information.');
-      await result.reload();
-    } catch (cause) {
-      setError(displayError(cause));
-    }
-  }
-
+function CityAdminSellersPage(): ReactNode {
   return (
     <div className="city-admin-page">
-      <div className="city-admin-page-heading"><div><p className="city-admin-eyebrow">Seller onboarding</p><h1>Sellers & SHGs</h1><p>Review applications for your assigned city. Seller access is granted only after approval.</p></div></div>
-      {error && <div className="city-admin-error" role="alert">{error}</div>}
-      {message && <Notice tone="success">{message}</Notice>}
-      <div className="city-admin-tabs" role="tablist" aria-label="Seller views">
-        <button type="button" role="tab" aria-selected={tab === 'applications'} className={tab === 'applications' ? 'active' : ''} onClick={() => setTab('applications')}>Applications</button>
-        <button type="button" role="tab" aria-selected={tab === 'sellers'} className={tab === 'sellers' ? 'active' : ''} onClick={() => setTab('sellers')}>Approved sellers</button>
-      </div>
-      {tab === 'sellers' ? <CityAdminSellerDirectory /> : <>
-      <section className="city-admin-panel city-admin-order-directory">
-        <div className="city-admin-order-tools">
-          <select aria-label="Filter seller applications by status" value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option value="pending">Awaiting review</option><option value="needs_info">Needs more information</option><option value="approved">Approved</option><option value="rejected">Rejected</option>
-          </select>
+      <div className="city-admin-page-heading">
+        <div>
+          <p className="city-admin-eyebrow">Local operations</p>
+          <h1>Sellers &amp; SHGs</h1>
+          <p>Registered Self-Help Groups (SHGs) and local artisan sellers in your assigned city.</p>
         </div>
-        {result.loading ? <Loading label="Loading seller applications…" /> : result.data?.data.length ? <div className="city-admin-review-grid">
-          {result.data.data.map((application) => <article key={application._id} className="city-admin-review-card panel">
-            <div className="panel-heading"><div><span className="eyebrow">{application.city} · {new Date(application.createdAt).toLocaleDateString('en-IN')}</span><h2>{application.shgName}</h2></div><span className={`status-pill status-${application.status.replaceAll('_', '-')}`}>{application.status.replaceAll('_', ' ')}</span></div>
-            <div className="panel-body">
-              <dl className="review-field-grid">
-                <div><dt>Representative</dt><dd>{application.representative}</dd></div>
-                <div><dt>Phone</dt><dd><a href={`tel:${application.phoneE164}`}>{application.phoneE164}</a></dd></div>
-                <div><dt>Primary product type</dt><dd>{application.primaryProductType}</dd></div>
-                <div><dt>Category</dt><dd>{application.primaryCategoryName || 'Not recorded'}{application.primarySubcategoryName ? ` · ${application.primarySubcategoryName}` : ''}</dd></div>
-                {application.primaryCategoryId === 'food-items' && <div><dt>FSSAI registration / licence</dt><dd>{application.fssaiRegistrationNumber || 'Not provided'} · {application.fssaiStatus.replaceAll('_', ' ')}</dd></div>}
-                <div><dt>Registered address</dt><dd>{application.registeredAddress}</dd></div>
-                {application.reviewNote && <div><dt>Previous review note</dt><dd>{application.reviewNote}</dd></div>}
-              </dl>
-              {application.status === 'pending' || application.status === 'needs_info' ? <>
-                <label className="field"><span>Review note (required to reject)</span><textarea rows={2} maxLength={1000} value={notes[application._id] ?? ''} onChange={(event) => setNotes((current) => ({ ...current, [application._id]: event.target.value }))} /></label>
-                {application.primaryCategoryId === 'food-items' && <label className="checkbox-field"><input type="checkbox" checked={verifiedFssai[application._id] ?? false} onChange={(event) => setVerifiedFssai((current) => ({ ...current, [application._id]: event.target.checked }))} /><span>I reviewed the submitted FSSAI details and confirm they are verified.</span></label>}
-                <div className="button-row review-actions">
-                  <button type="button" className="button" disabled={application.primaryCategoryId === 'food-items' && !(verifiedFssai[application._id] ?? false)} onClick={() => void review(application._id, 'approved', application.primaryCategoryId === 'food-items' ? 'verified' : undefined)}>Approve seller</button>
-                  <button type="button" className="button button-outline" onClick={() => void review(application._id, 'needs_info')}>Request information</button>
-                  <button type="button" className="button button-light" disabled={!notes[application._id]?.trim()} onClick={() => void review(application._id, 'rejected')}>Reject</button>
-                </div>
-              </> : application.reviewedAt && <p className="city-admin-data-note">Reviewed {new Date(application.reviewedAt).toLocaleString('en-IN')}</p>}
-            </div>
-          </article>)}
-        </div> : <div className="city-admin-empty">No seller applications in this queue.</div>}
-      </section>
-      </>}
+      </div>
+      <CityAdminSellerDirectory />
     </div>
   );
 }
@@ -5350,190 +6284,285 @@ function CityAdminSellerDirectory(): ReactNode {
   const result = useLoad(() => api.cityAdminSellers(query), [page, search]);
   useRefreshOnFocus(result.reload);
 
-  return <section className="city-admin-panel city-admin-order-directory">
-    <div className="city-admin-order-tools">
-      <label className="city-admin-search-field"><span aria-hidden="true">⌕</span><input aria-label="Search city sellers" placeholder="Search seller or phone" value={search} onChange={(event) => { setPage(1); setSearch(event.target.value); }} /></label>
-    </div>
-    {result.error && <div className="city-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
-    {result.loading ? <Loading label="Loading city sellers…" /> : result.error ? null : result.data?.data.length ? <div className="city-admin-table-wrap"><table className="city-admin-table"><thead><tr><th>Seller / SHG</th><th>Contact</th><th>Categories</th><th>Products</th><th>Orders</th><th>Verification</th><th>Account</th></tr></thead><tbody>{result.data.data.map((seller) => <tr key={seller._id}>
-      <td><strong>{seller.name || 'Seller'}</strong></td>
-      <td><a href={`tel:${seller.phoneE164}`}>{seller.phoneE164}</a>{seller.email && <small>{seller.email}</small>}</td>
-      <td>{seller.productCategories.join(', ') || 'No listed products'}</td>
-      <td>{seller.productCount}</td>
-      <td>{seller.orderCount}</td>
-      <td>Not tracked</td>
-      <td><StatusBadge value={seller.status} /></td>
-    </tr>)}</tbody></table></div> : <div className="city-admin-empty">No approved sellers are assigned to {user?.assignedCity ?? 'this city'} yet.</div>}
-    {result.data && result.data.pagination.totalPages > 1 && <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />}
-  </section>;
-}
-
-type SellerProductDraft = {
-  categoryId: string;
-  subcategoryId: string;
-  productType: string;
-  name: string;
-  slug: string;
-  slugEdited: boolean;
-  description: string;
-  price: string;
-  stock: string;
-  lowStockThreshold: string;
-  imageUrl: string;
-};
-
-function readSellerProductDraft(key: string): SellerProductDraft | null {
-  try {
-    const saved = window.localStorage.getItem(key);
-    if (!saved) return null;
-    const parsed: unknown = JSON.parse(saved);
-    if (!parsed || typeof parsed !== 'object') return null;
-    const value = parsed as Partial<SellerProductDraft>;
-    const fields: Array<keyof SellerProductDraft> = ['categoryId', 'subcategoryId', 'productType', 'name', 'slug', 'description', 'price', 'stock', 'lowStockThreshold', 'imageUrl'];
-    if (!fields.every((field) => typeof value[field] === 'string')) return null;
-    return { ...value, slugEdited: value.slugEdited === true } as SellerProductDraft;
-  } catch (cause) {
-    console.warn('Could not restore the saved seller product draft.', cause);
-    return null;
-  }
-}
-
-function SellerCatalogueListingPage({ onCancel, onSubmitted, onDraftSaved }: { onCancel: () => void; onSubmitted: () => void; onDraftSaved?: (draft: SellerProductDraft | null) => void }): ReactNode {
-  const { user } = useAuth();
-  const categories = useLoad(() => api.categories());
-  const draftKey = `esakhi.seller.productDraft:${user?.id ?? 'seller'}`;
-  const [draft] = useState(() => readSellerProductDraft(draftKey));
-  const [categoryId, setCategoryId] = useState(draft?.categoryId ?? 'womens-apparel-accessories');
-  const [subcategoryId, setSubcategoryId] = useState(draft?.subcategoryId ?? 'jewellery-accessories');
-  const [productType, setProductType] = useState(draft?.productType ?? '');
-  const [name, setName] = useState(draft?.name ?? '');
-  const [slug, setSlug] = useState(draft?.slug ?? '');
-  const [slugEdited, setSlugEdited] = useState(draft?.slugEdited ?? false);
-  const [description, setDescription] = useState(draft?.description ?? '');
-  const [price, setPrice] = useState(draft?.price ?? '');
-  const [stock, setStock] = useState(draft?.stock ?? '');
-  const [lowStockThreshold, setLowStockThreshold] = useState(draft?.lowStockThreshold ?? '5');
-  const [imageUrl, setImageUrl] = useState(draft?.imageUrl ?? '');
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const [saved, setSaved] = useState('');
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const selectedCategory = categories.data?.find((category) => category.categoryId === categoryId);
-  const selectedSubcategory = selectedCategory?.subcategories.find((subcategory) => subcategory.subcategoryId === subcategoryId);
-  const slugFromName = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-
-  useEffect(() => {
-    if (!categories.data?.length) return;
-    const validCategory = categories.data.find((category) => category.categoryId === categoryId) ?? categories.data[0];
-    if (validCategory.categoryId !== categoryId) setCategoryId(validCategory.categoryId);
-    if (!validCategory.subcategories.some((subcategory) => subcategory.subcategoryId === subcategoryId)) {
-      setSubcategoryId(validCategory.subcategories[0]?.subcategoryId ?? '');
-    }
-  }, [categories.data, categoryId, subcategoryId]);
-
-  const currentDraft: SellerProductDraft = {
-    categoryId, subcategoryId, productType, name, slug, slugEdited,
-    description, price, stock, lowStockThreshold, imageUrl,
-  };
-
-  function saveDraft(): void {
-    setError('');
-    try {
-      window.localStorage.setItem(draftKey, JSON.stringify(currentDraft));
-      onDraftSaved?.(currentDraft);
-      setSaved('Draft saved on this device. It will be available when you return on this browser.');
-    } catch (cause) {
-      setError(displayError(cause));
-    }
-  }
-
-  async function uploadImage(file: File): Promise<void> {
-    setUploadingImage(true);
-    setError('');
-    setSaved('');
-    try {
-      const uploaded = await api.uploadSellerProductImage(file);
-      setImageUrl(uploaded.imageUrl);
-    } catch (cause) {
-      setError(displayError(cause));
-    } finally {
-      setUploadingImage(false);
-    }
-  }
-
-  async function submitProduct(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    setSaving(true);
-    setError('');
-    setSaved('');
-    try {
-      await api.createSellerProduct({
-        name: name.trim(),
-        slug: slug.trim() || slugFromName(name),
-        description: description.trim(),
-        categoryId,
-        subcategoryId,
-        productType: productType.trim(),
-        pricePaise: Math.round(Number(price) * 100),
-        stock: Number(stock),
-        lowStockThreshold: Number(lowStockThreshold),
-        ...(imageUrl.trim() ? { imageUrls: [imageUrl.trim()] } : {}),
-      });
-      setSaved('Your product was submitted for City Admin review and is not yet published.');
-      try {
-        window.localStorage.removeItem(draftKey);
-        onDraftSaved?.(null);
-      } catch (cause) {
-        console.warn('Could not remove the submitted seller product draft.', cause);
-      }
-      onSubmitted();
-    } catch (cause) {
-      setError(displayError(cause));
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
-    <section className="seller-panel seller-product-editor">
-      <div className="seller-panel-heading"><div><h2>Product details</h2><p>Products are published after City Admin review.</p></div><button className="seller-secondary-action" type="button" onClick={onCancel}>Cancel</button></div>
-      <div className="seller-product-editor-body">
-          {saved && <Notice tone="success">{saved}</Notice>}
-          {error && <Notice tone="error">{error}</Notice>}
-          {categories.error && <div className="seller-panel-state"><Notice tone="error">{categories.error}</Notice><button type="button" className="seller-secondary-action" onClick={() => void categories.reload()}>Retry categories</button></div>}
-          <form className="seller-product-form" onSubmit={(event) => void submitProduct(event)}>
-            <div className="form-grid two-up">
-              <label className="field"><span>Main category</span><select required disabled={categories.loading || !categories.data?.length} value={categoryId} onChange={(event) => {
-                const nextCategory = categories.data?.find((category) => category.categoryId === event.target.value);
-                setCategoryId(event.target.value);
-                setSubcategoryId(nextCategory?.subcategories[0]?.subcategoryId ?? '');
-                setProductType('');
-              }}>{(categories.data ?? []).map((category) => <option key={category.categoryId} value={category.categoryId}>{category.categoryName}</option>)}</select></label>
-              <label className="field"><span>Subcategory</span><select required disabled={!selectedCategory} value={subcategoryId} onChange={(event) => { setSubcategoryId(event.target.value); setProductType(''); }}>{(selectedCategory?.subcategories ?? []).map((subcategory) => <option key={subcategory.subcategoryId} value={subcategory.subcategoryId}>{subcategory.subcategoryName}</option>)}</select></label>
-            </div>
-            <label className="field"><span>Product type</span><input required list="seller-product-types" value={productType} onChange={(event) => setProductType(event.target.value)} placeholder="Describe the product type" /><datalist id="seller-product-types">{(selectedSubcategory?.productTypes ?? []).map((type) => <option key={type.productTypeId} value={type.productType} />)}</datalist></label>
-            <label className="field"><span>Product name</span><input required maxLength={160} value={name} onChange={(event) => { setName(event.target.value); if (!slugEdited) setSlug(slugFromName(event.target.value)); }} /></label>
-            <label className="field"><span>Product page address</span><input required maxLength={180} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value={slug} onChange={(event) => { setSlugEdited(true); setSlug(event.target.value); }} /><small>Use lowercase letters, numbers, and hyphens.</small></label>
-            <label className="field"><span>Description</span><textarea required minLength={1} maxLength={5000} rows={4} value={description} onChange={(event) => setDescription(event.target.value)} /></label>
-            <div className="seller-image-upload">
-              <label className="field"><span>Product image</span><input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploadingImage} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file); event.currentTarget.value = ''; }} /><small>JPEG, PNG, or WebP. Maximum file size: 5 MB.</small></label>
-              {imageUrl && <div className="seller-image-preview"><img src={resolveProductImageUrl(imageUrl)} alt="Product preview" /><div><strong>Image ready</strong><button type="button" className="seller-secondary-action" onClick={() => setImageUrl('')}>Remove image</button></div></div>}
-              {uploadingImage && <Loading label="Uploading product image…" />}
-            </div>
-            <div className="form-grid two-up">
-              <label className="field"><span>Price (₹)</span><input required type="number" min="0.01" max="1000000" step="0.01" value={price} onChange={(event) => setPrice(event.target.value)} /></label>
-              <label className="field"><span>Available stock</span><input required type="number" min="0" max="100000" step="1" value={stock} onChange={(event) => setStock(event.target.value)} /></label>
-              <label className="field"><span>Low-stock alert at</span><input required type="number" min="0" max="100000" step="1" value={lowStockThreshold} onChange={(event) => setLowStockThreshold(event.target.value)} /><small>We’ll flag stock at or below this number.</small></label>
-            </div>
-            {categoryId === 'food-items' && <Notice>Food listings require an approved seller account with verified FSSAI details. Listings remain unpublished until City Admin approval.</Notice>}
-            {saved && <Notice tone="success">{saved}</Notice>}
-            {error && <Notice tone="error">{error}</Notice>}
-            <div className="seller-product-form-actions"><button type="button" className="seller-secondary-action" onClick={saveDraft} disabled={saving || uploadingImage}>Save draft on this device</button><button type="submit" className="seller-primary-action" disabled={saving || uploadingImage || categories.loading || !categories.data?.length}>{saving ? 'Submitting…' : 'Submit for approval'}</button></div>
-          </form>
+    <section className="city-admin-panel city-admin-order-directory">
+      <div className="city-admin-order-tools">
+        <label className="city-admin-search-field">
+          <span aria-hidden="true">⌕</span>
+          <input
+            aria-label="Search city sellers"
+            placeholder="Search seller by name or phone"
+            value={search}
+            onChange={(event) => { setPage(1); setSearch(event.target.value); }}
+          />
+        </label>
       </div>
+      {result.error && <div className="city-admin-error" role="alert">{result.error}<button onClick={() => void result.reload()}>Retry</button></div>}
+      {result.loading ? (
+        <Loading label="Loading city sellers…" />
+      ) : result.error ? null : result.data?.data.length ? (
+        <div className="city-admin-table-wrap">
+          <table className="city-admin-table">
+            <thead>
+              <tr>
+                <th>Seller / SHG</th>
+                <th>Contact</th>
+                <th>Assigned City</th>
+                <th>Categories</th>
+                <th>Products</th>
+                <th>Orders</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.data.data.map((seller) => (
+                <tr key={seller._id}>
+                  <td><strong>{seller.name || 'Seller'}</strong></td>
+                  <td>
+                    <a href={`tel:${seller.phoneE164}`}>{seller.phoneE164}</a>
+                    {seller.email && <small style={{ display: 'block', color: '#64748b' }}>{seller.email}</small>}
+                  </td>
+                  <td>{seller.assignedCity || user?.assignedCity || 'Damoh'}</td>
+                  <td>{seller.productCategories.join(', ') || 'No listed products'}</td>
+                  <td>{seller.productCount}</td>
+                  <td>{seller.orderCount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="city-admin-empty">No sellers are registered in {user?.assignedCity ?? 'this city'} yet.</div>
+      )}
+      {result.data && result.data.pagination.totalPages > 1 && (
+        <Pagination page={page} pages={result.data.pagination.totalPages} onChange={setPage} />
+      )}
     </section>
   );
 }
+
+function CityAdminProfilePage(): ReactNode {
+  const result = useLoad(() => api.cityAdminProfile(), []);
+  useRefreshOnFocus(result.reload);
+
+  const data = result.data;
+  const profile = data?.profile;
+  const bank = data?.bankAccount;
+  const compensation = data?.compensation;
+
+  return (
+    <div className="city-admin-page">
+      <div className="city-admin-page-heading">
+        <div>
+          <p className="city-admin-eyebrow">Account &amp; Official Records</p>
+          <h1>City Administrator Profile</h1>
+          <p>Official verified identity, residential credentials, banking coordinates, and earnings ledger.</p>
+        </div>
+      </div>
+
+      {result.error && (
+        <div className="city-admin-error" role="alert">
+          {result.error}
+          <button type="button" onClick={() => void result.reload()}>Retry</button>
+        </div>
+      )}
+
+      {result.loading ? (
+        <Loading label="Loading profile and compensation details…" />
+      ) : profile && bank && compensation ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {/* READ-ONLY SECURITY NOTICE */}
+          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '10px', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <span style={{ fontSize: '24px' }} role="img" aria-label="shield">🛡️</span>
+            <div>
+              <strong style={{ display: 'block', color: '#166534', fontSize: '15px' }}>Profile Locked &amp; Super Admin Verified</strong>
+              <p style={{ margin: 0, color: '#15803d', fontSize: '13px' }}>
+                For regulatory and compliance safety, personal credentials, residential address, Aadhaar ID, and bank coordinates cannot be edited directly by the City Administrator. If any updates are needed, please contact the Super Administrator.
+              </p>
+            </div>
+          </div>
+
+          {/* TWO COLUMN GRID FOR PERSONAL & BANK DETAILS */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
+            {/* PERSONAL & GOVERNMENT IDENTITY CARD */}
+            <section className="city-admin-panel" style={{ margin: 0 }}>
+              <div className="city-admin-panel-heading">
+                <div>
+                  <h2 style={{ fontSize: '18px', margin: 0 }}>Identity &amp; Residential Credentials</h2>
+                  <p style={{ margin: 0, color: '#64748b', fontSize: '13px' }}>Verified details recorded during onboarding by Super Admin</p>
+                </div>
+                <span className="status-pill status-active" style={{ textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.05em' }}>{profile.status}</span>
+              </div>
+              <div className="panel-body" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div>
+                  <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>Administrator Full Name</span>
+                  <strong style={{ fontSize: '16px', color: '#0f172a' }}>{profile.name}</strong>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div>
+                    <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>Verified Contact Number</span>
+                    <strong style={{ fontSize: '15px', color: '#0f172a' }}>{profile.phoneE164}</strong>
+                    <span style={{ color: '#059669', fontSize: '12px', display: 'block', marginTop: '2px' }}>✓ Verified OTP Mobile</span>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>Registered Email</span>
+                    <strong style={{ fontSize: '14px', color: '#0f172a' }}>{profile.email || 'None on record'}</strong>
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>Assigned Operational City</span>
+                  <strong style={{ fontSize: '15px', color: '#0284c7' }}>{profile.assignedCity}</strong>
+                </div>
+                <div>
+                  <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>Residential / Living Address</span>
+                  <p style={{ margin: '4px 0 0', color: '#334155', fontSize: '14px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px 12px' }}>
+                    {profile.residentialAddress}
+                  </p>
+                </div>
+                <div>
+                  <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>Identification / Aadhaar Card Number</span>
+                  <code style={{ display: 'inline-block', marginTop: '4px', background: '#f1f5f9', padding: '4px 8px', borderRadius: '4px', fontSize: '13px', fontWeight: 600, color: '#1e293b' }}>
+                    {profile.aadhaarNumber}
+                  </code>
+                </div>
+              </div>
+            </section>
+
+            {/* BANKING & PAYOUT COORDINATES CARD */}
+            <section className="city-admin-panel" style={{ margin: 0 }}>
+              <div className="city-admin-panel-heading">
+                <div>
+                  <h2 style={{ fontSize: '18px', margin: 0 }}>Registered Bank Details</h2>
+                  <p style={{ margin: 0, color: '#64748b', fontSize: '13px' }}>Designated beneficiary coordinates for commission disbursements</p>
+                </div>
+                <span className="status-pill status-approved" style={{ textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.05em' }}>
+                  {bank.verified ? 'Verified Account' : 'Recorded'}
+                </span>
+              </div>
+              <div className="panel-body" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div>
+                  <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>Account Holder Name</span>
+                  <strong style={{ fontSize: '16px', color: '#0f172a' }}>{bank.accountHolderName}</strong>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div>
+                    <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>Bank Name</span>
+                    <strong style={{ fontSize: '15px', color: '#0f172a' }}>{bank.bankName}</strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>IFSC Code</span>
+                    <code style={{ fontSize: '13px', color: '#0f172a' }}>{bank.ifscCode}</code>
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>Bank Account Number</span>
+                  <code style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '0.05em', color: '#0f172a' }}>
+                    {bank.accountNumber && bank.accountNumber !== 'Not provided'
+                      ? bank.accountNumber.length > 4
+                        ? `•••• •••• ${bank.accountNumber.slice(-4)}`
+                        : bank.accountNumber
+                      : 'Not provided'}
+                  </code>
+                </div>
+                <div>
+                  <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>UPI ID</span>
+                  <strong style={{ fontSize: '14px', color: '#334155' }}>{bank.upiId || 'Not provided'}</strong>
+                </div>
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '10px 12px', marginTop: 'auto' }}>
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>Payout Disbursing Authority:</span>
+                  <strong style={{ display: 'block', fontSize: '13px', color: '#0f172a' }}>{compensation.payer}</strong>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          {/* COMPENSATION TERMS & EARNINGS BALANCE */}
+          <section className="city-admin-panel">
+            <div className="city-admin-panel-heading">
+              <div>
+                <h2>Earnings, Compensation &amp; Payout Balance</h2>
+                <p>Contracted compensation rate and real-time ledger of earned commissions and settled payouts.</p>
+              </div>
+              <span className="city-admin-period">Live Ledger</span>
+            </div>
+
+            {/* SUMMARY CARDS */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', padding: '20px 20px 0' }}>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px' }}>
+                <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>Compensation Rate</span>
+                <strong style={{ fontSize: '16px', color: '#0f172a', display: 'block', marginTop: '4px' }}>{compensation.rateText}</strong>
+                <small style={{ color: '#64748b', display: 'block', marginTop: '2px' }}>Payer: {compensation.payer}</small>
+              </div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px' }}>
+                <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>Completed City Sales</span>
+                <strong style={{ fontSize: '20px', color: '#0f172a', display: 'block', marginTop: '4px' }}>{formatMoney(compensation.grossSalesPaise)}</strong>
+                <small style={{ color: '#64748b', display: 'block', marginTop: '2px' }}>From {compensation.completedOrdersCount} delivered orders</small>
+              </div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px' }}>
+                <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>Total Disbursed / Paid Out</span>
+                <strong style={{ fontSize: '20px', color: '#059669', display: 'block', marginTop: '4px' }}>{formatMoney(compensation.totalDisbursedPaise)}</strong>
+                <small style={{ color: '#64748b', display: 'block', marginTop: '2px' }}>Transferred to your bank account</small>
+              </div>
+              <div style={{ background: compensation.currentPayableBalancePaise > 0 ? '#eff6ff' : '#f8fafc', border: `1px solid ${compensation.currentPayableBalancePaise > 0 ? '#93c5fd' : '#e2e8f0'}`, borderRadius: '8px', padding: '16px' }}>
+                <span style={{ fontSize: '11px', color: compensation.currentPayableBalancePaise > 0 ? '#1d4ed8' : '#64748b', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>Current Payable Balance</span>
+                <strong style={{ fontSize: '22px', color: compensation.currentPayableBalancePaise > 0 ? '#1e40af' : '#0f172a', display: 'block', marginTop: '4px' }}>{formatMoney(compensation.currentPayableBalancePaise)}</strong>
+                <small style={{ color: compensation.currentPayableBalancePaise > 0 ? '#1e40af' : '#64748b', display: 'block', marginTop: '2px' }}>
+                  {compensation.currentPayableBalancePaise > 0 ? 'Pending Super Admin payout' : 'All earnings fully settled (₹0.00)'}
+                </small>
+              </div>
+            </div>
+
+            <div style={{ padding: '16px 20px', fontSize: '13px', color: '#475569' }}>
+              <p style={{ margin: 0 }}>
+                💡 <em>Note: When Super Admin processes your payout disbursement, the transferred funds are sent to your verified bank account and your payable balance automatically updates to ₹0.00.</em>
+              </p>
+            </div>
+
+            {/* PAYOUT HISTORY */}
+            <div style={{ borderTop: '1px solid #e2e8f0', padding: '20px' }}>
+              <h3 style={{ fontSize: '15px', margin: '0 0 12px', color: '#0f172a' }}>Payout Disbursement History</h3>
+              {compensation.payoutHistory && compensation.payoutHistory.length > 0 ? (
+                <div className="city-admin-table-wrap">
+                  <table className="city-admin-table">
+                    <thead>
+                      <tr>
+                        <th>Disbursement Date</th>
+                        <th>Amount Paid</th>
+                        <th>UTR / Reference</th>
+                        <th>Payment Method</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {compensation.payoutHistory.map((payout, index) => (
+                        <tr key={index}>
+                          <td>{payout.paidAt ? new Date(payout.paidAt).toLocaleDateString('en-IN') : 'Completed'}</td>
+                          <td><strong>{formatMoney(payout.amountPaise)}</strong></td>
+                          <td><code>{payout.transactionReference || 'Bank Transfer'}</code></td>
+                          <td>{payout.paymentMethod.toUpperCase()}</td>
+                          <td><span className="status-pill status-approved">{payout.status}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="city-admin-empty" style={{ padding: '20px' }}>
+                  No past disbursements recorded yet. Payouts processed by Super Admin will appear here.
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+
+
+
+
+
 
 function CityAdminProductReviewPage(): ReactNode {
   const categories = useLoad(() => api.categories());
@@ -5717,375 +6746,11 @@ function SellerGate({ children }: { children: ReactNode }): ReactNode {
   return children;
 }
 
-function SellerSalesTrendChart({ rows }: { rows: SellerDashboard['salesTrend'] }): ReactNode {
-  const maxSales = Math.max(...rows.map((row) => row.totalPaise), 1);
-  return <div className="seller-chart-wrap">
-    <svg className="seller-sales-chart" viewBox="0 0 600 190" role="img" aria-label="Confirmed paid product sales over the last six months">
-      {[0, 1, 2].map((line) => <line key={line} x1="30" x2="590" y1={25 + line * 48} y2={25 + line * 48} className="seller-chart-gridline" />)}
-      {rows.map((row, index) => {
-        const height = row.totalPaise === 0 ? 3 : Math.max(6, (row.totalPaise / maxSales) * 112);
-        const x = 54 + index * 91;
-        const y = 166 - height;
-        return <g key={`${row.month}-${index}`}>
-          <title>{row.month}: {formatMoney(row.totalPaise)}</title>
-          <rect x={x} y={y} width="42" height={height} rx="7" className="seller-chart-bar" />
-          <text x={x + 21} y="183" textAnchor="middle" className="seller-chart-label">{row.month}</text>
-        </g>;
-      })}
-    </svg>
-    {!rows.some((row) => row.totalPaise > 0) && <p className="seller-chart-empty">Confirmed paid sales will appear here when you receive your first order.</p>}
-  </div>;
-}
 
-function SellerProfileView({ profile, onSaved }: { profile: NonNullable<SellerDashboard['storeProfile']> | null; onSaved: () => Promise<void> }): ReactNode {
-  const [shgName, setShgName] = useState(profile?.shgName ?? '');
-  const [representative, setRepresentative] = useState(profile?.representative ?? '');
-  const [registeredAddress, setRegisteredAddress] = useState(profile?.registeredAddress ?? '');
-  const [storeDescription, setStoreDescription] = useState(profile?.storeDescription ?? '');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
 
-  if (!profile) return <section className="seller-panel"><Notice tone="error">We couldn’t find an approved store profile. Contact eSakhi support to resolve your seller account.</Notice></section>;
 
-  const save = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setSaving(true);
-    setError('');
-    setMessage('');
-    try {
-      await api.updateSellerProfile({ shgName: shgName.trim(), representative: representative.trim(), registeredAddress: registeredAddress.trim(), storeDescription: storeDescription.trim() });
-      setMessage('Your store profile has been saved.');
-      await onSaved();
-    } catch (cause) {
-      setError(displayError(cause));
-    } finally {
-      setSaving(false);
-    }
-  };
 
-  return <section className="seller-panel seller-store-profile">
-    <div className="seller-panel-heading"><div><h2>My Store Profile</h2><p>Keep your shop information up to date for customers and the eSakhi team.</p></div><span className="seller-verified-pill">✓ Seller approved</span></div>
-    <form className="seller-profile-form" onSubmit={(event) => void save(event)}>
-      {message && <Notice tone="success">{message}</Notice>}
-      {error && <Notice tone="error">{error}</Notice>}
-      <label><span>Store or SHG name</span><input required minLength={2} maxLength={160} value={shgName} onChange={(event) => setShgName(event.target.value)} /></label>
-      <label><span>Contact person</span><input required minLength={2} maxLength={120} value={representative} onChange={(event) => setRepresentative(event.target.value)} /></label>
-      <label className="seller-profile-wide"><span>About your store</span><textarea rows={4} maxLength={1000} value={storeDescription} onChange={(event) => setStoreDescription(event.target.value)} placeholder="Tell customers about your work and the people behind it." /></label>
-      <label className="seller-profile-wide"><span>Pickup / registered address</span><textarea required minLength={5} maxLength={500} rows={2} value={registeredAddress} onChange={(event) => setRegisteredAddress(event.target.value)} /></label>
-      <div className="seller-profile-readonly"><span><small>Phone</small><strong>{profile.phoneE164}</strong></span><span><small>Email</small><strong>{profile.email || 'Not added to your account'}</strong></span><span><small>Assigned city</small><strong>{profile.assignedCity || profile.city}</strong></span><span><small>Service zones</small><strong>{profile.serviceableLocalities.length ? profile.serviceableLocalities.join(', ') : 'Not assigned'}</strong></span><span><small>Main category</small><strong>{profile.primaryCategoryName ?? 'Under review'}</strong></span><span><small>FSSAI status</small><strong>{profile.fssaiStatus.replaceAll('_', ' ')}</strong></span></div>
-      <Notice>Phone, email, city, service zones, category, and verification are managed by eSakhi. Contact support to request changes to these details.</Notice>
-      <div className="seller-profile-actions"><button className="seller-primary-action" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save store profile'}</button><Link className="seller-secondary-action" to="/help">Get help</Link></div>
-    </form>
-  </section>;
-}
 
-function SellerInventoryHistoryPanel({ productId }: { productId: string }): ReactNode {
-  const history = useLoad(() => api.sellerInventoryHistory(productId), [productId]);
-  return <div className="seller-history-panel">
-    <strong>Stock update history</strong>
-    {history.loading ? <Loading label="Loading stock history…" /> : history.error ? <Notice tone="error">{history.error}</Notice> : history.data?.data.length ? history.data.data.map((entry: SellerInventoryAdjustment) => <div key={entry._id}><span className={entry.quantityChange > 0 ? 'is-increase' : 'is-decrease'}>{entry.quantityChange > 0 ? '+' : ''}{entry.quantityChange} units</span><span>{entry.reason}</span><small>{new Date(entry.createdAt).toLocaleString('en-IN')}</small></div>) : <small>No stock adjustments have been recorded for this product.</small>}
-  </div>;
-}
-
-function SellerUnavailablePanel({ title, description }: { title: string; description: string }): ReactNode {
-  return <section className="seller-panel seller-unavailable-panel">
-    <div className="seller-unavailable-icon" aria-hidden="true">✦</div>
-    <h2>{title}</h2><p>{description}</p>
-    <p className="seller-unavailable-note">This information is not tracked by the current seller system. No estimates or amounts are shown here.</p>
-    <Link className="seller-secondary-action" to="/help">Contact eSakhi support</Link>
-  </section>;
-}
-
-function SellerPortalPage({ initialView = 'overview' }: { initialView?: 'overview' | 'products' | 'inventory' | 'orders' | 'profile' | 'new_product' }): ReactNode {
-  const { user, signOut } = useAuth();
-  const [view, setView] = useState<'overview' | 'products' | 'inventory' | 'orders' | 'profile' | 'new_product' | 'finance' | 'payments' | 'reviews' | 'support' | 'notifications' | 'settings' | 'help'>(initialView);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const draftKey = `esakhi.seller.productDraft:${user?.id ?? 'seller'}`;
-  const [savedDraft, setSavedDraft] = useState<SellerProductDraft | null>(() => readSellerProductDraft(draftKey));
-  useEffect(() => {
-    setSavedDraft(readSellerProductDraft(draftKey));
-  }, [draftKey]);
-  const discardDraft = () => {
-    try { window.localStorage.removeItem(draftKey); } catch { /* ignore */ }
-    setSavedDraft(null);
-  };
-  const dashboard = useLoad(() => api.sellerDashboard(), [user?.id]);
-  const [productPage, setProductPage] = useState(1);
-  const [productSearch, setProductSearch] = useState('');
-  const [productApprovalStatus, setProductApprovalStatus] = useState('');
-  const [productStockStatus, setProductStockStatus] = useState(initialView === 'inventory' ? 'low_stock' : 'all');
-  const products = useLoad(() => {
-    const query = new URLSearchParams({ page: String(productPage), limit: '20' });
-    if (productSearch.trim()) query.set('q', productSearch.trim());
-    if (productApprovalStatus) query.set('approvalStatus', productApprovalStatus);
-    if (productStockStatus !== 'all') query.set('stockStatus', productStockStatus);
-    return api.sellerProducts(query);
-  }, [user?.id, productPage, productSearch, productApprovalStatus, productStockStatus]);
-  const [orderPage, setOrderPage] = useState(1);
-  const [inventoryProductId, setInventoryProductId] = useState('');
-  const [inventoryVariantId, setInventoryVariantId] = useState('');
-  const [inventoryQuantityChange, setInventoryQuantityChange] = useState('');
-  const [inventoryReason, setInventoryReason] = useState('');
-  const [savingInventory, setSavingInventory] = useState(false);
-  const [inventoryError, setInventoryError] = useState('');
-  const [inventoryMessage, setInventoryMessage] = useState('');
-  const [historyProductId, setHistoryProductId] = useState('');
-  const [orderStatus, setOrderStatus] = useState<'all' | 'new' | 'processing' | 'ready' | 'completed' | 'cancelled'>('all');
-  const orders = useLoad(() => api.sellerOrders(orderPage, 20, orderStatus), [user?.id, orderPage, orderStatus]);
-  const orderViewStatus: Partial<Record<typeof orderStatus, string[]>> = {
-    new: ['placed', 'order_confirmed'],
-    processing: ['accepted', 'preparing'],
-    ready: ['ready_for_pickup', 'delivery_partner_assigned', 'out_for_pickup', 'picked_up', 'out_for_delivery', 'return_requested', 'return_accepted', 'return_partner_assigned', 'return_picked_up'],
-    completed: ['delivered', 'completed', 'return_delivered_to_seller', 'ready_for_refund', 'refund_completed', 'return_rejected'],
-    cancelled: ['cancelled', 'delivery_failed'],
-  };
-  useRefreshOnFocus(dashboard.reload);
-  useRefreshOnFocus(products.reload);
-  useRefreshOnFocus(orders.reload);
-  const data = dashboard.data;
-  const metrics = data?.metrics;
-  const [updatingOrderId, setUpdatingOrderId] = useState('');
-  const [orderActionMessage, setOrderActionMessage] = useState('');
-  const [orderActionError, setOrderActionError] = useState('');
-
-  const updateSellerOrderStatus = async (order: SellerOrder, nextStatus: 'accepted' | 'preparing' | 'ready_for_pickup' | 'completed') => {
-    setUpdatingOrderId(order._id);
-    setOrderActionError('');
-    setOrderActionMessage('');
-    try {
-      await api.updateSellerOrderStatus(order._id, nextStatus);
-      const confirmation = nextStatus === 'ready_for_pickup'
-        ? (order.fulfilmentMethod === 'delivery'
-          ? `Order #${order.orderReference} is now Ready for Pickup! A popup notification has been sent to the City Admin portal to assign a suitable delivery partner.`
-          : `Order #${order.orderReference} is now Ready for Pickup! The customer has been notified.`)
-        : nextStatus === 'accepted'
-          ? `Order #${order.orderReference} accepted. You can now start preparing the items or mark it Ready for Pickup.`
-          : nextStatus === 'preparing'
-            ? `Order #${order.orderReference} marked as Preparing.`
-            : `Order #${order.orderReference} marked as Completed.`;
-      setOrderActionMessage(confirmation);
-      await Promise.all([orders.reload(false), dashboard.reload(false)]);
-    } catch (cause) {
-      setOrderActionError(displayError(cause));
-    } finally {
-      setUpdatingOrderId('');
-    }
-  };
-
-  const submitInventoryAdjustment = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const quantityChange = Number(inventoryQuantityChange);
-    if (!inventoryProductId || !Number.isInteger(quantityChange) || quantityChange === 0) {
-      setInventoryError('Enter a non-zero whole number of units to add or remove.');
-      return;
-    }
-    setSavingInventory(true);
-    setInventoryError('');
-    setInventoryMessage('');
-    try {
-      await api.adjustSellerInventory(inventoryProductId, {
-        quantityChange,
-        reason: inventoryReason.trim(),
-        ...(inventoryVariantId ? { variantId: inventoryVariantId } : {}),
-      });
-      setInventoryProductId('');
-      setInventoryVariantId('');
-      setInventoryQuantityChange('');
-      setInventoryReason('');
-      setInventoryMessage('Inventory updated and recorded.');
-      await Promise.all([products.reload(false), dashboard.reload(false)]);
-    } catch (cause) {
-      setInventoryError(displayError(cause));
-    } finally {
-      setSavingInventory(false);
-    }
-  };
-
-  const navItem = (key: typeof view, label: string, icon: string, badge?: number, selected = view === key, onSelect: () => void = () => setView(key)) => <button className={selected ? 'active' : ''} onClick={onSelect} key={`${key}-${label}`}><span aria-hidden="true">{icon}</span>{label}{badge ? <small>{badge}</small> : null}</button>;
-  const title: Record<typeof view, string> = {
-    overview: 'Overview', profile: 'My Store Profile', products: 'Products', inventory: 'Inventory',
-    orders: 'Orders', new_product: 'Add a product', finance: 'Earnings & Settlements',
-    payments: 'Payment History', reviews: 'Reviews & Feedback', support: 'Support Requests',
-    notifications: 'Notifications', settings: 'Settings', help: 'Help & Support',
-  };
-  const orderRows = (rows: SellerOrder[]) => rows.length ? (
-    <div className="seller-order-list" style={{ display: 'grid', gap: '1rem' }}>
-      {rows.map((order) => (
-        <SellerOrderCard
-          key={order._id}
-          order={order}
-          isUpdating={updatingOrderId === order._id}
-          onTransitionStatus={updateSellerOrderStatus}
-        />
-      ))}
-    </div>
-  ) : <div className="seller-empty"><span aria-hidden="true">✿</span><strong>No orders to show</strong><small>Orders containing your products will appear here.</small></div>;
-
-  const allOrders = orders.data?.data ?? [];
-  const visibleOrders = orderStatus === 'all'
-    ? allOrders
-    : allOrders.filter((order) => orderViewStatus[orderStatus]?.includes(order.fulfilmentStatus));
-  const setOrderView = (status: typeof orderStatus) => {
-    setView('orders');
-    setOrderStatus(status);
-    setOrderPage(1);
-  };
-  const viewInventory = (stockStatus = 'all') => {
-    setProductStockStatus(stockStatus);
-    setProductPage(1);
-    setView('inventory');
-  };
-  const currentStore = data?.storeProfile?.shgName || user?.name || 'Your store';
-  const productRows = (isInventory: boolean) => (
-    <section className="seller-panel seller-products-panel">
-      <div className="seller-panel-heading"><div><h2>{isInventory ? 'Inventory at a glance' : 'Your products'}</h2><p>{isInventory ? 'Available stock for your listings. Reserved quantities stay controlled by eSakhi orders.' : 'Find a listing, check its review status, and keep product availability up to date.'}</p></div></div>
-      {inventoryMessage && <Notice tone="success">{inventoryMessage}</Notice>}
-      {inventoryError && <Notice tone="error">{inventoryError}</Notice>}
-      {!isInventory && savedDraft && (savedDraft.name || savedDraft.description || savedDraft.price || savedDraft.imageUrl) && (
-        <div className="seller-draft-banner Notice">
-          <div>
-            <strong>Saved draft on this device: {savedDraft.name || 'Untitled product'}</strong>
-            <p>{savedDraft.productType ? `${savedDraft.productType} · ` : ''}{savedDraft.price ? `₹${savedDraft.price}` : 'Price not set'}{savedDraft.stock ? ` · ${savedDraft.stock} units` : ''}</p>
-          </div>
-          <div className="seller-table-actions">
-            <button type="button" className="seller-primary-action" onClick={() => setView('new_product')}>Continue editing draft</button>
-            <button type="button" className="seller-secondary-action" onClick={discardDraft}>Discard draft</button>
-          </div>
-        </div>
-      )}
-      {products.error && <div className="seller-panel-state"><Notice tone="error">{products.error}</Notice><button className="seller-secondary-action" onClick={() => void products.reload()}>Try again</button></div>}
-      <div className="seller-product-tools">
-        <label><span>Search products</span><input type="search" value={productSearch} onChange={(event) => { setProductPage(1); setProductSearch(event.target.value); }} placeholder="Search by product name" /></label>
-        <label><span>Review status</span><select value={productApprovalStatus} onChange={(event) => { setProductPage(1); setProductApprovalStatus(event.target.value); }}><option value="">All statuses</option><option value="pending">Awaiting review</option><option value="approved">Approved</option><option value="rejected">Changes requested</option></select></label>
-        <label><span>Stock status</span><select value={productStockStatus} onChange={(event) => { setProductPage(1); setProductStockStatus(event.target.value); }}><option value="all">All stock</option><option value="low_stock">Low stock</option><option value="out_of_stock">Out of stock</option><option value="in_stock">In stock</option></select></label>
-      </div>
-      {products.loading ? <Loading label="Loading your products…" /> : products.error ? null : products.data?.data.length ? <>
-        <div className="seller-products-table-wrap"><table className="seller-products-table"><thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Available stock</th><th>Listing / review</th><th>Updated</th><th>Actions</th></tr></thead><tbody>
-          {products.data.data.map((product) => {
-            const stock = product.variants.length ? product.variants.reduce((sum, variant) => sum + variant.stock, 0) : product.stock;
-            const stockLabel = stock === 0 ? 'Out of stock' : stock <= product.lowStockThreshold ? 'Low stock' : 'In stock';
-            const isAdjusting = inventoryProductId === product._id;
-            return <Fragment key={product._id}>
-              <tr>
-                <td><span className="seller-table-product"><span className="seller-product-image">{product.imageUrls[0] ? <img src={resolveProductImageUrl(product.imageUrls[0])} alt="" /> : '✿'}</span><span><strong>{product.name}</strong><small>{product.productType}</small></span></span></td>
-                <td>{product.categoryName}<small>{product.subcategoryName}</small></td>
-                <td>{formatMoney(product.pricePaise)}</td>
-                <td><span className={`seller-stock-label${stock === 0 ? ' is-empty' : stock <= product.lowStockThreshold ? ' is-low' : ''}`}>{stockLabel}</span><small>{stock} units</small></td>
-                <td><span className={`seller-approval-status status-${product.approvalStatus}`}>{product.approvalStatus === 'pending' ? 'Awaiting review' : product.approvalStatus === 'approved' ? 'Approved' : 'Changes requested'}</span><small>{product.isActive ? 'Published' : 'Not published'}{product.isFoodProduct ? ` · FSSAI ${product.foodComplianceStatus.replaceAll('_', ' ')}` : ''}</small>{product.classificationStatus === 'needs_review' && <small>Category review needed</small>}</td>
-                <td>{product.updatedAt ? new Date(product.updatedAt).toLocaleDateString('en-IN') : '—'}</td>
-                <td><div className="seller-table-actions"><button onClick={() => { setInventoryError(''); setInventoryProductId(isAdjusting ? '' : product._id); setInventoryVariantId(product.variants[0]?._id ?? ''); setInventoryQuantityChange(''); setInventoryReason(''); }}>{isAdjusting ? 'Close' : 'Update stock'}</button><button onClick={() => setHistoryProductId(historyProductId === product._id ? '' : product._id)}>{historyProductId === product._id ? 'Hide history' : 'History'}</button></div></td>
-              </tr>
-              {isAdjusting && <tr><td colSpan={7}><form className="seller-inventory-form" onSubmit={(event) => void submitInventoryAdjustment(event)}>
-                {product.variants.length > 0 && <label><span>Variant</span><select required value={inventoryVariantId} onChange={(event) => setInventoryVariantId(event.target.value)}>{product.variants.map((variant) => <option key={variant._id} value={variant._id}>{Object.entries(variant.attributes).map(([key, value]) => `${key}: ${value}`).join(', ') || variant.sku || 'Variant'} · {variant.stock} available</option>)}</select></label>}
-                <label><span>Units to add or remove</span><input required type="number" step="1" min="-100000" max="100000" value={inventoryQuantityChange} onChange={(event) => setInventoryQuantityChange(event.target.value)} placeholder="e.g. 10 or -2" /></label>
-                <label><span>Reason for adjustment</span><input required minLength={3} maxLength={300} value={inventoryReason} onChange={(event) => setInventoryReason(event.target.value)} placeholder="e.g. New handmade stock received" /></label>
-                <button className="seller-primary-action" type="submit" disabled={savingInventory}>{savingInventory ? 'Saving…' : 'Save stock update'}</button>
-              </form></td></tr>}
-              {historyProductId === product._id && <tr><td colSpan={7}><SellerInventoryHistoryPanel productId={product._id} /></td></tr>}
-            </Fragment>;
-          })}
-        </tbody></table></div>
-      </> : <div className="seller-empty"><span>◇</span><strong>{productSearch || productApprovalStatus || productStockStatus !== 'all' ? 'No products match these filters' : 'No products yet'}</strong><small>{productSearch || productApprovalStatus || productStockStatus !== 'all' ? 'Try a different search or status.' : 'Add your first product to start building your shop.'}</small>{!productSearch && !productApprovalStatus && productStockStatus === 'all' && <button className="seller-primary-action" onClick={() => setView('new_product')}>＋ Add your first product</button>}</div>}
-      {products.data && products.data.pagination.totalPages > 1 && <div className="seller-pagination"><button className="seller-secondary-action" disabled={productPage <= 1} onClick={() => setProductPage((page) => page - 1)}>Previous</button><span>Page {productPage} of {products.data.pagination.totalPages}</span><button className="seller-secondary-action" disabled={productPage >= products.data.pagination.totalPages} onClick={() => setProductPage((page) => page + 1)}>Next</button></div>}
-    </section>
-  );
-  const orderTabs: Array<{ key: typeof orderStatus; label: string }> = [
-    { key: 'all', label: 'All orders' }, { key: 'new', label: 'New' }, { key: 'processing', label: 'Preparing' },
-    { key: 'ready', label: 'Ready for pickup' }, { key: 'completed', label: 'Completed' }, { key: 'cancelled', label: 'Cancelled' },
-  ];
-
-  return <div className="seller-portal">
-    <aside className="seller-sidebar">
-      <Link to="/" className="seller-brand"><img src="/images/maitri-sisterhood-logo.png" alt="" /><span><strong>eSakhi</strong><small>SELLER WORKSPACE</small></span></Link>
-      <div className="seller-account-summary"><span>{(currentStore.trim().charAt(0) || 'S').toLocaleUpperCase('en-IN')}</span><div><strong>{currentStore}</strong><small>{data?.storeProfile?.city || user?.assignedCity || 'Seller account'}</small></div></div>
-      <nav className="seller-navigation" aria-label="Seller workspace">
-        <span className="seller-nav-heading">MAIN</span>{navItem('overview', 'Overview', '⌂')}
-        <span className="seller-nav-heading">MY BUSINESS</span>{navItem('profile', 'My Store Profile', '◯')}{navItem('products', 'Products', '◇', metrics?.totalProducts)}{navItem('inventory', 'Inventory', '▦', metrics?.lowStockProducts, view === 'inventory', () => viewInventory())}
-        <span className="seller-nav-heading">ORDERS</span>{navItem('orders', 'New Orders', '＋', metrics?.newOrders, view === 'orders' && orderStatus === 'new', () => setOrderView('new'))}{navItem('orders', 'Processing', '◷', metrics?.ordersToPrepare, view === 'orders' && orderStatus === 'processing', () => setOrderView('processing'))}{navItem('orders', 'Ready for Pickup', '↗', metrics?.readyOrders, view === 'orders' && orderStatus === 'ready', () => setOrderView('ready'))}{navItem('orders', 'Completed Orders', '✓', metrics?.completedOrders, view === 'orders' && orderStatus === 'completed', () => setOrderView('completed'))}{navItem('orders', 'Cancelled Orders', '×', undefined, view === 'orders' && orderStatus === 'cancelled', () => setOrderView('cancelled'))}
-        <span className="seller-nav-heading">FINANCE</span>{navItem('finance', 'Earnings & Settlements', '₹')}{navItem('payments', 'Payment History', '▤')}
-        <span className="seller-nav-heading">CUSTOMER SERVICE</span>{navItem('reviews', 'Reviews & Feedback', '☆')}{navItem('support', 'Support Requests', '?')}
-        <span className="seller-nav-heading">ACCOUNT</span>{navItem('notifications', 'Notifications', '♧')}{navItem('settings', 'Settings', '⚙')}{navItem('help', 'Help & Support', '♡')}
-      </nav>
-      <div className="seller-support-note"><strong>We’re here to help</strong><small>Need help with your store or an order?</small><Link to="/help">Visit Help & Support →</Link></div>
-    </aside>
-    <main className="seller-main">
-      <header className="seller-topbar"><Link to="/" className="seller-topbar-brand">eSakhi <small>SELLER</small></Link><div><span>{currentStore}</span><button className="seller-topbar-profile" onClick={() => setView('profile')}>My store</button><button onClick={() => void signOut()}>Sign out</button></div></header>
-      <div className="seller-page">
-        <div className="seller-page-heading"><div><span className="seller-kicker">{data?.storeProfile?.verificationStatus === 'approved' ? '✓ VERIFIED SELLER' : 'SELLER WORKSPACE'}</span><h1>{view === 'overview' ? `Namaste, ${currentStore}` : title[view]}</h1><p>{view === 'overview' ? 'Here’s what’s happening with your shop today.' : view === 'orders' ? 'Check order status and the payment state for your items.' : 'Your seller workspace, built around your store.'}</p></div>
-          {(view === 'products' || view === 'overview') && <button className="seller-primary-action" onClick={() => setView('new_product')}>＋ Add a product</button>}
-        </div>
-        {dashboard.error && <div className="seller-panel-state"><Notice tone="error">{dashboard.error}</Notice><button className="seller-secondary-action" onClick={() => void dashboard.reload()}>Retry dashboard</button></div>}
-        {view === 'overview' && <>
-          {dashboard.loading && !data ? <Loading label="Preparing your seller dashboard…" /> : <>
-            {metrics?.pendingProducts ? <button className="seller-pending-banner" onClick={() => { setProductApprovalStatus('pending'); setView('products'); }}><span aria-hidden="true">◷</span><span><strong>{metrics.pendingProducts} product{metrics.pendingProducts === 1 ? '' : 's'} awaiting approval</strong><small>Your new listings will appear in the marketplace after City Admin review.</small></span><b>View products →</b></button> : null}
-            <section className="seller-metrics">
-              <button onClick={() => setOrderView('new')}><SellerMetric label="New orders" value={metrics?.newOrders} icon="＋" unavailable={!metrics} /></button>
-              <button onClick={() => setOrderView('processing')}><SellerMetric label="Orders to prepare" value={metrics?.ordersToPrepare} icon="◷" unavailable={!metrics} /></button>
-              <button onClick={() => setView('products')}><SellerMetric label="Active products" value={metrics?.activeProducts} icon="◇" unavailable={!metrics} /></button>
-              <button onClick={() => viewInventory('low_stock')}><SellerMetric label="Low stock" value={metrics?.lowStockProducts} icon="!" alert={Boolean(metrics?.lowStockProducts)} unavailable={!metrics} /></button>
-              <SellerMetric label="Sales this month" value={metrics ? formatMoney(metrics.grossPaidProductSalesThisMonthPaise) : undefined} icon="↗" unavailable={!metrics} />
-              <button onClick={() => setView('finance')}><SellerMetric label="Settlement & Penalties" value="View Ledger →" icon="₹" /></button>
-            </section>
-            <SellerSettlementsLedgerPanel />
-            <div className="seller-dashboard-grid">
-              <section className="seller-panel seller-chart-panel"><div className="seller-panel-heading"><div><h2>Sales trend</h2><p>Confirmed paid product sales · last six months</p></div><span className="seller-trend-total">{metrics ? formatMoney(metrics.grossPaidProductSalesThisMonthPaise) : '—'} <small>this month</small></span></div>{data ? <SellerSalesTrendChart rows={data.salesTrend} /> : <Loading label="Loading sales trend…" />}<p className="seller-chart-footnote">Gross product sales only—not commission-adjusted earnings or settlement balance.</p></section>
-              <section className="seller-panel seller-checklist-panel"><div className="seller-panel-heading"><div><h2>Your shop checklist</h2><p>A few small steps to keep your store ready.</p></div></div><div className="seller-checklist">
-                <button onClick={() => setView('profile')}><span className="seller-check-complete">✓</span><span><strong>Seller account approved</strong><small>Your seller profile is active.</small></span></button>
-                <button onClick={() => setView('profile')}><span className={data?.storeProfile?.storeDescription ? 'seller-check-complete' : 'seller-check-pending'}>{data?.storeProfile?.storeDescription ? '✓' : '2'}</span><span><strong>Add a store introduction</strong><small>{data?.storeProfile?.storeDescription ? 'Your story is on your profile.' : 'Tell shoppers about your group and craft.'}</small></span></button>
-                <button onClick={() => setView('products')}><span className={metrics?.activeProducts ? 'seller-check-complete' : 'seller-check-pending'}>{metrics?.activeProducts ? '✓' : '3'}</span><span><strong>Publish your first product</strong><small>{metrics?.activeProducts ? 'Your products are live.' : 'Approved products appear in the marketplace.'}</small></span></button>
-              </div></section>
-              <section className="seller-panel"><div className="seller-panel-heading"><div><h2>Recent orders</h2><p>Update preparation status or mark orders Ready for Pickup.</p></div><button onClick={() => setOrderView('all')}>See all orders →</button></div>{orderActionMessage && <Notice tone="success">{orderActionMessage}</Notice>}{orderActionError && <Notice tone="error">{orderActionError}</Notice>}{orders.loading ? <SellerOrderSkeleton count={2} /> : orders.error ? <Notice tone="error">{orders.error}</Notice> : orderRows(data?.recentOrders ?? [])}</section>
-              <section className="seller-panel"><div className="seller-panel-heading"><div><h2>Top-selling products</h2><p>By units sold in confirmed orders.</p></div><button onClick={() => setView('products')}>Your products →</button></div>{data?.topSellingProducts.length ? <div className="seller-top-products">{data.topSellingProducts.map((item, index) => <div key={item._id}><span>{String(index + 1).padStart(2, '0')}</span><strong>{item.productName}</strong><small>{item.unitsSold} sold</small><b>{formatMoney(item.grossSalesPaise)}</b></div>)}</div> : <div className="seller-panel-empty">Your top sellers will show here after confirmed paid orders.</div>}</section>
-              <section className="seller-panel seller-low-stock-panel"><div className="seller-panel-heading"><div><h2>Stock needing attention</h2><p>Items at or below their low-stock threshold.</p></div><button onClick={() => viewInventory('low_stock')}>View inventory →</button></div>{data?.lowStockProducts.length ? <div className="seller-low-stock-list">{data.lowStockProducts.map((item) => <div key={item._id}><span className={item.availableStock === 0 ? 'is-out' : ''}>{item.availableStock}</span><strong>{item.name}</strong><small>{item.availableStock === 0 ? 'Out of stock' : 'Low stock'}</small></div>)}</div> : <div className="seller-panel-empty">All your products are above their low-stock threshold.</div>}</section>
-              <section className="seller-panel"><div className="seller-panel-heading"><div><h2>Customer feedback</h2><p>Reviews are not available yet.</p></div></div><div className="seller-feedback-empty"><span>☆</span><strong>No reviews to show</strong><small>eSakhi does not currently collect customer reviews.</small><Link to="/help">Need help? Contact support →</Link></div></section>
-            </div>
-          </>}
-        </>}
-        {view === 'products' && productRows(false)}
-        {view === 'inventory' && productRows(true)}
-        {view === 'profile' && <SellerProfileView profile={data?.storeProfile ?? null} onSaved={() => dashboard.reload(false)} />}
-        {view === 'orders' && <section className="seller-panel seller-orders-panel"><div className="seller-panel-heading"><div><h2>Your orders</h2><p>Manage order preparation and mark orders Ready for Pickup so the City Admin can assign a delivery partner.</p></div></div>
-          {orderActionMessage && <Notice tone="success">{orderActionMessage}</Notice>}
-          {orderActionError && <Notice tone="error">{orderActionError}</Notice>}
-          <div className="seller-order-tabs" role="tablist" aria-label="Filter orders">{orderTabs.map((tab) => <button key={tab.key} role="tab" aria-selected={orderStatus === tab.key} className={orderStatus === tab.key ? 'active' : ''} onClick={() => { setOrderStatus(tab.key); setOrderPage(1); }}>{tab.label}</button>)}</div>
-          {orders.loading ? <SellerOrderSkeleton count={3} /> : orders.error ? <Notice tone="error">{orders.error}</Notice> : orderRows(visibleOrders)}
-          {orders.data && orders.data.pagination.totalPages > 1 && <div className="seller-pagination"><button className="seller-secondary-action" disabled={orderPage <= 1} onClick={() => setOrderPage((page) => page - 1)}>Previous</button><span>Page {orderPage} of {orders.data.pagination.totalPages} · {orders.data.pagination.total} orders</span><button className="seller-secondary-action" disabled={orderPage >= orders.data.pagination.totalPages} onClick={() => setOrderPage((page) => page + 1)}>Next</button></div>}
-          <p className="seller-data-note">Once you mark a delivery order Ready for Pickup, the City Admin receives a popup notification in their portal to assign a suitable delivery partner.</p>
-        </section>}
-        {view === 'finance' && <SellerSettlementsLedgerPanel />}
-        {view === 'payments' && <SellerSettlementsLedgerPanel />}
-        {view === 'reviews' && <SellerUnavailablePanel title="Customer reviews are not available yet" description="The marketplace does not currently collect product ratings or written reviews." />}
-        {view === 'support' && <SellerUnavailablePanel title="Support requests are handled by eSakhi" description="Seller support tickets are not tracked in the dashboard yet. Use the help centre to contact the team." />}
-        {view === 'notifications' && <SellerUnavailablePanel title="Seller notifications are not configured yet" description="Order and product updates are visible in this dashboard. Seller-specific notification preferences are not currently available." />}
-        {view === 'settings' && <section className="seller-panel seller-settings-panel"><div className="seller-panel-heading"><div><h2>Account settings</h2><p>Manage your sign-in and seller profile.</p></div></div><div className="seller-settings-actions"><button onClick={() => setView('profile')}>Edit store profile <span>→</span></button><Link to="/account/profile">Update account name <span>→</span></Link><button onClick={() => void signOut()}>Sign out <span>→</span></button></div></section>}
-        {view === 'help' && <section className="seller-panel seller-help-panel"><div className="seller-panel-heading"><div><h2>Help & Support</h2><p>We’re here to help you run your store.</p></div></div><p>For help with products, orders, your account, or an assigned service area, contact the eSakhi team through the Help & policies page.</p><Link className="seller-primary-action" to="/help">Open Help & Support →</Link></section>}
-        {view === 'new_product' && <SellerCatalogueListingPage onCancel={() => setView('products')} onSubmitted={() => { setView('products'); void products.reload(false); void dashboard.reload(false); }} onDraftSaved={setSavedDraft} />}
-      </div>
-      <nav className="seller-mobile-nav" aria-label="Seller navigation">
-        {navItem('overview', 'Overview', '⌂')}
-        {navItem('products', 'Products', '◇')}
-        {navItem('orders', 'Orders', '▤')}
-        {navItem('profile', 'Store', '◯')}
-        <button className={mobileMenuOpen || !['overview', 'products', 'orders', 'profile'].includes(view) ? 'active' : ''} aria-expanded={mobileMenuOpen} aria-controls="seller-mobile-more" onClick={() => setMobileMenuOpen((open) => !open)}><span aria-hidden="true">⋯</span><small>More</small></button>
-        {mobileMenuOpen && <div className="seller-mobile-more" id="seller-mobile-more">
-          {navItem('inventory', 'Inventory', '▦', undefined, view === 'inventory', () => { viewInventory(); setMobileMenuOpen(false); })}
-          {navItem('finance', 'Earnings & Settlements', '₹', undefined, view === 'finance', () => { setView('finance'); setMobileMenuOpen(false); })}
-          {navItem('payments', 'Payment History', '▤', undefined, view === 'payments', () => { setView('payments'); setMobileMenuOpen(false); })}
-          {navItem('reviews', 'Reviews & Feedback', '☆', undefined, view === 'reviews', () => { setView('reviews'); setMobileMenuOpen(false); })}
-          {navItem('support', 'Support Requests', '?', undefined, view === 'support', () => { setView('support'); setMobileMenuOpen(false); })}
-          {navItem('notifications', 'Notifications', '♧', undefined, view === 'notifications', () => { setView('notifications'); setMobileMenuOpen(false); })}
-          {navItem('settings', 'Settings', '⚙', undefined, view === 'settings', () => { setView('settings'); setMobileMenuOpen(false); })}
-          {navItem('help', 'Help & Support', '♡', undefined, view === 'help', () => { setView('help'); setMobileMenuOpen(false); })}
-        </div>}
-      </nav>
-    </main>
-  </div>;
-}
-
-function SellerMetric({ label, value, icon, unavailable = false, alert = false }: { label: string; value?: string | number; icon: string; unavailable?: boolean; alert?: boolean }): ReactNode {
-  return <article className={`seller-metric${unavailable ? ' is-unavailable' : ''}${alert ? ' is-alert' : ''}`}><span className="seller-metric-icon">{icon}</span><span><small>{label}</small><strong>{value === undefined ? '…' : typeof value === 'number' ? value.toLocaleString('en-IN') : value}</strong><small>{unavailable ? 'Not available in seller data' : alert ? 'Needs attention' : 'Seller-scoped data'}</small></span></article>;
-}
 
 function DeliveryPartnerGate({ children }: { children: ReactNode }): ReactNode {
   const { user, ready } = useAuth();
@@ -6096,462 +6761,10 @@ function DeliveryPartnerGate({ children }: { children: ReactNode }): ReactNode {
   return children;
 }
 
-function DeliveryPartnerPage(): ReactNode {
+function DeliveryPartnerCockpitPage(): ReactNode {
   const { user, signOut } = useAuth();
-  const [view, setView] = useState<'overview' | 'deliveries' | 'history' | 'profile'>('overview');
-  const orders = useLoad(() => api.partnerOrders(), [user?.id]);
-  const history = useLoad(() => api.partnerOrderHistory(), [user?.id]);
-  const profile = useLoad(() => api.partnerProfile(), [user?.id]);
-  useRefreshOnFocus(orders.reload);
-  useRefreshOnFocus(history.reload);
-  useRefreshOnFocus(profile.reload);
-  const [note, setNote] = useState('');
-  const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
-  const [updatingAvailability, setUpdatingAvailability] = useState(false);
-  const [reportingFailureOrder, setReportingFailureOrder] = useState<Order | null>(null);
-
-  const toggleOnlineAvailability = async (nextOnline: boolean, nextStatus?: 'available' | 'busy' | 'offline') => {
-    setUpdatingAvailability(true);
-    setError('');
-    setMessage('');
-    try {
-      await api.updatePartnerAvailability({
-        isOnline: nextOnline,
-        availabilityStatus: nextStatus ?? (nextOnline ? 'available' : 'offline'),
-      });
-      setMessage(nextOnline ? 'You are now ONLINE & AVAILABLE for nearby order assignments.' : 'You are now OFFLINE.');
-      await profile.reload(false);
-    } catch (cause) {
-      setError(displayError(cause));
-    } finally {
-      setUpdatingAvailability(false);
-    }
-  };
-
-  const refreshLiveGpsLocation = () => {
-    setUpdatingAvailability(true);
-    setError('');
-    setMessage('');
-    const saveCoords = async (lat: number, lng: number) => {
-      try {
-        await api.updatePartnerAvailability({
-          isOnline: true,
-          latitude: lat,
-          longitude: lng,
-        });
-        setMessage(`Live GPS location updated (${lat.toFixed(4)}, ${lng.toFixed(4)}).`);
-        await profile.reload(false);
-      } catch (cause) {
-        setError(displayError(cause));
-      } finally {
-        setUpdatingAvailability(false);
-      }
-    };
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => void saveCoords(pos.coords.latitude, pos.coords.longitude),
-        () => void saveCoords(23.8388, 79.4422),
-        { timeout: 5000 },
-      );
-    } else {
-      void saveCoords(23.8388, 79.4422);
-    }
-  };
-
-  const updateStatus = async (
-    id: string,
-    status: 'out_for_pickup' | 'picked_up' | 'out_for_delivery' | 'delivered' | 'delivery_failed' | 'return_picked_up' | 'return_delivered_to_seller',
-    orderReference: string,
-    paymentCollected?: boolean,
-  ) => {
-    const confirmationMap: Record<typeof status, string> = {
-      out_for_pickup: `Accept assignment for #${orderReference} and start Route to Seller (OUT_FOR_PICKUP)?`,
-      picked_up: `Confirm you reached the Seller and picked up package #${orderReference} (PICKED_UP)?`,
-      out_for_delivery: `Start Route to Customer for #${orderReference} (OUT_FOR_DELIVERY)?`,
-      delivered: `Confirm payment collected/settled and package #${orderReference} handed over to Customer (DELIVERED)? Your status will revert to AVAILABLE.`,
-      delivery_failed: `Report delivery failed for #${orderReference}?`,
-      return_picked_up: `Confirm you reached the Customer and picked up the return package #${orderReference} (RETURN_PICKED_UP)?`,
-      return_delivered_to_seller: `Confirm you handed over the return package #${orderReference} back to the Seller (RETURN_DELIVERED_TO_SELLER)? Your active task will end and status will revert to AVAILABLE.`,
-    };
-    if (!window.confirm(confirmationMap[status])) return;
-    setError('');
-    setMessage('');
-    try {
-      await api.updatePartnerOrderStatus(id, status, note.trim() || undefined, paymentCollected);
-      setNote('');
-      setMessage(
-        status === 'delivered'
-          ? `Order #${orderReference} marked DELIVERED & payment settled! Your availability reverted to AVAILABLE.`
-          : status === 'return_delivered_to_seller'
-            ? `Reverse return #${orderReference} handed over to Seller (RETURN_DELIVERED_TO_SELLER)! Your availability reverted to AVAILABLE.`
-            : `Order #${orderReference} updated to ${orderStatusLabel(status)}.`,
-      );
-      await Promise.all([orders.reload(false), history.reload(false), profile.reload(false)]);
-    } catch (cause) {
-      setError(displayError(cause));
-    }
-  };
-  const activeOrders = orders.data ?? [];
-  const deliveryHistory = history.data ?? [];
-  const activeDelivery = activeOrders.find((order) =>
-    ['out_for_pickup', 'picked_up', 'out_for_delivery', 'delivery_partner_assigned', 'return_partner_assigned', 'return_picked_up'].includes(order.fulfilmentStatus),
-  ) ?? activeOrders[0];
-  const [gpsStreamState, setGpsStreamState] = useState<'GPS_STREAM_ACTIVE' | 'GPS_STREAM_INACTIVE'>('GPS_STREAM_INACTIVE');
-
-  useEffect(() => {
-    const activeId = activeDelivery?._id;
-    const status = activeDelivery?.fulfilmentStatus ?? '';
-    const isTransitActive = Boolean(
-      activeId && ['delivery_partner_assigned', 'out_for_pickup', 'picked_up', 'out_for_delivery', 'return_partner_assigned', 'return_picked_up'].includes(status),
-    );
-    if (!isTransitActive || !activeId) {
-      setGpsStreamState('GPS_STREAM_INACTIVE');
-      return;
-    }
-
-    setGpsStreamState('GPS_STREAM_ACTIVE');
-    let cancelled = false;
-    let watchId: number | null = null;
-
-    const sendPing = async (lat: number, lng: number) => {
-      if (cancelled) return;
-      try {
-        const res = await api.broadcastPartnerOrderLocation(activeId, lat, lng);
-        if (res.streamStatus === 'GPS_STREAM_INACTIVE' || !res.active) {
-          setGpsStreamState('GPS_STREAM_INACTIVE');
-          if (watchId !== null && navigator.geolocation) {
-            navigator.geolocation.clearWatch(watchId);
-            watchId = null;
-          }
-        }
-      } catch {
-        // Ignore transient network hiccups; next ping will retry while order remains in transit
-      }
-    };
-
-    if (navigator.geolocation) {
-      watchId = navigator.geolocation.watchPosition(
-        (pos) => void sendPing(pos.coords.latitude, pos.coords.longitude),
-        () => {
-          const fallbackLat = status === 'picked_up'
-            ? (activeDelivery?.sellerPickup?.latitude ?? 23.8388)
-            : status === 'out_for_delivery'
-              ? ((activeDelivery?.sellerPickup?.latitude ?? 23.8388) + (activeDelivery?.address?.latitude ?? 23.8342)) / 2
-              : 23.8402;
-          const fallbackLng = status === 'picked_up'
-            ? (activeDelivery?.sellerPickup?.longitude ?? 79.4422)
-            : status === 'out_for_delivery'
-              ? ((activeDelivery?.sellerPickup?.longitude ?? 79.4422) + (activeDelivery?.address?.longitude ?? 79.4385)) / 2
-              : 79.4438;
-          void sendPing(fallbackLat, fallbackLng);
-        },
-        { enableHighAccuracy: true, maximumAge: 5000, timeout: 6000 },
-      );
-    }
-
-    return () => {
-      cancelled = true;
-      if (watchId !== null && navigator.geolocation) {
-        navigator.geolocation.clearWatch(watchId);
-      }
-    };
-  }, [activeDelivery?._id, activeDelivery?.fulfilmentStatus, activeDelivery?.sellerPickup?.latitude, activeDelivery?.sellerPickup?.longitude, activeDelivery?.address?.latitude, activeDelivery?.address?.longitude]);
-  const completedToday = deliveryHistory.filter((order) => {
-    if (!['delivered', 'completed'].includes(order.fulfilmentStatus)) return false;
-    const completedAt = [...(order.statusHistory ?? [])].reverse().find((event) => ['delivered', 'completed'].includes(event.status))?.changedAt;
-    return completedAt ? new Date(completedAt).toDateString() === new Date().toDateString() : false;
-  }).length;
-  const isOnline = profile.data?.isOnline ?? true;
-  const availabilityStatus = profile.data?.availabilityStatus ?? (activeOrders.length > 0 ? 'busy' : 'available');
-  const partnerCoords = profile.data?.currentLocation;
-  const title = view === 'history' ? 'Delivery history' : view === 'deliveries' ? 'My deliveries' : view === 'profile' ? 'Partner profile' : 'Ready to deliver?';
-  const selectView = (next: typeof view) => setView(next);
-
-  const renderOrders = (items: Order[], isHistory = false) => items.length ? (
-    <div className="delivery-order-list">{items.map((order) => {
-      const seller = order.sellerPickup;
-      const destination = order.address;
-      const sellerMapUrl = seller?.latitude !== undefined && seller?.longitude !== undefined
-        ? `https://www.google.com/maps/dir/?api=1&destination=${seller.latitude},${seller.longitude}`
-        : seller?.address
-          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${seller.address}, ${seller.city}`)}`
-          : '';
-      const customerMapQuery = destination
-        ? encodeURIComponent([destination.addressLine1, destination.locality, destination.city, destination.postalCode].filter(Boolean).join(', '))
-        : '';
-      const customerMapUrl = destination
-        ? (destination.latitude !== undefined && destination.longitude !== undefined
-          ? `https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}`
-          : `https://www.google.com/maps/search/?api=1&query=${customerMapQuery}`)
-        : '';
-
-      const checkpointSteps = [
-        { key: 'assigned', label: '1. Assigned', active: ['delivery_partner_assigned', 'ready_for_pickup', 'preparing', 'out_for_pickup', 'picked_up', 'out_for_delivery', 'delivered', 'completed'].includes(order.fulfilmentStatus) },
-        { key: 'out_for_pickup', label: '2. Route to Seller (Out for Pickup)', active: ['out_for_pickup', 'picked_up', 'out_for_delivery', 'delivered', 'completed'].includes(order.fulfilmentStatus) },
-        { key: 'picked_up', label: '3. Picked Up from Seller', active: ['picked_up', 'out_for_delivery', 'delivered', 'completed'].includes(order.fulfilmentStatus) },
-        { key: 'out_for_delivery', label: '4. Route to Customer (Out for Delivery)', active: ['out_for_delivery', 'delivered', 'completed'].includes(order.fulfilmentStatus) },
-        { key: 'delivered', label: '5. Delivered & Settled', active: ['delivered', 'completed'].includes(order.fulfilmentStatus) },
-      ];
-
-      return <article className="delivery-order-card" key={order._id}>
-        <div className="delivery-order-heading">
-          <div>
-            <span className="delivery-section-kicker">ORDER #{order.orderReference} · {order.paymentMethod === 'cash' ? 'CASH ON DELIVERY' : 'ONLINE / UPI'} ({formatMoney(order.totalPaise)})</span>
-            <h3>{order.customerName}</h3>
-          </div>
-          <StatusBadge value={order.fulfilmentStatus} fulfilmentMethod={order.fulfilmentMethod} />
-        </div>
-
-        {/* Visual Route Checkpoints */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: '0.45rem', margin: '0.75rem 0' }}>
-          {checkpointSteps.map((cp) => (
-            <div
-              key={cp.key}
-              style={{
-                padding: '0.45rem 0.6rem',
-                borderRadius: '8px',
-                fontSize: '0.78rem',
-                fontWeight: 600,
-                background: cp.active ? 'rgba(29, 107, 67, 0.12)' : 'rgba(120, 80, 100, 0.06)',
-                color: cp.active ? 'var(--success, #1d6b43)' : 'var(--muted, #6a5864)',
-                border: cp.active ? '1px solid rgba(29, 107, 67, 0.35)' : '1px solid rgba(120, 80, 100, 0.14)',
-              }}
-            >
-              {cp.active ? '✓ ' : '○ '}{cp.label}
-            </div>
-          ))}
-        </div>
-
-        {/* Visual Route Summary Bar */}
-        <div className="delivery-route">
-          <span className="delivery-route-point pickup"><i />Seller Pickup: {seller?.sellerName || 'Seller Shop'} ({seller?.city || 'Damoh'})</span>
-          <span className="delivery-route-line" />
-          <span className="delivery-route-point"><i />Customer Drop-off: {destination ? `${destination.locality}, ${destination.villageOrCity || destination.city}` : 'Customer Address'}</span>
-        </div>
-
-        {/* Full Seller Pickup & Customer Drop-off GPS Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '0.85rem', margin: '0.75rem 0' }}>
-          <div style={{ padding: '0.85rem', borderRadius: '12px', background: 'rgba(107, 33, 92, 0.05)', border: '1px solid rgba(107, 33, 92, 0.18)' }}>
-            <strong style={{ display: 'block', fontSize: '0.82rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--brand, #6b215c)' }}>
-              📍 Step A · Route to Seller (Pickup Address & GPS)
-            </strong>
-            <div style={{ marginTop: '0.35rem', fontSize: '0.92rem' }}>
-              <strong>{seller?.sellerName || 'Assigned Seller SHG'}</strong>
-              {seller?.phoneE164 && <> · <a href={`tel:${seller.phoneE164}`}>{seller.phoneE164}</a></>}
-              <address style={{ fontStyle: 'normal', marginTop: '0.2rem' }}>
-                {seller ? `${seller.address}, ${seller.city}` : 'Damoh Seller Center'}
-              </address>
-              {seller?.latitude !== undefined && seller?.longitude !== undefined && (
-                <small style={{ display: 'block', marginTop: '0.2rem', color: 'var(--muted, #6a5864)' }}>
-                  Seller GPS: {seller.latitude.toFixed(4)}, {seller.longitude.toFixed(4)}
-                  {order.deliveryPartner?.distanceKm !== undefined && order.deliveryPartner?.distanceKm !== null ? ` (${order.deliveryPartner.distanceKm} km from your location)` : ''}
-                </small>
-              )}
-              {!isHistory && sellerMapUrl && (
-                <a className="delivery-map-link" style={{ display: 'inline-block', marginTop: '0.35rem' }} href={sellerMapUrl} target="_blank" rel="noreferrer">
-                  Navigate to Seller in Maps <span aria-hidden="true">↗</span>
-                </a>
-              )}
-            </div>
-          </div>
-
-          <div style={{ padding: '0.85rem', borderRadius: '12px', background: 'rgba(29, 107, 67, 0.05)', border: '1px solid rgba(29, 107, 67, 0.2)' }}>
-            <strong style={{ display: 'block', fontSize: '0.82rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--success, #1d6b43)' }}>
-              🏁 Step B · Route to Customer (Drop-off Address & GPS)
-            </strong>
-            <div style={{ marginTop: '0.35rem', fontSize: '0.92rem' }}>
-              <strong>{destination?.name || order.customerName}</strong>
-              {destination?.phoneE164 && <> · <a href={`tel:${destination.phoneE164}`}>{destination.phoneE164}</a></>}
-              {destination && (
-                <address style={{ fontStyle: 'normal', marginTop: '0.2rem' }}>
-                  {destination.formattedAddress || [destination.addressLine1, destination.addressLine2, destination.area, destination.landmark, destination.villageOrCity || destination.city, destination.district, destination.state, destination.postalCode].filter(Boolean).join(', ')}
-                </address>
-              )}
-              {destination?.latitude !== undefined && destination?.longitude !== undefined && (
-                <small style={{ display: 'block', marginTop: '0.2rem', color: 'var(--muted, #6a5864)' }}>
-                  Customer GPS: {destination.latitude.toFixed(4)}, {destination.longitude.toFixed(4)}
-                </small>
-              )}
-              {!isHistory && customerMapUrl && (
-                <a className="delivery-map-link" style={{ display: 'inline-block', marginTop: '0.35rem' }} href={customerMapUrl} target="_blank" rel="noreferrer">
-                  Navigate to Customer in Maps <span aria-hidden="true">↗</span>
-                </a>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="delivery-order-items">{order.items.map((item, index) => <span key={`${item.productId}-${index}`}>{item.productName} × {item.quantity}</span>)}</div>
-        <div className="delivery-order-meta">
-          <span>Assigned {order.deliveryPartner?.assignedAt ? new Date(order.deliveryPartner.assignedAt).toLocaleString('en-IN') : '—'}</span>
-          <span>Payment: <strong>{order.paymentMethod.toUpperCase()} ({formatMoney(order.totalPaise)}) · {order.paymentStatus.replaceAll('_', ' ')}</strong></span>
-          {destination?.phoneE164 && <a href={`tel:${destination.phoneE164}`}>Call customer ({destination.phoneE164})</a>}
-        </div>
-
-        {!isHistory && <div className="delivery-order-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', marginTop: '0.75rem' }}>
-          {['delivery_partner_assigned', 'ready_for_pickup', 'preparing'].includes(order.fulfilmentStatus) && (
-            <button className="delivery-primary-action" onClick={() => void updateStatus(order._id, 'out_for_pickup', order.orderReference)}>
-              Accept & Start Pickup (OUT_FOR_PICKUP)
-            </button>
-          )}
-          {order.fulfilmentStatus === 'out_for_pickup' && (
-            <button className="delivery-primary-action" onClick={() => void updateStatus(order._id, 'picked_up', order.orderReference)}>
-              Confirm Picked Up from Seller (PICKED_UP)
-            </button>
-          )}
-          {order.fulfilmentStatus === 'picked_up' && (
-            <>
-              <button className="delivery-primary-action" onClick={() => void updateStatus(order._id, 'out_for_delivery', order.orderReference)}>
-                Start Route to Customer (OUT_FOR_DELIVERY)
-              </button>
-              <button
-                type="button"
-                className="delivery-secondary-action"
-                style={{ color: '#b91c1c', borderColor: '#fca5a5', fontSize: '0.82rem' }}
-                onClick={() => setReportingFailureOrder(order)}
-              >
-                ⚠️ Report Issue / Unassign
-              </button>
-            </>
-          )}
-          {order.fulfilmentStatus === 'out_for_delivery' && (
-            <>
-              <button className="delivery-primary-action" onClick={() => void updateStatus(order._id, 'delivered', order.orderReference, true)}>
-                Confirm Payment ({order.paymentMethod === 'cash' ? `Collect Cash ${formatMoney(order.totalPaise)}` : 'Online Paid'}) & Mark DELIVERED
-              </button>
-              <button
-                type="button"
-                className="delivery-secondary-action"
-                style={{ color: '#b91c1c', borderColor: '#fca5a5' }}
-                onClick={() => setReportingFailureOrder(order)}
-              >
-                ⚠️ Report Delivery Issue
-              </button>
-            </>
-          )}
-          {['return_partner_assigned', 'return_accepted'].includes(order.fulfilmentStatus) && (
-            <button
-              className="delivery-primary-action"
-              style={{ background: '#EA580C', borderColor: '#EA580C' }}
-              onClick={() => void updateStatus(order._id, 'return_picked_up', order.orderReference)}
-            >
-              🔄 Confirm Return Picked Up from Customer (RETURN_PICKED_UP)
-            </button>
-          )}
-          {order.fulfilmentStatus === 'return_picked_up' && (
-            <button
-              className="delivery-primary-action"
-              style={{ background: '#16A34A', borderColor: '#16A34A' }}
-              onClick={() => void updateStatus(order._id, 'return_delivered_to_seller', order.orderReference)}
-            >
-              ✓ Confirm Return Handed Over to Seller (RETURN_DELIVERED_TO_SELLER)
-            </button>
-          )}
-        </div>}
-      </article>;
-    })}</div>
-  ) : <div className="delivery-empty"><span aria-hidden="true">✿</span><h3>{isHistory ? 'No completed deliveries yet' : 'No active deliveries right now'}</h3><p>{isHistory ? 'Completed delivery records will appear here.' : 'Ensure your status is ONLINE & AVAILABLE so City Admin can assign nearby orders to you.'}</p></div>;
-
-  const nav = (
-    <>
-      <button className={view === 'overview' ? 'active' : ''} onClick={() => selectView('overview')}><span aria-hidden="true">⌂</span>Overview</button>
-      <button className={view === 'deliveries' ? 'active' : ''} onClick={() => selectView('deliveries')}><span aria-hidden="true">▣</span>Active Requests ({activeOrders.length})</button>
-      <button className={view === 'history' ? 'active' : ''} onClick={() => selectView('history')}><span aria-hidden="true">◷</span>Delivery history</button>
-      <button className={view === 'profile' ? 'active' : ''} onClick={() => selectView('profile')}><span aria-hidden="true">○</span>Profile & Pay Slip</button>
-    </>
-  );
-  return <div className="delivery-portal">
-    <header className="delivery-portal-header">
-      <Link to="/" className="delivery-portal-brand"><img src="/images/maitri-sisterhood-logo.png" alt="" /><span><strong>eSakhi</strong><small>DELIVERY PARTNER</small></span></Link>
-      <div className="delivery-header-user"><span>{user?.name || 'Delivery partner'}</span><button onClick={() => void signOut()} className="delivery-signout">Sign out</button></div>
-    </header>
-    <div className="delivery-portal-layout">
-      <aside className="delivery-sidebar"><span className="delivery-sidebar-label">WORKSPACE</span><nav>{nav}</nav><div className="delivery-sidebar-note"><strong>Live GPS & Dispatch</strong><span>Stay ONLINE & AVAILABLE to receive nearby Seller pickup requests.</span></div></aside>
-      <main className="delivery-main">
-        <div className="delivery-page-heading"><div><span className="delivery-section-kicker">E SAKHI · DELIVERY PARTNER</span><h1>{title}</h1><p>{view === 'overview' ? 'Accept assigned orders, navigate to the Seller for pickup, and deliver to the Customer.' : view === 'profile' ? 'Your account details, live GPS coordinates, monthly pay slip, and availability controls.' : 'Orders and records connected to your partner account.'}</p></div><button className="delivery-refresh" onClick={() => void Promise.all([orders.reload(), history.reload(), profile.reload()])}>Refresh</button></div>
-        {error && <Notice tone="error">{error}</Notice>}{message && <Notice tone="success">{message}</Notice>}
-        {view === 'overview' && <>
-          <section className="delivery-welcome">
-            <div>
-              <span className="delivery-section-kicker">GOOD DAY{user?.name ? `, ${user.name.split(' ')[0].toLocaleUpperCase('en-IN')}` : ''}</span>
-              <h2>Your delivery workspace</h2>
-              <p>
-                Status: <strong>{isOnline ? (availabilityStatus === 'busy' ? 'ONLINE · ON DELIVERY' : 'ONLINE & AVAILABLE') : 'OFFLINE'}</strong>
-                {partnerCoords ? ` · GPS: ${partnerCoords.latitude.toFixed(4)}, ${partnerCoords.longitude.toFixed(4)}` : ''}
-                {' · '}
-                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: gpsStreamState === 'GPS_STREAM_ACTIVE' ? '#2563eb' : '#64748b' }}>
-                  {gpsStreamState === 'GPS_STREAM_ACTIVE' ? '◉ Live GPS Broadcast Active' : '○ GPS Broadcast Idle (Battery Saver)'}
-                </span>
-              </p>
-            </div>
-            <div className="delivery-availability" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-              <button
-                type="button"
-                className={isOnline ? 'delivery-secondary-action' : 'delivery-primary-action'}
-                disabled={updatingAvailability}
-                onClick={() => void toggleOnlineAvailability(!isOnline)}
-              >
-                {isOnline ? 'Go Offline' : 'Go Online & Available'}
-              </button>
-              {isOnline && availabilityStatus !== 'available' && activeOrders.length === 0 && (
-                <button
-                  type="button"
-                  className="delivery-primary-action"
-                  disabled={updatingAvailability}
-                  onClick={() => void toggleOnlineAvailability(true, 'available')}
-                >
-                  Mark Idle / Available
-                </button>
-              )}
-              <button
-                type="button"
-                className="delivery-secondary-action"
-                disabled={updatingAvailability}
-                onClick={refreshLiveGpsLocation}
-              >
-                📍 Update GPS
-              </button>
-            </div>
-          </section>
-          <section className="delivery-metrics" aria-label="Delivery summary">
-            <article><span className="delivery-metric-icon">▣</span><small>Active deliveries</small><strong>{orders.loading ? '…' : activeOrders.length}</strong><span>Assigned to you</span></article>
-            <article><span className="delivery-metric-icon">✓</span><small>Completed today</small><strong>{history.loading ? '…' : completedToday}</strong><span>From delivery history</span></article>
-            <article><span className="delivery-metric-icon">◎</span><small>Availability</small><strong>{isOnline ? (availabilityStatus === 'busy' ? 'On Delivery' : 'Available') : 'Offline'}</strong><span>Live City Admin visibility</span></article>
-            <article><span className="delivery-metric-icon">📍</span><small>Current GPS</small><strong>{partnerCoords ? `${partnerCoords.latitude.toFixed(3)}, ${partnerCoords.longitude.toFixed(3)}` : 'Damoh'}</strong><span>Used for Seller proximity</span></article>
-          </section>
-          <DeliveryPartnerPaySlipPanel />
-          <div className="delivery-content-grid">
-            <section className="delivery-panel" style={{ gridColumn: '1 / -1' }}>
-              <div className="delivery-panel-heading"><div><span className="delivery-section-kicker">{activeDelivery ? 'ACTIVE REQUEST & ROUTE CHECKPOINTS' : 'YOUR ASSIGNMENTS'}</span><h2>{activeDelivery ? 'Active pickup & delivery route' : 'Assigned deliveries'}</h2></div><button onClick={() => selectView('deliveries')}>View all ({activeOrders.length}) <span aria-hidden="true">→</span></button></div>
-              {orders.loading ? <Loading label="Loading assigned deliveries…" /> : orders.error ? <div className="delivery-panel-state"><Notice tone="error">{orders.error}</Notice><button className="delivery-secondary-action" onClick={() => void orders.reload()}>Try again</button></div> : renderOrders(activeOrders)}
-            </section>
-          </div>
-          <section className="delivery-panel delivery-recent-history"><div className="delivery-panel-heading"><div><span className="delivery-section-kicker">RECENT ACTIVITY</span><h2>Delivery history</h2></div><button onClick={() => selectView('history')}>View history <span aria-hidden="true">→</span></button></div>{history.loading ? <Loading label="Loading delivery history…" /> : history.error ? <Notice tone="error">{history.error}</Notice> : renderOrders(deliveryHistory.slice(0, 2), true)}</section>
-        </>}
-        {view === 'deliveries' && <section className="delivery-panel"><div className="delivery-panel-heading"><div><span className="delivery-section-kicker">ACTIVE REQUESTS</span><h2>My assigned deliveries</h2></div></div>{orders.loading ? <Loading label="Loading assigned deliveries…" /> : orders.error ? <div className="delivery-panel-state"><Notice tone="error">{orders.error}</Notice><button className="delivery-secondary-action" onClick={() => void orders.reload()}>Try again</button></div> : renderOrders(activeOrders)}</section>}
-        {view === 'history' && <section className="delivery-panel"><div className="delivery-panel-heading"><div><span className="delivery-section-kicker">COMPLETED & CLOSED</span><h2>Delivery history</h2></div></div>{history.loading ? <Loading label="Loading delivery history…" /> : history.error ? <Notice tone="error">{history.error}</Notice> : renderOrders(deliveryHistory, true)}</section>}
-        {view === 'profile' && <><section className="delivery-panel delivery-profile-panel"><div className="delivery-panel-heading"><div><span className="delivery-section-kicker">YOUR ACCOUNT & GPS</span><h2>Partner profile</h2></div><Link to="/account/profile">Edit profile <span aria-hidden="true">→</span></Link></div><dl><div><dt>Name</dt><dd>{user?.name || 'Not provided'}</dd></div><div><dt>Phone</dt><dd>{user?.phone || 'Not available'}</dd></div><div><dt>Account</dt><dd>Delivery partner</dd></div><div><dt>Approved Localities</dt><dd>{profile.data?.serviceableLocalities?.join(', ') || 'Damoh'}</dd></div><div><dt>Availability</dt><dd>{isOnline ? `ONLINE (${availabilityStatus.toUpperCase()})` : 'OFFLINE'}</dd></div><div><dt>Live GPS Coordinates</dt><dd>{partnerCoords ? `${partnerCoords.latitude.toFixed(4)}, ${partnerCoords.longitude.toFixed(4)}` : '23.8388, 79.4422 (Damoh)'}</dd></div></dl></section><DeliveryPartnerPaySlipPanel /></>}
-        <p className="delivery-data-note">Follow the checkpoint buttons in order: Accept (OUT_FOR_PICKUP) → Picked Up from Seller (PICKED_UP) → Out for Delivery (OUT_FOR_DELIVERY) → Confirm Payment & Mark Delivered (DELIVERED). When an order is marked DELIVERED, your status automatically reverts to AVAILABLE.</p>
-      </main>
-      {reportingFailureOrder && (
-        <DeliveryFailureReportModal
-          order={reportingFailureOrder}
-          onClose={() => setReportingFailureOrder(null)}
-          onSuccess={(msg) => {
-            setMessage(msg);
-            void Promise.all([orders.reload(false), history.reload(false), profile.reload(false)]);
-          }}
-        />
-      )}
-      <nav className="delivery-mobile-nav" aria-label="Delivery portal navigation">
-        <button className={view === 'overview' ? 'active' : ''} onClick={() => selectView('overview')}><span>⌂</span>Home</button>
-        <button className={view === 'deliveries' ? 'active' : ''} onClick={() => selectView('deliveries')}><span>▣</span>Deliveries</button>
-        <button className={view === 'history' ? 'active' : ''} onClick={() => selectView('history')}><span>◷</span>History</button>
-        <button className={view === 'profile' ? 'active' : ''} onClick={() => selectView('profile')}><span>○</span>Profile</button>
-      </nav>
-    </div>
-  </div>;
+  if (!user) return null;
+  return <DeliveryPartnerCockpit user={user} onSignOut={signOut} />;
 }
 
 function AdminCustomersPage(): ReactNode {

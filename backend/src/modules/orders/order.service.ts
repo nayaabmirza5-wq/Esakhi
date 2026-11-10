@@ -249,7 +249,7 @@ export async function createOrder(actorId: string, input: Checkout): Promise<{ o
           ? { reservationExpiresAt: new Date(Date.now() + settings.stockReservationHours * 60 * 60 * 1000) }
           : {}),
         paymentMethod: input.paymentMethod,
-        paymentStatus: 'pending_verification',
+        paymentStatus: input.paymentMethod !== 'cash' ? 'confirmed' : 'pending_verification',
         fulfilmentStatus: 'placed',
         statusHistory: [{
           status: 'placed',

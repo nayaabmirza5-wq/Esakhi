@@ -5,6 +5,7 @@ import { SwipeToConfirmSlider } from './SwipeToConfirmSlider';
 import { DynamicUpiQrModal } from './DynamicUpiQrModal';
 import { HubRemittanceModal } from './HubRemittanceModal';
 import { DeliveryFailureReportModal } from '../../DeliveryEscalationSystem';
+import { DeliveryPartnerPaySlipPanel } from '../../ReturnDisputeSystem';
 
 interface DeliveryPartnerCockpitProps {
   user: User;
@@ -15,7 +16,7 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
   user,
   onSignOut,
 }) => {
-  const [activeTab, setActiveTab] = useState<'focus' | 'all' | 'history'>('focus');
+  const [activeTab, setActiveTab] = useState<'focus' | 'all' | 'history' | 'payslip'>('focus');
   const [orders, setOrders] = useState<Order[]>([]);
   const [historyOrders, setHistoryOrders] = useState<Order[]>([]);
   const [profile, setProfile] = useState<PartnerProfile | null>(null);
@@ -294,10 +295,13 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
             🛵
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
               <strong style={{ fontSize: '0.96rem', letterSpacing: '-0.01em', color: '#ffffff' }}>
                 {profile?.name || user.name || 'Delivery Partner'}
               </strong>
+              <span style={{ fontSize: '0.74rem', color: '#fbcfe8', fontWeight: 600 }}>
+                ({user.phone || user.phoneE164 || profile?.phoneE164})
+              </span>
               <span style={{ fontSize: '0.68rem', backgroundColor: '#dcfce7', color: '#15803d', fontWeight: 800, padding: '0.1rem 0.4rem', borderRadius: '4px' }}>
                 ✓ Fleet
               </span>
@@ -674,6 +678,31 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
             <span>📜</span>
             <span>History</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('payslip')}
+            style={{
+              flex: 1,
+              padding: '0.6rem 0.4rem',
+              borderRadius: '10px',
+              border: 'none',
+              backgroundColor: activeTab === 'payslip' ? '#ffffff' : 'transparent',
+              fontWeight: activeTab === 'payslip' ? 800 : 600,
+              fontSize: '0.82rem',
+              color: activeTab === 'payslip' ? '#0f172a' : '#64748b',
+              cursor: 'pointer',
+              boxShadow: activeTab === 'payslip' ? '0 2px 6px rgba(0,0,0,0.08)' : 'none',
+              transition: 'all 0.15s ease',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.35rem',
+            }}
+          >
+            <span>💰</span>
+            <span>Pay Slip</span>
+          </button>
         </div>
 
         {/* TAB 1: FOCUS MODE (ACTIVE DELIVERY) */}
@@ -694,9 +723,12 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
                 <h3 style={{ fontSize: '1.25rem', fontWeight: 900, color: '#0f172a', margin: '0.35rem 0' }}>
                   No Active Deliveries Right Now
                 </h3>
-                <p style={{ fontSize: '0.88rem', color: '#64748b', maxWidth: '420px', margin: '0.5rem auto 1.25rem', lineHeight: 1.5 }}>
+                <p style={{ fontSize: '0.88rem', color: '#64748b', maxWidth: '420px', margin: '0.5rem auto 0.75rem', lineHeight: 1.5 }}>
                   You are currently <strong>{isOnline ? 'ONLINE & READY FOR DISPATCH' : 'OFFLINE'}</strong> in Damoh. When an artisan marks an order ready, it will instantly alert your phone.
                 </p>
+                <div style={{ display: 'inline-block', background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '0.4rem 0.85rem', marginBottom: '1.25rem', fontSize: '0.8rem', color: '#334155' }}>
+                  Signed in as: <strong>{user.name || 'Delivery Partner'}</strong> · <strong>{user.phone || user.phoneE164 || profile?.phoneE164}</strong>
+                </div>
                 {!isOnline && (
                   <button
                     type="button"
@@ -1287,6 +1319,13 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* TAB 4: EARNINGS & PAYSLIP */}
+        {activeTab === 'payslip' && (
+          <div style={{ marginTop: '0.5rem' }}>
+            <DeliveryPartnerPaySlipPanel />
           </div>
         )}
       </main>

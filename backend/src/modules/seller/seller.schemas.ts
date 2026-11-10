@@ -25,6 +25,7 @@ export const sellerOnboardingSchema = z.object({
     accountNumber: z.string().trim().regex(/^\d{9,18}$/, 'Bank account number must be between 9 and 18 digits.'),
     ifscCode: z.string().trim().toUpperCase().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'Enter a valid 11-character IFSC code.'),
     accountType: z.enum(['SAVINGS', 'CURRENT']).default('SAVINGS'),
+    upiId: z.string().trim().max(120).optional().or(z.literal('')),
   }),
   supplierDetails: z.object({
     shgCode: z.string().trim().toUpperCase().optional().or(z.literal('')),

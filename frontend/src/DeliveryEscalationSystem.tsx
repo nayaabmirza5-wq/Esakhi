@@ -362,7 +362,65 @@ export const CityAdminDeliveryEscalationQueue: React.FC<EscalationQueueProps> = 
       o.fulfilmentStatus === 'delivery_failed'
   );
 
-  if (escalatedOrders.length === 0) return null;
+  if (escalatedOrders.length === 0) {
+    return (
+      <section
+        style={{
+          background: '#f0fdf4',
+          border: '2px solid #86efac',
+          borderRadius: '14px',
+          padding: '1.25rem 1.5rem',
+          marginBottom: '1.5rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px',
+        }}
+      >
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '24px',
+                height: '24px',
+                borderRadius: '50%',
+                backgroundColor: '#16a34a',
+                color: '#ffffff',
+                fontWeight: 800,
+                fontSize: '0.85rem',
+              }}
+            >
+              ✓
+            </span>
+            <strong style={{ color: '#14532d', fontSize: '1rem' }}>
+              Road Delivery Fleet Clear · Zero Unresolved Road Exceptions
+            </strong>
+            <span
+              style={{
+                background: '#dcfce7',
+                color: '#166534',
+                border: '1px solid #86efac',
+                padding: '2px 8px',
+                borderRadius: 999,
+                fontSize: '11px',
+                fontWeight: 800,
+              }}
+            >
+              2-Fail Auto-RTO Shield Active
+            </span>
+          </div>
+          <p style={{ margin: '6px 0 0', color: '#166534', fontSize: '0.84rem', lineHeight: 1.4 }}>
+            All assigned deliveries are proceeding normally. If a customer is unreachable for &ge; 2 delivery attempts, the autonomous 2-Fail Auto-RTO engine triggers automatic return to seller without manual mediation.
+          </p>
+        </div>
+        <span style={{ fontSize: '26px' }}>🛵</span>
+      </section>
+    );
+  }
 
   return (
     <section

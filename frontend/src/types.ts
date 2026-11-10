@@ -247,6 +247,10 @@ export interface User {
   };
   savedAddresses?: Address[];
   bankAccount?: CustomerBankAccount;
+  residentialAddress?: string;
+  aadhaarNumber?: string;
+  compensationRate?: string;
+  payerText?: string;
 }
 
 export interface PartnerProfile {
@@ -535,8 +539,22 @@ export interface SellerOrder {
   orderReference: string;
   fulfilmentMethod: 'delivery' | 'pickup';
   fulfilmentStatus: string;
+  paymentMethod?: string;
   paymentStatus: 'pending_verification' | 'confirmed' | 'rejected' | 'refunded';
-  items: Array<{ productName: string; quantity: number; lineTotalPaise: number }>;
+  totalPaise?: number;
+  deliveryFeePaise?: number;
+  customerName?: string;
+  customerPhoneE164?: string;
+  address?: OrderAddressSnapshot;
+  sellerPickup?: { sellerName?: string; phoneE164?: string; address?: string; city?: string; latitude?: number; longitude?: number };
+  deliveryOtp?: string;
+  items: Array<{
+    productName: string;
+    quantity: number;
+    unitPricePaise?: number;
+    lineTotalPaise: number;
+    variantAttributes?: Record<string, string>;
+  }>;
   deliveryPartner?: { name: string; phoneE164?: string; distanceKm?: number; estimatedPickupEtaMinutes?: number; assignedAt?: string };
   preDispatchInspection?: PreDispatchInspection;
   returnRequest?: OrderReturnRequest;
@@ -644,6 +662,7 @@ export interface Locality {
   name: string;
   postalCodes: string[];
   deliveryFeePaise?: number;
+  coveredLocalities?: string[];
 }
 
 export interface Settings {
@@ -738,6 +757,15 @@ export interface SuperAdminOrder {
   deliveryPartner?: { userId?: string; name: string; phoneE164?: string; distanceKm?: number | null; assignedAt?: string };
   preDispatchInspection?: PreDispatchInspection;
   returnRequest?: OrderReturnRequest;
+  doorstepPayment?: {
+    mode?: 'cash' | 'upi_qr' | 'prepaid_online' | string;
+    upiUtr?: string;
+    collectedAmountPaise?: number;
+    collectedAt?: string;
+    remittedToCityAdmin?: boolean;
+    remittedAt?: string;
+    remittedReceiptNumber?: string;
+  };
 }
 
 export interface SuperAdminCitySummary {
@@ -789,6 +817,9 @@ export interface CityAdminDashboard {
     deliveredToday: number;
     ordersNeedingAction: number;
     paymentsToReview: number;
+    activeDeliveryPartners?: number;
+    partnerApplications?: number;
+    openSupportTickets?: number;
   };
   ordersByStatus: Array<{ status: string; count: number }>;
   ordersOverTime: Array<{ day: string; count: number }>;
@@ -807,6 +838,15 @@ export interface CityAdminServiceZones {
   city: string;
   state?: string;
   configured: boolean;
+  assignedAdministrator?: {
+    name: string;
+    phoneE164: string;
+    status: string;
+    role: string;
+    assignedCity: string;
+  };
+  activeRidersCount?: number;
+  standardDeliveryFeePaise?: number;
   eligiblePartnersTracked?: boolean;
   zones: Array<{
     name: string;
@@ -817,6 +857,48 @@ export interface CityAdminServiceZones {
     eligiblePartnerCount: number | null;
     status: 'active' | 'disabled';
   }>;
+}
+
+export interface CityAdminProfileData {
+  profile: {
+    id: string;
+    name: string;
+    phoneE164: string;
+    email: string | null;
+    assignedCity: string;
+    residentialAddress: string;
+    aadhaarNumber: string;
+    status: 'active' | 'disabled';
+    role: 'city_admin';
+    createdAt: string;
+  };
+  bankAccount: {
+    accountHolderName: string;
+    accountNumber: string;
+    bankName: string;
+    ifscCode: string;
+    upiId: string | null;
+    verified: boolean;
+  };
+  compensation: {
+    payer: string;
+    rateText: string;
+    grossSalesPaise: number;
+    totalCommissionEarnedPaise: number;
+    totalDisbursedPaise: number;
+    currentPayableBalancePaise: number;
+    completedOrdersCount: number;
+    payoutHistory: Array<{
+      id: string;
+      payoutReference: string;
+      amountPaise: number;
+      paidAt: string;
+      paymentMethod: string;
+      transactionReference: string | null;
+      status: string;
+    }>;
+  };
+  lockNotice: string;
 }
 
 export interface CityAdminSeller {
@@ -935,6 +1017,15 @@ export interface CityAdminOrder {
   returnRequest?: OrderReturnRequest;
   statusHistory?: Array<{ status: string; changedAt: string; note?: string }>;
   paymentEvents?: Array<{ status: string; createdAt: string; note?: string }>;
+  doorstepPayment?: {
+    mode?: 'cash' | 'upi_qr' | 'prepaid_online' | string;
+    upiUtr?: string;
+    collectedAmountPaise?: number;
+    collectedAt?: string;
+    remittedToCityAdmin?: boolean;
+    remittedAt?: string;
+    remittedReceiptNumber?: string;
+  };
   createdAt: string;
 }
 
@@ -1264,7 +1355,170 @@ export type SellerProductDraft = {
   slugEdited: boolean;
   description: string;
   price: string;
+  basePrice?: string;
   stock: string;
   lowStockThreshold: string;
   imageUrl: string;
 };
+
+export interface SupportTicketItem {
+  _id: string;
+  ticketReference: string;
+  city: string;
+  cityAdminId: string;
+  cityAdminName: string;
+  cityAdminPhone: string;
+  category: 'seller_dispute' | 'delivery_dispute' | 'customer_claim' | 'payout_query' | 'policy_help' | 'other';
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  status: 'open' | 'under_review' | 'action_taken' | 'resolved' | 'closed';
+  relatedOrderReference?: string;
+  relatedParty?: {
+    partyType: 'seller' | 'delivery_partner' | 'customer';
+    name?: string;
+    phoneE164?: string;
+  };
+  subject: string;
+  description: string;
+  superAdminResolution?: {
+    resolvedBy?: string;
+    resolvedByName?: string;
+    resolvedAt?: string;
+    decisionNote?: string;
+    actionTaken?: string;
+  };
+  timeline: Array<{
+    senderRole: 'city_admin' | 'super_admin';
+    senderName: string;
+    message: string;
+    timestamp: string;
+  }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CityAdminSettlementItem {
+  cityAdminId: string;
+  cityAdminName: string;
+  phoneE164: string;
+  email?: string | null;
+  city: string;
+  ordersHandledCount: number;
+  grossCitySalesPaise: number;
+  commissionPaise: number;
+  penaltyDeductionsPaise: number;
+  alreadyDisbursedPaise: number;
+  netLockedPayablePaise: number;
+  bankAccount: {
+    accountHolderName: string;
+    accountNumberMasked: string;
+    ifscCode: string;
+    bankName: string;
+    upiId?: string;
+    isPending?: boolean;
+  };
+  recentDisbursements: Array<{
+    payoutReference: string;
+    netPaidPaise: number;
+    utrReference: string;
+    disbursedAt: string;
+  }>;
+  recentOrders: Array<{
+    orderReference: string;
+    subtotalPaise: number;
+    cityAdminCommissionPaise: number;
+    createdAt: string;
+  }>;
+}
+
+export interface SellerPayoutSettlementItem {
+  sellerId: string;
+  sellerName: string;
+  representative: string;
+  phoneE164: string;
+  city: string;
+  unitsSold: number;
+  grossSalesPaise: number;
+  commissionDeductionsPaise: number;
+  grossArtisanSharePaise: number;
+  penaltyDeductionsPaise: number;
+  alreadyDisbursedPaise: number;
+  netLockedPayablePaise: number;
+  bankAccount: {
+    accountHolderName: string;
+    accountNumberMasked: string;
+    ifscCode: string;
+    bankName: string;
+    upiId?: string;
+    isPending?: boolean;
+  };
+  recentDisbursements: Array<{
+    payoutReference: string;
+    netPaidPaise: number;
+    utrReference: string;
+    disbursedAt: string;
+  }>;
+  recentOrders: Array<{
+    orderReference: string;
+    itemTotalPaise: number;
+    productName: string;
+  }>;
+}
+
+export interface PartnerPayoutSettlementItem {
+  partnerId: string;
+  partnerName: string;
+  phoneE164: string;
+  city: string;
+  tripsCompleted: number;
+  grossEarningsPaise: number;
+  penaltyDeductionsPaise: number;
+  alreadyDisbursedPaise: number;
+  netLockedPayablePaise: number;
+  bankAccount: {
+    accountHolderName: string;
+    accountNumberMasked: string;
+    ifscCode: string;
+    bankName: string;
+    upiId?: string;
+    isPending?: boolean;
+  };
+  recentDisbursements: Array<{
+    payoutReference: string;
+    netPaidPaise: number;
+    utrReference: string;
+    disbursedAt: string;
+  }>;
+  recentDeliveries: Array<{
+    orderReference: string;
+    deliveryFeePaise: number;
+    createdAt: string;
+  }>;
+}
+
+export interface PayoutRecordItem {
+  _id: string;
+  payoutReference: string;
+  beneficiaryType: 'city_admin' | 'seller' | 'delivery_partner';
+  beneficiaryId: string;
+  beneficiaryName: string;
+  beneficiaryPhone: string;
+  city: string;
+  grossAmountPaise: number;
+  commissionPaise: number;
+  penaltyDeductionsPaise: number;
+  netPaidPaise: number;
+  bankAccountSnapshot: {
+    accountHolderName?: string;
+    accountNumberMasked?: string;
+    ifscCode?: string;
+    bankName?: string;
+    upiId?: string;
+  };
+  paymentMethod: 'upi_intent' | 'bank_transfer' | 'razorpay_manual';
+  utrReference: string;
+  status: 'disbursed' | 'settled';
+  disbursedBy: string;
+  disbursedByName: string;
+  disbursedAt: string;
+  notes?: string;
+}
