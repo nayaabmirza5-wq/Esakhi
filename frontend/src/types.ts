@@ -546,7 +546,7 @@ export interface SellerOrder {
   customerName?: string;
   customerPhoneE164?: string;
   address?: OrderAddressSnapshot;
-  sellerPickup?: { sellerName?: string; phoneE164?: string; address?: string; city?: string; latitude?: number; longitude?: number };
+  sellerPickup?: { sellerName?: string; phoneE164?: string; address?: string; city?: string; latitude?: number; longitude?: number; enrolmentId?: string; panNumber?: string };
   deliveryOtp?: string;
   items: Array<{
     productName: string;

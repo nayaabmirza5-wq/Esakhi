@@ -679,8 +679,9 @@ export const listCityAdminFailedDeliveries: RequestHandler = async (req, res) =>
   const filter: Record<string, any> = {
     'address.city': cityFilter(city),
     $or: [
-      { deliveryStatus: { $in: ['DELIVERY_FAILED', 'ESCALATED_TO_ADMIN'] } },
-      { fulfilmentStatus: 'delivery_failed' },
+      { deliveryStatus: { $in: ['DELIVERY_FAILED', 'ESCALATED_TO_ADMIN', 'RETURN_TO_ORIGIN'] } },
+      { fulfilmentStatus: { $in: ['delivery_failed', 'return_partner_assigned', 'return_picked_up', 'return_delivered_to_seller'] } },
+      { 'deliveryExceptions.0': { $exists: true } },
     ],
   };
 

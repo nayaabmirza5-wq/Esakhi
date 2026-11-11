@@ -22,16 +22,16 @@ export const REASON_CODE_LABELS: Record<DeliveryExceptionReasonCode, string> = {
 };
 
 export const REQUESTED_ACTION_LABELS: Record<RiderRequestedAction, string> = {
-  UNASSIGN_ME: 'Unassign Me & Escalate to City Admin',
-  RETRY_LATER: 'I Will Retry Delivery Later',
-  CANCEL_ORDER: 'Customer Requested Full Cancellation',
+  RETRY_LATER: 'Return Package to Seller — Reassign to Me as Return Pickup (I am Online)',
+  UNASSIGN_ME: 'I am Offline / Vehicle Issue — Auto-Assign Nearby Online Partner for Return',
+  CANCEL_ORDER: 'Customer Refused / Cancelled — Auto-Return Package to Seller',
 };
 
 export const RESOLUTION_ACTION_LABELS: Record<AdminResolutionAction, string> = {
   REASSIGN_NEW_RIDER: 'Reassign to New Delivery Partner',
   REASSIGN_SAME_RIDER: 'Instruct Same Partner to Retry Delivery',
   RESCHEDULE_LATER: 'Reschedule Delivery for Later (Ready for Pickup)',
-  TRIGGER_RTO: 'Trigger Return To Origin (RTO)',
+  TRIGGER_RTO: 'Autonomous Return To Origin (RTO — Return Pickup)',
 };
 
 /* ============================================================================
@@ -52,7 +52,7 @@ export const DeliveryFailureReportModal: React.FC<DeliveryFailureReportModalProp
   const [reasonCode, setReasonCode] = useState<DeliveryExceptionReasonCode>('CUSTOMER_UNAVAILABLE');
   const [reasonNotes, setReasonNotes] = useState('');
   const [proofImageUrl, setProofImageUrl] = useState('');
-  const [riderRequestedAction, setRiderRequestedAction] = useState<RiderRequestedAction>('UNASSIGN_ME');
+  const [riderRequestedAction, setRiderRequestedAction] = useState<RiderRequestedAction>('RETRY_LATER');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -74,8 +74,8 @@ export const DeliveryFailureReportModal: React.FC<DeliveryFailureReportModalProp
 
       const message =
         riderRequestedAction === 'UNASSIGN_ME'
-          ? `Delivery failure recorded for #${order.orderReference}. You have been unassigned and order is escalated to City Admin.`
-          : `Delivery failure recorded for #${order.orderReference} (${REQUESTED_ACTION_LABELS[riderRequestedAction]}).`;
+          ? `✓ Delivery failure recorded for #${order.orderReference}. Nearest ONLINE delivery partner has been automatically assigned for Return Pickup to Seller.`
+          : `✓ Delivery failure recorded for #${order.orderReference}. Order automatically converted to Return Pickup and assigned to return to Seller!`;
 
       onSuccess(message);
       onClose();
@@ -220,7 +220,7 @@ export const DeliveryFailureReportModal: React.FC<DeliveryFailureReportModalProp
                 marginBottom: '0.4rem',
               }}
             >
-              Requested Action from Rider <span style={{ color: '#dc2626' }}>*</span>
+              Auto-Return Pickup Assignment <span style={{ color: '#dc2626' }}>*</span>
             </label>
             <select
               required
@@ -235,18 +235,18 @@ export const DeliveryFailureReportModal: React.FC<DeliveryFailureReportModalProp
                 background: '#f8fafc',
               }}
             >
-              <option value="UNASSIGN_ME">
-                Unassign Me & Escalate to City Admin (Rider released to AVAILABLE)
-              </option>
               <option value="RETRY_LATER">
-                I Will Retry Delivery Later (Keep order assigned to me)
+                Return Package to Seller — Reassign to Me as Return Pickup (I am Online)
+              </option>
+              <option value="UNASSIGN_ME">
+                I am Offline / Vehicle Issue — Auto-Assign Nearby Online Partner for Return
               </option>
               <option value="CANCEL_ORDER">
-                Customer Requested Cancellation (Return package to Seller)
+                Customer Refused / Cancelled — Auto-Return Package to Seller
               </option>
             </select>
             <small style={{ display: 'block', marginTop: '0.35rem', color: '#64748b', fontSize: '0.8rem' }}>
-              Selecting &quot;Unassign Me&quot; will immediately free you up so you can take other deliveries while City Admin handles this issue.
+              If you are ONLINE, the order automatically switches to Return Pickup assigned to you. If you are OFFLINE or select nearby replacement, the nearest online partner is assigned automatically without manual City Admin work.
             </small>
           </div>
 
@@ -359,7 +359,12 @@ export const CityAdminDeliveryEscalationQueue: React.FC<EscalationQueueProps> = 
     (o) =>
       o.deliveryStatus === 'DELIVERY_FAILED' ||
       o.deliveryStatus === 'ESCALATED_TO_ADMIN' ||
-      o.fulfilmentStatus === 'delivery_failed'
+      o.deliveryStatus === 'RETURN_TO_ORIGIN' ||
+      o.fulfilmentStatus === 'delivery_failed' ||
+      o.fulfilmentStatus === 'return_partner_assigned' ||
+      o.fulfilmentStatus === 'return_picked_up' ||
+      o.fulfilmentStatus === 'return_delivered_to_seller' ||
+      Boolean(o.deliveryExceptions && o.deliveryExceptions.length > 0)
   );
 
   if (escalatedOrders.length === 0) {
@@ -397,7 +402,7 @@ export const CityAdminDeliveryEscalationQueue: React.FC<EscalationQueueProps> = 
               ✓
             </span>
             <strong style={{ color: '#14532d', fontSize: '1rem' }}>
-              Road Delivery Fleet Clear · Zero Unresolved Road Exceptions
+              Road Delivery Fleet Clear · Zero Failed / Return Orders
             </strong>
             <span
               style={{
@@ -410,11 +415,11 @@ export const CityAdminDeliveryEscalationQueue: React.FC<EscalationQueueProps> = 
                 fontWeight: 800,
               }}
             >
-              2-Fail Auto-RTO Shield Active
+              Autonomous Return Dispatch Active
             </span>
           </div>
           <p style={{ margin: '6px 0 0', color: '#166534', fontSize: '0.84rem', lineHeight: 1.4 }}>
-            All assigned deliveries are proceeding normally. If a customer is unreachable for &ge; 2 delivery attempts, the autonomous 2-Fail Auto-RTO engine triggers automatic return to seller without manual mediation.
+            When any delivery fails, the system automatically assigns Return Pickup to the same online partner (or nearest online partner if offline) without requiring manual City Admin work.
           </p>
         </div>
         <span style={{ fontSize: '26px' }}>🛵</span>
@@ -425,12 +430,12 @@ export const CityAdminDeliveryEscalationQueue: React.FC<EscalationQueueProps> = 
   return (
     <section
       style={{
-        background: '#fff1f2',
-        border: '1px solid #fecdd3',
+        background: '#fff7ed',
+        border: '1.5px solid #fed7aa',
         borderRadius: '14px',
         padding: '1.25rem',
         marginBottom: '1.5rem',
-        boxShadow: '0 4px 6px -1px rgba(225, 29, 72, 0.05)',
+        boxShadow: '0 4px 6px -1px rgba(234, 88, 12, 0.06)',
       }}
     >
       <div
@@ -452,20 +457,20 @@ export const CityAdminDeliveryEscalationQueue: React.FC<EscalationQueueProps> = 
               width: '32px',
               height: '32px',
               borderRadius: '50%',
-              backgroundColor: '#e11d48',
+              backgroundColor: '#ea580c',
               color: '#ffffff',
               fontWeight: 800,
               fontSize: '1rem',
             }}
           >
-            !
+            🔄
           </span>
           <div>
-            <h3 style={{ margin: 0, color: '#9f1239', fontSize: '1.05rem', fontWeight: 700 }}>
-              Failed-Delivery Escalation Queue ({escalatedOrders.length})
+            <h3 style={{ margin: 0, color: '#9a3412', fontSize: '1.05rem', fontWeight: 700 }}>
+              Failed Deliveries & Autonomous Return Orders ({escalatedOrders.length})
             </h3>
-            <p style={{ margin: 0, color: '#be123c', fontSize: '0.82rem' }}>
-              These orders experienced delivery failure or rider unassignment and require City Admin review or manual reassignment.
+            <p style={{ margin: 0, color: '#c2410c', fontSize: '0.82rem' }}>
+              Automatically assigned for Return Pickup (to same online partner or nearest online partner) — shown here for City Admin visibility.
             </p>
           </div>
         </div>
@@ -483,13 +488,14 @@ export const CityAdminDeliveryEscalationQueue: React.FC<EscalationQueueProps> = 
             order.deliveryExceptions && order.deliveryExceptions.length > 0
               ? order.deliveryExceptions[order.deliveryExceptions.length - 1]
               : undefined;
+          const returnPartner = order.deliveryPartner;
 
           return (
             <div
               key={order._id}
               style={{
                 background: '#ffffff',
-                border: '1px solid #fda4af',
+                border: '1px solid #fdba74',
                 borderRadius: '10px',
                 padding: '1rem',
                 display: 'flex',
@@ -504,33 +510,39 @@ export const CityAdminDeliveryEscalationQueue: React.FC<EscalationQueueProps> = 
                     justifyContent: 'space-between',
                     alignItems: 'flex-start',
                     marginBottom: '0.5rem',
+                    gap: '0.5rem',
                   }}
                 >
                   <Link
                     to={`/city-admin/orders/${order._id}`}
-                    style={{ fontWeight: 700, fontSize: '0.98rem', color: '#be123c', textDecoration: 'none' }}
+                    style={{ fontWeight: 700, fontSize: '0.98rem', color: '#9a3412', textDecoration: 'none' }}
                   >
                     #{order.orderReference}
                   </Link>
                   <span
                     style={{
-                      fontSize: '0.72rem',
-                      fontWeight: 700,
-                      padding: '0.2rem 0.5rem',
-                      borderRadius: '4px',
-                      background: '#ffe4e6',
-                      color: '#9f1239',
-                      border: '1px solid #fecdd3',
+                      fontSize: '0.7rem',
+                      fontWeight: 800,
+                      padding: '0.2rem 0.55rem',
+                      borderRadius: '999px',
+                      background: '#dcfce7',
+                      color: '#166534',
+                      border: '1px solid #86efac',
                     }}
                   >
-                    {order.deliveryStatus || 'DELIVERY_FAILED'}
+                    ✓ AUTO-RETURN ({order.fulfilmentStatus.replaceAll('_', ' ').toUpperCase()})
                   </span>
                 </div>
 
                 <div style={{ fontSize: '0.85rem', color: '#334155', marginBottom: '0.5rem' }}>
                   <strong>Customer:</strong> {order.customerName} {order.customerPhoneE164 ? `(${order.customerPhoneE164})` : ''}
                   <br />
-                  <strong>Locality:</strong> {order.address?.locality || 'Not specified'}
+                  <strong>Locality:</strong> {order.address?.locality || 'Damoh'}
+                  {returnPartner && (
+                    <div style={{ marginTop: '0.35rem', padding: '0.35rem 0.6rem', background: '#f0fdf4', borderRadius: '6px', border: '1px solid #bbf7d0', color: '#14532d' }}>
+                      <strong>🛵 Return Pickup Partner:</strong> {returnPartner.name} {returnPartner.phoneE164 ? `(${returnPartner.phoneE164})` : ''}
+                    </div>
+                  )}
                 </div>
 
                 {lastException && (
@@ -545,26 +557,16 @@ export const CityAdminDeliveryEscalationQueue: React.FC<EscalationQueueProps> = 
                     }}
                   >
                     <div style={{ fontWeight: 600, color: '#dc2626' }}>
-                      Reason: {REASON_CODE_LABELS[lastException.reasonCode] || lastException.reasonCode}
-                    </div>
-                    <div style={{ color: '#475569', marginTop: '0.2rem' }}>
-                      <strong>Action requested:</strong> {REQUESTED_ACTION_LABELS[lastException.riderRequestedAction] || lastException.riderRequestedAction}
+                      Failure Reason: {REASON_CODE_LABELS[lastException.reasonCode] || lastException.reasonCode}
                     </div>
                     {lastException.reasonNotes && (
-                      <div style={{ color: '#64748b', marginTop: '0.2rem', fontStyle: 'italic' }}>
+                      <div style={{ color: '#475569', marginTop: '0.2rem', fontStyle: 'italic' }}>
                         &quot;{lastException.reasonNotes}&quot;
                       </div>
                     )}
-                    {lastException.proofImageUrl && (
-                      <div style={{ marginTop: '0.35rem' }}>
-                        <a
-                          href={lastException.proofImageUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{ color: '#2563eb', textDecoration: 'underline' }}
-                        >
-                          View Rider Proof Photo ↗
-                        </a>
+                    {order.adminResolution?.adminNotes && (
+                      <div style={{ color: '#15803d', marginTop: '0.3rem', fontWeight: 600, fontSize: '0.78rem' }}>
+                        ⚡ {order.adminResolution.adminNotes}
                       </div>
                     )}
                   </div>
@@ -577,7 +579,7 @@ export const CityAdminDeliveryEscalationQueue: React.FC<EscalationQueueProps> = 
                   style={{
                     display: 'block',
                     textAlign: 'center',
-                    background: '#be123c',
+                    background: '#ea580c',
                     color: '#ffffff',
                     fontWeight: 600,
                     fontSize: '0.84rem',
@@ -586,7 +588,7 @@ export const CityAdminDeliveryEscalationQueue: React.FC<EscalationQueueProps> = 
                     textDecoration: 'none',
                   }}
                 >
-                  Review & Reassign Rider →
+                  View Return Order Details →
                 </Link>
               </div>
             </div>

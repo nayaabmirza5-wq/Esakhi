@@ -187,7 +187,8 @@ export function SellerOrderCard({
         })
         .catch(() => undefined);
     }
-    void onTransitionStatus(order, nextStatus);
+    await onTransitionStatus(order, nextStatus);
+    if (nextStatus === 'preparing') setShowSlip(true);
   };
 
   return (
@@ -519,7 +520,7 @@ export function SellerOrderCard({
             onClick={() => setShowSlip(true)}
             style={{ fontSize: '0.84rem', padding: '0.42rem 0.8rem', background: '#f8fafc', color: '#475569', border: '1px solid #cbd5e1' }}
           >
-            🏷️ Meesho Slip & Bill
+            🏷️ Print Slip & Bill (Paste on Box)
           </button>
         </div>
 

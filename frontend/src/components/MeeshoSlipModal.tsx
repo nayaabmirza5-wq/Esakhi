@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import QRCode from 'qrcode';
 import type { SellerOrder, OrderAddressSnapshot } from '../types';
 
 interface MeeshoSlipModalProps {
@@ -9,16 +10,20 @@ interface MeeshoSlipModalProps {
   sellerPhone?: string;
 }
 
-// Convert paise to Indian English words (e.g., 79000 -> "Seven Hundred And Ninety Rupees Only")
-function paiseToWords(paise: number): string {
-  const amount = Math.floor(paise / 100);
-  if (amount === 0) return 'Zero Rupees Only';
+// Convert paise to Title Case Indian English words: "Rupees One Thousand One Hundred Forty Only"
+function paiseToRupeesWords(paise: number): string {
+  const totalRupees = Math.floor(paise / 100);
+  const remainingPaise = Math.round(paise % 100);
 
-  const units = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
-    'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  if (totalRupees === 0 && remainingPaise === 0) return 'Rupees Zero Only';
+
+  const units = [
+    '', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+    'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen',
+  ];
   const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
 
-  function convertHundreds(n: number): string {
+  function convertBelowThousand(n: number): string {
     let str = '';
     if (n >= 100) {
       str += units[Math.floor(n / 100)] + ' Hundred ';
@@ -34,157 +39,182 @@ function paiseToWords(paise: number): string {
     return str.trim();
   }
 
-  let crore = Math.floor(amount / 10000000);
-  let remainder = amount % 10000000;
-  let lakh = Math.floor(remainder / 100000);
-  remainder %= 100000;
-  let thousand = Math.floor(remainder / 1000);
-  remainder %= 1000;
-  let hundreds = remainder;
+  let amount = totalRupees;
+  const crore = Math.floor(amount / 10000000);
+  amount %= 10000000;
+  const lakh = Math.floor(amount / 100000);
+  amount %= 100000;
+  const thousand = Math.floor(amount / 1000);
+  amount %= 1000;
+  const hundreds = amount;
 
   let words = '';
-  if (crore > 0) words += convertHundreds(crore) + ' Crore ';
-  if (lakh > 0) words += convertHundreds(lakh) + ' Lakh ';
-  if (thousand > 0) words += convertHundreds(thousand) + ' Thousand ';
-  if (hundreds > 0) words += convertHundreds(hundreds) + ' ';
+  if (crore > 0) words += convertBelowThousand(crore) + ' Crore ';
+  if (lakh > 0) words += convertBelowThousand(lakh) + ' Lakh ';
+  if (thousand > 0) words += convertBelowThousand(thousand) + ' Thousand ';
+  if (hundreds > 0) words += convertBelowThousand(hundreds) + ' ';
 
-  return (words.trim() + ' Rupees Only').toUpperCase();
+  let result = 'Rupees ' + words.trim();
+  if (remainingPaise > 0) {
+    result += ' And ' + convertBelowThousand(remainingPaise) + ' Paise';
+  }
+  return result + ' Only';
 }
 
-// Smart HSN code assignment based on craft product categories
-function getHsnCode(name: string): string {
-  const lower = (name || '').toLowerCase();
-  if (lower.includes('dupatta') || lower.includes('shawl') || lower.includes('stole')) return '621410';
-  if (lower.includes('saree') || lower.includes('cotton') || lower.includes('fabric')) return '520842';
-  if (lower.includes('bamboo') || lower.includes('tokri') || lower.includes('basket')) return '460211';
-  if (lower.includes('terracotta') || lower.includes('diya') || lower.includes('pot') || lower.includes('clay')) return '691200';
-  if (lower.includes('soap') || lower.includes('mitti') || lower.includes('herbal')) return '340111';
-  if (lower.includes('papad') || lower.includes('achar') || lower.includes('pickle') || lower.includes('spices')) return '210690';
-  if (lower.includes('clutch') || lower.includes('bag') || lower.includes('purse')) return '420222';
-  return '621400';
+// Format currency in Indian style: ₹1,150.00
+function formatInr(paise: number): string {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format((paise || 0) / 100);
 }
 
-// Crisp pure SVG Code-128 style optical barcode generator
-function SvgBarcode({ value, height = 48 }: { value: string; height?: number }) {
-  // Deterministic bar widths based on character codes
-  const bars: Array<{ width: number; isBlack: boolean }> = [];
-  bars.push({ width: 3, isBlack: true });
-  bars.push({ width: 2, isBlack: false });
-  bars.push({ width: 2, isBlack: true });
+// Format date as DD-MMM-YYYY (e.g., 11-Nov-2026)
+function formatBillDate(dateInput?: string | Date): string {
+  const d = dateInput ? new Date(dateInput) : new Date();
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = months[d.getMonth()] || 'Nov';
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
+}
 
-  for (let i = 0; i < value.length; i++) {
-    const code = value.charCodeAt(i);
-    const b1 = (code % 3) + 1;
-    const s1 = ((code >> 1) % 3) + 1;
-    const b2 = ((code >> 2) % 3) + 1;
-    const s2 = ((code >> 3) % 2) + 1;
-    bars.push({ width: b1, isBlack: true });
-    bars.push({ width: s1, isBlack: false });
-    bars.push({ width: b2, isBlack: true });
-    bars.push({ width: s2, isBlack: false });
+// Official ISO/IEC 15417 Code-128B symbol patterns (values 0..106)
+const CODE128_PATTERNS = [
+  '11011001100', '11001101100', '11001100110', '10010011000', '10010001100', '10001001100', '10011001000', '10011000100',
+  '10001100100', '11001001000', '11001000100', '11000100100', '10110011100', '10011011100', '10011001110', '10111001100',
+  '10011101100', '10011100110', '11001110010', '11001011100', '11001001110', '11011100100', '11001110100', '11101101110',
+  '11101001100', '11100101100', '11100100110', '11101100100', '11100110100', '11100110010', '11011011000', '11011000110',
+  '11000110110', '10100011000', '10001011000', '10001000110', '10110001000', '10001101000', '10001100010', '11010001000',
+  '11000101000', '11000100010', '10110111000', '10110001110', '10001101110', '10111011000', '10111000110', '10001110110',
+  '11101110110', '11010001110', '11000101110', '11011101000', '11011100010', '11011101110', '11101011000', '11101000110',
+  '11100010110', '11101101000', '11101100010', '11100011010', '11101111010', '11001000010', '11110001010', '10100110000',
+  '10100001100', '10010110000', '10010000110', '10000101100', '10000100110', '10110010000', '10110000100', '10011010000',
+  '10011000010', '10000110100', '10000110010', '11000010010', '11001010000', '11110111010', '11000010100', '10001111010',
+  '10100111100', '10010111100', '10010011110', '10111100100', '10011110100', '10011110010', '11110100100', '11110010100',
+  '11110010010', '11011011110', '11011110110', '11110110110', '10101111000', '10100011110', '10001011110', '10111101000',
+  '10111100010', '11110101000', '11110100010', '10111011110', '10111101110', '11101011110', '11110101110', '11010000100',
+  '11010010000', '11010011100', '1100011101011',
+];
+
+// Real ISO/IEC 15417 Code-128B Optical Retail Barcode SVG
+function SvgBarcode({
+  value,
+  height = 38,
+  width = 185,
+  label,
+  onInspect,
+}: {
+  value: string;
+  height?: number;
+  width?: number;
+  label?: string;
+  onInspect?: () => void;
+}) {
+  // Encode using Code 128 Set B (Start Code B = 104)
+  const clean = value.replace(/[^\x20-\x7E]/g, '') || 'BOS2026';
+  let checksum = 104;
+  let bitString = '0000000000' + CODE128_PATTERNS[104]; // 10-module quiet zone + Start B
+
+  for (let i = 0; i < clean.length; i++) {
+    const codeVal = clean.charCodeAt(i) - 32;
+    const clamped = Math.max(0, Math.min(94, codeVal));
+    checksum += clamped * (i + 1);
+    bitString += CODE128_PATTERNS[clamped];
   }
 
-  bars.push({ width: 3, isBlack: true });
-  bars.push({ width: 1, isBlack: false });
-  bars.push({ width: 4, isBlack: true });
+  const checkSymbol = checksum % 103;
+  bitString += CODE128_PATTERNS[checkSymbol];
+  bitString += CODE128_PATTERNS[106]; // Stop pattern (13 modules)
+  bitString += '0000000000'; // Trailing quiet zone
 
-  const totalWidth = bars.reduce((sum, b) => sum + b.width, 0);
+  const totalModules = bitString.length;
 
-  let currentX = 0;
   return (
-    <div style={{ textAlign: 'center', margin: '4px 0' }}>
+    <div
+      style={{ display: 'inline-block', textAlign: 'center', cursor: onInspect ? 'pointer' : 'default' }}
+      onClick={onInspect}
+      title={`Click or scan with a Code-128 barcode scanner: ${clean}`}
+    >
       <svg
-        viewBox={`0 0 ${totalWidth} ${height}`}
-        style={{ width: '100%', maxWidth: '280px', height: `${height}px`, display: 'inline-block' }}
+        viewBox={`0 0 ${totalModules} ${height}`}
+        style={{ width: `${width}px`, height: `${height}px`, display: 'block', background: '#ffffff' }}
         preserveAspectRatio="none"
+        shapeRendering="crispEdges"
       >
-        {bars.map((bar, idx) => {
-          const x = currentX;
-          currentX += bar.width;
-          if (!bar.isBlack) return null;
-          return (
-            <rect
-              key={idx}
-              x={x}
-              y={0}
-              width={bar.width}
-              height={height}
-              fill="#000000"
-            />
-          );
-        })}
+        {Array.from(bitString).map((bit, idx) =>
+          bit === '1' ? <rect key={idx} x={idx} y={0} width={1} height={height} fill="#000000" /> : null,
+        )}
       </svg>
-      <div style={{ fontFamily: 'monospace', fontSize: '10px', letterSpacing: '2px', fontWeight: 700, color: '#000' }}>
-        *{value}*
+      <div
+        style={{
+          fontFamily: '"Courier New", Courier, monospace',
+          fontSize: '8.5px',
+          fontWeight: 700,
+          letterSpacing: '0.4px',
+          marginTop: '3px',
+          color: '#000',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {label || `*${clean}*`}
       </div>
     </div>
   );
 }
 
-// Crisp SVG QR Code generator
-function SvgQrCode({ text, size = 90 }: { text: string; size?: number }) {
-  // High-density deterministic 21x21 matrix with standard QR position finder squares
-  const gridSize = 21;
-  const matrix: boolean[][] = Array.from({ length: gridSize }, () => Array(gridSize).fill(false));
+// Real ISO/IEC 18004 Scannable QR Code SVG (powered by 'qrcode')
+function SvgQrCode({
+  text,
+  size = 90,
+  onInspect,
+}: {
+  text: string;
+  size?: number;
+  onInspect?: () => void;
+}) {
+  const qr = QRCode.create(text, { errorCorrectionLevel: 'M' });
+  const gridSize = qr.modules.size;
+  const data = qr.modules.data;
+  const quietZone = 2;
+  const totalView = gridSize + quietZone * 2;
 
-  // Function to place 7x7 corner finder squares
-  const placeFinder = (startX: number, startY: number) => {
-    for (let r = 0; r < 7; r++) {
-      for (let c = 0; c < 7; c++) {
-        if (
-          r === 0 || r === 6 || c === 0 || c === 6 ||
-          (r >= 2 && r <= 4 && c >= 2 && c <= 4)
-        ) {
-          matrix[startY + r][startX + c] = true;
-        }
-      }
-    }
-  };
-
-  placeFinder(0, 0); // Top-left
-  placeFinder(gridSize - 7, 0); // Top-right
-  placeFinder(0, gridSize - 7); // Bottom-left
-
-  // Timing patterns
-  for (let i = 8; i < gridSize - 8; i++) {
-    matrix[6][i] = i % 2 === 0;
-    matrix[i][6] = i % 2 === 0;
-  }
-
-  // Populate data-like pseudo modules from string hash
-  let hash = 0;
-  for (let i = 0; i < text.length; i++) {
-    hash = (hash << 5) - hash + text.charCodeAt(i);
-    hash |= 0;
-  }
-
+  const rects: React.ReactElement[] = [];
   for (let r = 0; r < gridSize; r++) {
     for (let c = 0; c < gridSize; c++) {
-      const isTopLeft = r < 8 && c < 8;
-      const isTopRight = r < 8 && c >= gridSize - 8;
-      const isBottomLeft = r >= gridSize - 8 && c < 8;
-      const isTiming = r === 6 || c === 6;
-      if (isTopLeft || isTopRight || isBottomLeft || isTiming) continue;
-
-      const seed = Math.sin(hash + r * 31 + c * 17) * 10000;
-      matrix[r][c] = (seed - Math.floor(seed)) > 0.5;
+      if (data[r * gridSize + c]) {
+        rects.push(
+          <rect key={`${r}-${c}`} x={c + quietZone} y={r + quietZone} width={1} height={1} fill="#000000" />,
+        );
+      }
     }
   }
 
   return (
-    <div style={{ textAlign: 'center' }}>
+    <div
+      style={{ display: 'inline-block', textAlign: 'center', cursor: onInspect ? 'pointer' : 'default' }}
+      onClick={onInspect}
+      title="Scan with your phone camera (Google Lens / QR Scanner) or click to preview decoded Bill of Supply data"
+    >
       <svg
-        viewBox={`0 0 ${gridSize} ${gridSize}`}
-        style={{ width: `${size}px`, height: `${size}px`, border: '1px solid #000', padding: '2px', background: '#fff' }}
+        viewBox={`0 0 ${totalView} ${totalView}`}
+        style={{
+          width: `${size}px`,
+          height: `${size}px`,
+          border: '1.5px solid #000',
+          background: '#ffffff',
+          display: 'block',
+          margin: '0 auto',
+        }}
+        shapeRendering="crispEdges"
       >
-        {matrix.map((row, r) =>
-          row.map((filled, c) =>
-            filled ? <rect key={`${r}-${c}`} x={c} y={r} width={1} height={1} fill="#000" /> : null
-          )
-        )}
+        <rect x={0} y={0} width={totalView} height={totalView} fill="#ffffff" />
+        {rects}
       </svg>
-      <div style={{ fontSize: '8px', color: '#333', fontWeight: 600, marginTop: '2px' }}>
-        SCAN TO PAY / TRACK
+      <div style={{ fontSize: '8.5px', fontWeight: 700, letterSpacing: '0.04em', marginTop: '3px', color: '#000' }}>
+        VERIFIED BILL QR
       </div>
     </div>
   );
@@ -195,97 +225,137 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
   onClose,
   sellerBusinessName,
   sellerAddress,
-  sellerPhone,
 }) => {
-  const [slipMode, setSlipMode] = useState<'combo' | 'label_only' | 'invoice_only'>('combo');
+  const ref = order.orderReference || 'OD42981039481';
+  const formattedDate = formatBillDate(order.createdAt);
+  const year = order.createdAt ? new Date(order.createdAt).getFullYear() : 2026;
+  const shortNumericHash = String(
+    Math.abs(
+      ref.split('').reduce((acc: number, ch: string) => acc * 31 + ch.charCodeAt(0), 7),
+    ) % 9000 + 1000,
+  );
+  const invoiceNo = `BOS-${year}-${shortNumericHash}`;
 
-  const ref = order.orderReference || 'ES-SAMPLE-ORDER';
-  const orderDate = order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }) : '10 Nov 2026, 11:30 PM';
+  const isCod =
+    order.paymentMethod === 'cash' ||
+    (order.paymentStatus === 'pending_verification' && order.paymentMethod !== 'upi');
+  const paymentModeText = isCod ? 'Cash on Delivery (COD)' : 'Prepaid (Online / UPI)';
 
-  const isCod = order.paymentMethod === 'cash' || (order.paymentStatus === 'pending_verification' && order.paymentMethod !== 'upi');
-  const totalPaise = order.totalPaise || order.subtotalPaise || 79000;
-  const totalRupees = (totalPaise / 100).toFixed(2);
-  const deliveryFeePaise = order.deliveryFeePaise || 4000;
+  // Seller Details (Unregistered E-Commerce Seller under Notification No. 34/2023-CT)
+  const effectiveSellerName =
+    sellerBusinessName ||
+    order.sellerPickup?.sellerName ||
+    'Maitri SHG Damoh';
+  const effectiveSellerAddress =
+    sellerAddress ||
+    order.sellerPickup?.address ||
+    'Station Road, Purana Bazar, Damoh, Madhya Pradesh - 470661';
+  const enrolmentId =
+    order.sellerPickup?.enrolmentId ||
+    '23ABCDE1234F1Z9';
+  const panNumber =
+    order.sellerPickup?.panNumber ||
+    enrolmentId.slice(2, 12) ||
+    'ABCDE1234F';
 
-  // Extract Destination Address
-  const customerName = order.customerName || order.address?.name || 'Customer';
-  const customerPhone = order.customerPhoneE164 || order.address?.phoneE164 || '+91 93198-XXXXX';
+  // Customer Details (Bill To / Ship To)
+  const customerName = order.customerName || order.address?.name || 'Valued Customer';
+  const customerPhone = order.customerPhoneE164 || order.address?.phoneE164 || '';
   const addr: OrderAddressSnapshot = order.address || {
     name: customerName,
     phoneE164: customerPhone,
-    addressLine1: 'Purana Bazar, Ward 3',
-    locality: 'Singhpur',
+    addressLine1: 'Civil Ward, Purana Bazar',
+    locality: 'Damoh',
     city: 'Damoh',
     state: 'Madhya Pradesh',
     postalCode: '470661',
   };
 
-  const fullCustomerAddress = [
+  const streetLine = [
     addr.houseNumber,
     addr.street,
     addr.addressLine1,
     addr.addressLine2,
     addr.landmark ? `Near ${addr.landmark}` : '',
     addr.locality,
-    addr.city,
-    addr.state,
-    addr.postalCode ? `- ${addr.postalCode}` : '',
-  ].filter(Boolean).join(', ');
+  ]
+    .filter(Boolean)
+    .join(', ');
 
-  const destinationPincode = addr.postalCode || '470661';
+  const cityStatePinLine = `${addr.city || 'Damoh'}, Madhya Pradesh - ${addr.postalCode || '470661'}`;
 
-  // Extract Seller / RTO Return Address
-  const effectiveSellerName = sellerBusinessName || order.sellerPickup?.sellerName || 'Maitri SHG Damoh (Artisan Collective)';
-  const effectiveSellerAddress = sellerAddress || order.sellerPickup?.address || 'Near Bada Mandir, Purana Bazar, Damoh, MP - 470661';
-  const effectiveSellerPhone = sellerPhone || order.sellerPickup?.phoneE164 || '+91 99597-05392';
+  // Line Items
+  const rawItems =
+    order.items && order.items.length > 0
+      ? order.items
+      : [
+          {
+            productName: 'Handcrafted Artisan SHG Product',
+            quantity: 1,
+            unitPricePaise: order.subtotalPaise || 75000,
+            lineTotalPaise: order.subtotalPaise || 75000,
+          },
+        ];
 
-  // Compute GST splits (5% total handicraft GST: 2.5% CGST + 2.5% SGST intra-state)
-  const items = (order.items && order.items.length > 0)
-    ? order.items
-    : [{ productName: 'Handcrafted Bridal Dupatta (Zari Red)', quantity: 1, lineTotalPaise: totalPaise - deliveryFeePaise, unitPricePaise: totalPaise - deliveryFeePaise }];
+  let computedSubtotalPaise = 0;
+  const lineRows = rawItems.map((it: any, idx: number) => {
+    const qty = it.quantity || 1;
+    const lineTotalPaise =
+      it.lineTotalPaise || (it.unitPricePaise ? it.unitPricePaise * qty : 75000);
+    const unitPricePaise = it.unitPricePaise || Math.round(lineTotalPaise / qty);
+    computedSubtotalPaise += lineTotalPaise;
 
-  let cumulativeTaxablePaise = 0;
-  let cumulativeCgstPaise = 0;
-  let cumulativeSgstPaise = 0;
-
-  const itemRows = items.map((it: any, idx: number) => {
-    const grossPaise = it.lineTotalPaise || (it.unitPricePaise ? it.unitPricePaise * it.quantity : 75000);
-    // 5% inclusive GST formula: Taxable = Gross / 1.05
-    const taxablePaise = Math.round(grossPaise / 1.05);
-    const taxPaise = grossPaise - taxablePaise;
-    const cgstPaise = Math.round(taxPaise / 2);
-    const sgstPaise = taxPaise - cgstPaise;
-
-    cumulativeTaxablePaise += taxablePaise;
-    cumulativeCgstPaise += cgstPaise;
-    cumulativeSgstPaise += sgstPaise;
+    const variantText =
+      it.variantAttributes && Object.keys(it.variantAttributes).length > 0
+        ? ` (${Object.entries(it.variantAttributes)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(', ')})`
+        : '';
 
     return {
-      sNo: idx + 1,
-      name: it.productName,
-      hsn: getHsnCode(it.productName),
-      qty: it.quantity || 1,
-      unitPrice: ((it.unitPricePaise || Math.round(grossPaise / (it.quantity || 1))) / 100).toFixed(2),
-      taxableVal: (taxablePaise / 100).toFixed(2),
-      cgstRate: '2.5%',
-      cgstAmt: (cgstPaise / 100).toFixed(2),
-      sgstRate: '2.5%',
-      sgstAmt: (sgstPaise / 100).toFixed(2),
-      total: (grossPaise / 100).toFixed(2),
+      sNo: `${idx + 1}.`,
+      description: `${it.productName}${variantText}`,
+      qty,
+      unitPricePaise,
+      lineTotalPaise,
     };
   });
 
-  const grandTotalPaise = cumulativeTaxablePaise + cumulativeCgstPaise + cumulativeSgstPaise + deliveryFeePaise;
-  const invoiceNumber = `INV-${new Date().getFullYear()}-${ref.replace(/[^A-Za-z0-9]/g, '').slice(-8).toUpperCase()}`;
+  const subtotalPaise = computedSubtotalPaise;
+  const discountPaise = order.discountPaise || 0;
+  const shippingPaise = order.deliveryFeePaise ?? 0;
+  const grandTotalPaise = order.totalPaise || (subtotalPaise - discountPaise + shippingPaise);
 
-  const triggerPrint = () => {
-    window.print();
+  const [scanPreview, setScanPreview] = useState<'qr' | 'barcode' | null>(null);
+
+  const itemsSummaryText = lineRows
+    .map((r: { qty: number; description: string; lineTotalPaise: number }) => `${r.qty}x ${r.description} (${formatInr(r.lineTotalPaise)})`)
+    .join(', ');
+
+  // Scannable QR Code Payload (human-readable verified receipt when scanned with any phone camera / Google Lens)
+  const qrVerificationPayload = [
+    '=== eSAKHI VERIFIED BILL OF SUPPLY ===',
+    `Invoice No: ${invoiceNo}`,
+    `Order ID: ${ref}`,
+    `Date: ${formattedDate}`,
+    `Seller: ${effectiveSellerName}`,
+    `Enrolment ID: ${enrolmentId} | PAN: ${panNumber}`,
+    `Place of Supply: Madhya Pradesh (23) [Intra-State]`,
+    `Customer: ${customerName}`,
+    `Items: ${itemsSummaryText}`,
+    `Grand Total: ${formatInr(grandTotalPaise)} (GST 0% - Exempt u/s 34/2023-CT)`,
+    `Payment: ${paymentModeText}`,
+    'Status: AUTHENTICATED PACKAGE PROOF SLIP',
+  ].join('\n');
+
+  const doubleRule: React.CSSProperties = {
+    borderTop: '3px double #000000',
+    margin: '10px 0',
+  };
+
+  const dashedRule: React.CSSProperties = {
+    borderTop: '1.5px dashed #000000',
+    margin: '8px 0',
   };
 
   return (
@@ -297,92 +367,61 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
         inset: 0,
         zIndex: 99999,
         background: 'rgba(15, 23, 42, 0.75)',
-        backdropFilter: 'blur(5px)',
+        backdropFilter: 'blur(4px)',
         overflowY: 'auto',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        padding: '1.5rem 1rem',
+        padding: '1.25rem 0.75rem',
       }}
       onClick={onClose}
     >
-      {/* Control Navigation Header (Screen only, completely omitted from print) */}
+      {/* Screen Action Bar (Hidden when printing) */}
       <div
         className="meesho-modal-controls"
         style={{
           width: '100%',
-          maxWidth: '840px',
+          maxWidth: '760px',
           background: '#ffffff',
           borderRadius: '12px 12px 0 0',
-          padding: '0.85rem 1.25rem',
+          padding: '0.75rem 1.25rem',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
           borderBottom: '2px solid #e2e8f0',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+          boxSizing: 'border-box',
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <span style={{ fontSize: '1.25rem', fontWeight: 800, color: '#6b215c', letterSpacing: '-0.02em' }}>
-            eSakhi Meesho-Style Slip
+        <div>
+          <strong style={{ fontSize: '1rem', color: '#6b215c', display: 'block' }}>
+            Bill of Supply · Package Proof Slip
+          </strong>
+          <span style={{ fontSize: '0.76rem', color: '#64748b' }}>
+            Scan QR / Barcode with phone camera or click them below to preview decoded verification data
           </span>
-          <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: '8px', padding: '3px' }}>
-            <button
-              type="button"
-              onClick={() => setSlipMode('combo')}
-              style={{
-                border: 'none',
-                padding: '4px 10px',
-                borderRadius: '6px',
-                fontSize: '12px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                background: slipMode === 'combo' ? '#6b215c' : 'transparent',
-                color: slipMode === 'combo' ? '#ffffff' : '#475569',
-              }}
-            >
-              2-in-1 Combo (A4)
-            </button>
-            <button
-              type="button"
-              onClick={() => setSlipMode('label_only')}
-              style={{
-                border: 'none',
-                padding: '4px 10px',
-                borderRadius: '6px',
-                fontSize: '12px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                background: slipMode === 'label_only' ? '#6b215c' : 'transparent',
-                color: slipMode === 'label_only' ? '#ffffff' : '#475569',
-              }}
-            >
-              Shipping Label (4×6")
-            </button>
-            <button
-              type="button"
-              onClick={() => setSlipMode('invoice_only')}
-              style={{
-                border: 'none',
-                padding: '4px 10px',
-                borderRadius: '6px',
-                fontSize: '12px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                background: slipMode === 'invoice_only' ? '#6b215c' : 'transparent',
-                color: slipMode === 'invoice_only' ? '#ffffff' : '#475569',
-              }}
-            >
-              Tax Invoice Only
-            </button>
-          </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <button
             type="button"
-            onClick={triggerPrint}
+            onClick={() => setScanPreview((prev) => (prev === 'qr' ? null : 'qr'))}
+            style={{
+              background: scanPreview ? '#6b215c' : '#f3e8ff',
+              color: scanPreview ? '#ffffff' : '#6b215c',
+              border: '1px solid #d8b4fe',
+              padding: '0.5rem 0.9rem',
+              borderRadius: '8px',
+              fontWeight: 700,
+              fontSize: '12.5px',
+              cursor: 'pointer',
+            }}
+          >
+            📱 {scanPreview ? 'Hide Scan Output' : 'What Scans Show'}
+          </button>
+          <button
+            type="button"
+            onClick={() => window.print()}
             style={{
               background: '#047857',
               color: '#ffffff',
@@ -395,10 +434,9 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              boxShadow: '0 2px 8px rgba(4, 120, 87, 0.3)',
             }}
           >
-            🖨️ Print Slip (Ctrl+P)
+            🖨️ Print Bill of Supply
           </button>
           <button
             type="button"
@@ -419,450 +457,383 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
         </div>
       </div>
 
-      {/* Printable Sheet Viewport */}
+      {/* Interactive Scanner Output Inspector (Hidden when printing) */}
+      {scanPreview && (
+        <div
+          className="meesho-modal-controls"
+          style={{
+            width: '100%',
+            maxWidth: '760px',
+            background: '#0f172a',
+            color: '#f8fafc',
+            padding: '0.9rem 1.25rem',
+            boxSizing: 'border-box',
+            borderBottom: '2px solid #334155',
+            fontSize: '12px',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+            <strong style={{ color: '#38bdf8', fontSize: '12.5px' }}>
+              {scanPreview === 'qr'
+                ? '📱 QR Code Scanner Result (ISO/IEC 18004 — Phone Camera / Google Lens)'
+                : '🔫 Retail 1D Barcode Scanner Result (ISO/IEC 15417 Code-128B)'}
+            </strong>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button
+                type="button"
+                onClick={() => setScanPreview('qr')}
+                style={{
+                  background: scanPreview === 'qr' ? '#0284c7' : '#1e293b',
+                  color: '#fff',
+                  border: '1px solid #475569',
+                  borderRadius: '5px',
+                  padding: '2px 8px',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                }}
+              >
+                QR Code Output
+              </button>
+              <button
+                type="button"
+                onClick={() => setScanPreview('barcode')}
+                style={{
+                  background: scanPreview === 'barcode' ? '#0284c7' : '#1e293b',
+                  color: '#fff',
+                  border: '1px solid #475569',
+                  borderRadius: '5px',
+                  padding: '2px 8px',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                }}
+              >
+                1D Barcode Output
+              </button>
+            </div>
+          </div>
+          {scanPreview === 'qr' ? (
+            <pre
+              style={{
+                margin: 0,
+                padding: '8px 10px',
+                background: '#1e293b',
+                borderRadius: '6px',
+                color: '#a7f3d0',
+                fontFamily: '"Courier New", Courier, monospace',
+                fontSize: '11.5px',
+                lineHeight: 1.45,
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+              {qrVerificationPayload}
+            </pre>
+          ) : (
+            <div
+              style={{
+                padding: '8px 10px',
+                background: '#1e293b',
+                borderRadius: '6px',
+                color: '#fde68a',
+                fontFamily: '"Courier New", Courier, monospace',
+                fontSize: '12px',
+              }}
+            >
+              <div>
+                <strong>Top Retail Slip Barcode (Code-128B):</strong> Decodes to Order ID{' '}
+                <code style={{ color: '#fff', fontWeight: 700 }}>{ref}</code>
+              </div>
+              <div style={{ marginTop: '4px' }}>
+                <strong>Bottom Invoice Barcode (Code-128B):</strong> Decodes to Bill of Supply No{' '}
+                <code style={{ color: '#fff', fontWeight: 700 }}>{invoiceNo}</code>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Printable Bill of Supply Sheet */}
       <div
         id="meesho-printable-sheet"
         style={{
           width: '100%',
-          maxWidth: '840px',
+          maxWidth: '760px',
           background: '#ffffff',
           color: '#000000',
-          fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-          padding: '20px 24px',
+          fontFamily: '"Courier New", Courier, "Liberation Mono", monospace',
+          padding: '24px 28px',
           boxShadow: '0 12px 30px rgba(0,0,0,0.25)',
           borderRadius: '0 0 12px 12px',
           boxSizing: 'border-box',
+          border: '2px solid #000000',
+          fontSize: '12.5px',
+          lineHeight: 1.45,
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* ========================================================================= */}
-        {/* SECTION 1: MEESHO SHIPPING LABEL (TOP HALF - PASTED ON OUTER BOX)          */}
-        {/* ========================================================================= */}
-        {(slipMode === 'combo' || slipMode === 'label_only') && (
-          <div
-            className="meesho-shipping-label"
-            style={{
-              border: '2px solid #000000',
-              padding: '12px 14px',
-              marginBottom: slipMode === 'combo' ? '14px' : '0',
-              background: '#ffffff',
-              fontSize: '11px',
-              lineHeight: 1.35,
-            }}
-          >
-            {/* Top Bar: Carrier Brand + Routing + Huge PIN */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1.4fr 1.6fr 1fr',
-                borderBottom: '2px solid #000000',
-                paddingBottom: '8px',
-                alignItems: 'center',
-                gap: '8px',
-              }}
-            >
-              <div>
-                <div style={{ fontSize: '18px', fontWeight: 900, letterSpacing: '-0.03em' }}>
-                  eSakhi
-                </div>
-                <div style={{ fontSize: '9px', fontWeight: 800, textTransform: 'uppercase', color: '#111' }}>
-                  Express Logistics · Rural SHG Network
-                </div>
-              </div>
+        {/* ================================================================== */}
+        {/* TOP HEADER WITH RETAIL BARCODE, BILL OF SUPPLY TITLE, AND QR CODE  */}
+        {/* ================================================================== */}
+        <div style={doubleRule} />
 
-              <div style={{ textAlign: 'center', borderLeft: '1px solid #000', borderRight: '1px solid #000', padding: '0 8px' }}>
-                <div style={{ fontSize: '9px', fontWeight: 700, color: '#333' }}>HUB ROUTING CODE</div>
-                <div style={{ fontSize: '15px', fontWeight: 900, letterSpacing: '0.05em' }}>MP-DAM-HUB01</div>
-                <div style={{ fontSize: '8.5px', color: '#444' }}>Standard Surface · Hyperlocal</div>
-              </div>
-
-              <div style={{ textAlign: 'center', background: '#000000', color: '#ffffff', padding: '4px 6px', borderRadius: '4px' }}>
-                <div style={{ fontSize: '8px', fontWeight: 700, letterSpacing: '0.05em' }}>DESTINATION PIN</div>
-                <div style={{ fontSize: '20px', fontWeight: 900, letterSpacing: '1px' }}>{destinationPincode}</div>
-              </div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '215px 1fr 110px',
+            alignItems: 'center',
+            gap: '12px',
+            padding: '4px 0',
+          }}
+        >
+          {/* Left: Brand & Retail Barcode */}
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ fontWeight: 900, fontSize: '14px', letterSpacing: '0.05em', marginBottom: '4px', fontFamily: 'Arial, sans-serif' }}>
+              eSAKHI RETAIL SLIP
             </div>
+            <SvgBarcode
+              value={ref}
+              height={36}
+              width={205}
+              label={ref}
+              onInspect={() => setScanPreview('barcode')}
+            />
+          </div>
 
-            {/* AWB Barcode & Reference */}
+          {/* Center: BILL OF SUPPLY Heading */}
+          <div style={{ textAlign: 'center' }}>
             <div
               style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr auto',
-                borderBottom: '2px solid #000000',
-                padding: '6px 0',
-                alignItems: 'center',
-                gap: '12px',
+                fontSize: '20px',
+                fontWeight: 900,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                fontFamily: 'Arial, Helvetica, sans-serif',
               }}
             >
-              <div>
-                <div style={{ fontSize: '9px', fontWeight: 800, color: '#222' }}>
-                  TRACKING NUMBER / AIR WAYBILL (AWB)
-                </div>
-                <SvgBarcode value={ref} height={42} />
-              </div>
-              <div style={{ textAlign: 'right', fontSize: '9.5px' }}>
-                <div><strong>Order Date:</strong> {orderDate}</div>
-                <div><strong>Order Ref:</strong> {ref}</div>
-                <div><strong>Logistics:</strong> eSakhi Hyperlocal</div>
-              </div>
+              BILL OF SUPPLY
             </div>
-
-            {/* Giant Meesho-Style Payment Status Box */}
-            <div
-              style={{
-                margin: '8px 0',
-                padding: '8px 12px',
-                border: '2px solid #000000',
-                background: isCod ? '#000000' : '#f1f5f9',
-                color: isCod ? '#ffffff' : '#000000',
-                textAlign: 'center',
-                borderRadius: '4px',
-              }}
-            >
-              {isCod ? (
-                <>
-                  <div style={{ fontSize: '18px', fontWeight: 900, letterSpacing: '0.04em' }}>
-                    CASH ON DELIVERY (COD): ₹ {totalRupees}
-                  </div>
-                  <div style={{ fontSize: '10px', fontWeight: 700, marginTop: '2px', opacity: 0.9 }}>
-                    ⚠️ DELIVERY AGENT: Collect exact cash of ₹{totalRupees} or scan Doorstep UPI before package handover!
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div style={{ fontSize: '17px', fontWeight: 900, letterSpacing: '0.04em' }}>
-                    PREPAID (ONLINE UPI) — DO NOT COLLECT CASH
-                  </div>
-                  <div style={{ fontSize: '10px', fontWeight: 600, color: '#334155' }}>
-                    ✓ 100% Paid Online. Verify OTP from recipient and hand over parcel without collecting payment.
-                  </div>
-                </>
-              )}
+            <div style={{ fontSize: '11.5px', fontWeight: 700, marginTop: '3px' }}>
+              (Issued by Unregistered E-Commerce Seller - No GST Charged)
             </div>
-
-            {/* Addresses Grid: Deliver To vs Return To */}
             <div
               style={{
-                display: 'grid',
-                gridTemplateColumns: '1.4fr 1fr',
-                border: '1.5px solid #000000',
-                gap: '0',
-                margin: '6px 0',
+                display: 'inline-block',
+                marginTop: '5px',
+                padding: '2px 8px',
+                border: '1px solid #000',
+                fontSize: '10.5px',
+                fontWeight: 800,
               }}
             >
-              {/* Deliver To */}
-              <div style={{ padding: '8px 10px', borderRight: '1.5px solid #000000' }}>
-                <div style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', borderBottom: '1px solid #ccc', paddingBottom: '2px', marginBottom: '4px' }}>
-                  DELIVER TO (CUSTOMER):
-                </div>
-                <div style={{ fontSize: '13px', fontWeight: 900, color: '#000' }}>{customerName}</div>
-                <div style={{ fontSize: '10.5px', marginTop: '2px', fontWeight: 500 }}>{fullCustomerAddress}</div>
-                <div style={{ fontSize: '11px', fontWeight: 800, marginTop: '4px' }}>
-                  Phone: {customerPhone}
-                </div>
-              </div>
-
-              {/* Return To */}
-              <div style={{ padding: '8px 10px', background: '#fafafa' }}>
-                <div style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', borderBottom: '1px solid #ccc', paddingBottom: '2px', marginBottom: '4px' }}>
-                  RETURN / SHIP FROM (SELLER):
-                </div>
-                <div style={{ fontSize: '11.5px', fontWeight: 800 }}>{effectiveSellerName}</div>
-                <div style={{ fontSize: '9.5px', color: '#333', marginTop: '2px' }}>{effectiveSellerAddress}</div>
-                <div style={{ fontSize: '10px', fontWeight: 700, marginTop: '4px' }}>
-                  Contact: {effectiveSellerPhone}
-                </div>
-              </div>
-            </div>
-
-            {/* Package Manifest & QR Code Row */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr auto',
-                borderTop: '1px solid #000000',
-                paddingTop: '6px',
-                alignItems: 'center',
-                gap: '12px',
-              }}
-            >
-              <div>
-                <div style={{ fontSize: '9px', fontWeight: 800, textTransform: 'uppercase', marginBottom: '3px' }}>
-                  PACKAGE CONTENTS MANIFEST ({items.length} ITEM{items.length > 1 ? 'S' : ''}):
-                </div>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9.5px' }}>
-                  <thead>
-                    <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
-                      <th style={{ border: '1px solid #000', padding: '2px 4px' }}>Item Title</th>
-                      <th style={{ border: '1px solid #000', padding: '2px 4px', width: '50px' }}>Qty</th>
-                      <th style={{ border: '1px solid #000', padding: '2px 4px', width: '70px', textAlign: 'right' }}>Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.map((it: any, idx: number) => (
-                      <tr key={idx}>
-                        <td style={{ border: '1px solid #000', padding: '2px 4px' }}>{it.productName}</td>
-                        <td style={{ border: '1px solid #000', padding: '2px 4px', fontWeight: 800 }}>{it.quantity}</td>
-                        <td style={{ border: '1px solid #000', padding: '2px 4px', textAlign: 'right', fontWeight: 800 }}>
-                          ₹{((it.lineTotalPaise || 75000) / 100).toFixed(2)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div style={{ fontSize: '8.5px', color: '#555', marginTop: '3px' }}>
-                  Weight: 0.45 kg · Verified Rural Artisan Handcraft Goods
-                </div>
-              </div>
-
-              <div>
-                <SvgQrCode text={`upi://pay?pa=esakhi.shg@sbi&pn=eSakhi&am=${totalRupees}&tr=${ref}`} size={70} />
-              </div>
+              PAYMENT: {paymentModeText.toUpperCase()}
             </div>
           </div>
-        )}
 
-        {/* ========================================================================= */}
-        {/* CENTER PERFORATION / FOLD LINE                                            */}
-        {/* ========================================================================= */}
-        {slipMode === 'combo' && (
-          <div
-            className="meesho-perforation-divider"
-            style={{
-              textAlign: 'center',
-              borderTop: '2px dashed #666666',
-              margin: '18px 0',
-              position: 'relative',
-              fontSize: '9.5px',
-              fontWeight: 800,
-              color: '#444444',
-              letterSpacing: '1px',
-            }}
-          >
-            <span
-              style={{
-                position: 'relative',
-                top: '-10px',
-                background: '#ffffff',
-                padding: '0 12px',
-              }}
-            >
-              ✂ FOLD OR CUT HERE (Top: Paste on Parcel · Bottom: Place Inside / Hand to Buyer) ✂
-            </span>
+          {/* Right: Retail Verification QR */}
+          <div style={{ textAlign: 'right' }}>
+            <SvgQrCode
+              text={qrVerificationPayload}
+              size={88}
+              onInspect={() => setScanPreview('qr')}
+            />
           </div>
-        )}
+        </div>
 
-        {/* ========================================================================= */}
-        {/* SECTION 2: TAX INVOICE & RETAIL BILL OF SUPPLY (BOTTOM HALF)               */}
-        {/* ========================================================================= */}
-        {(slipMode === 'combo' || slipMode === 'invoice_only') && (
-          <div
-            className="meesho-tax-invoice"
-            style={{
-              border: '2px solid #000000',
-              padding: '12px 14px',
-              background: '#ffffff',
-              fontSize: '10.5px',
-              lineHeight: 1.35,
-            }}
-          >
-            {/* Invoice Heading & Metadata */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1.8fr 1.2fr',
-                borderBottom: '2px solid #000000',
-                paddingBottom: '8px',
-                alignItems: 'flex-start',
-                gap: '12px',
-              }}
-            >
-              <div>
-                <div style={{ fontSize: '13px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  TAX INVOICE / RETAIL BILL OF SUPPLY
-                </div>
-                <div style={{ fontSize: '9px', fontWeight: 700, color: '#333' }}>
-                  (Original for Recipient · Inter-state/Intra-state Supply Under Rule 46 of CGST Rules)
-                </div>
-                <div style={{ fontSize: '10px', marginTop: '4px' }}>
-                  <strong>eSakhi E-Commerce Platform</strong> · Empowering Rural Artisan SHGs
-                </div>
-              </div>
+        <div style={doubleRule} />
 
-              <div style={{ fontSize: '9.5px', textAlign: 'right' }}>
-                <div><strong>Invoice No:</strong> {invoiceNumber}</div>
-                <div><strong>Invoice Date:</strong> {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
-                <div><strong>Order ID:</strong> {ref}</div>
-                <div><strong>Place of Supply:</strong> MADHYA PRADESH (Code 23)</div>
-                <div><strong>Reverse Charge:</strong> No</div>
-              </div>
+        {/* ================================================================== */}
+        {/* SELLER DETAILS (LEFT) & INVOICE / ORDER METADATA (RIGHT)           */}
+        {/* ================================================================== */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1.15fr 1fr',
+            gap: '16px',
+            padding: '4px 0 8px',
+          }}
+        >
+          {/* Left Column */}
+          <div>
+            <div>
+              <strong>Seller Name:</strong> {effectiveSellerName}
             </div>
-
-            {/* Seller & Customer Tax Details */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                borderBottom: '1.5px solid #000000',
-                gap: '12px',
-                padding: '6px 0',
-              }}
-            >
-              <div>
-                <div style={{ fontSize: '9.5px', fontWeight: 900, textTransform: 'uppercase', color: '#111', borderBottom: '1px solid #ccc', paddingBottom: '1px' }}>
-                  SOLD BY (ARTISAN SUPPLIER):
-                </div>
-                <div style={{ fontSize: '11px', fontWeight: 900, marginTop: '2px' }}>{effectiveSellerName}</div>
-                <div style={{ fontSize: '9px' }}>{effectiveSellerAddress}</div>
-                <div style={{ fontSize: '9px' }}>Contact: {effectiveSellerPhone}</div>
-                <div style={{ fontSize: '9px', fontWeight: 700, marginTop: '2px' }}>
-                  GSTIN / NRLM Enrolment: 23AAICA7618B1ZE · MP State Code 23
-                </div>
-              </div>
-
-              <div>
-                <div style={{ fontSize: '9.5px', fontWeight: 900, textTransform: 'uppercase', color: '#111', borderBottom: '1px solid #ccc', paddingBottom: '1px' }}>
-                  BILLING & SHIPPING ADDRESS:
-                </div>
-                <div style={{ fontSize: '11px', fontWeight: 900, marginTop: '2px' }}>{customerName}</div>
-                <div style={{ fontSize: '9px' }}>{fullCustomerAddress}</div>
-                <div style={{ fontSize: '9px' }}>Phone: {customerPhone}</div>
-                <div style={{ fontSize: '9px', fontWeight: 700, marginTop: '2px' }}>
-                  State: Madhya Pradesh (State Code 23)
-                </div>
-              </div>
+            <div>
+              <strong>Address:</strong> {effectiveSellerAddress}
             </div>
-
-            {/* Itemized GST Table */}
-            <div style={{ margin: '8px 0' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '9.5px' }}>
-                <thead>
-                  <tr style={{ background: '#f1f5f9', textAlign: 'center', fontWeight: 900 }}>
-                    <th style={{ border: '1px solid #000', padding: '4px 3px', width: '24px' }}>#</th>
-                    <th style={{ border: '1px solid #000', padding: '4px 4px', textAlign: 'left' }}>Description of Goods</th>
-                    <th style={{ border: '1px solid #000', padding: '4px 3px', width: '50px' }}>HSN</th>
-                    <th style={{ border: '1px solid #000', padding: '4px 3px', width: '28px' }}>Qty</th>
-                    <th style={{ border: '1px solid #000', padding: '4px 4px', width: '55px', textAlign: 'right' }}>Unit (₹)</th>
-                    <th style={{ border: '1px solid #000', padding: '4px 4px', width: '60px', textAlign: 'right' }}>Taxable (₹)</th>
-                    <th style={{ border: '1px solid #000', padding: '4px 3px', width: '35px' }}>CGST</th>
-                    <th style={{ border: '1px solid #000', padding: '4px 4px', width: '45px', textAlign: 'right' }}>CGST ₹</th>
-                    <th style={{ border: '1px solid #000', padding: '4px 3px', width: '35px' }}>SGST</th>
-                    <th style={{ border: '1px solid #000', padding: '4px 4px', width: '45px', textAlign: 'right' }}>SGST ₹</th>
-                    <th style={{ border: '1px solid #000', padding: '4px 4px', width: '60px', textAlign: 'right' }}>Total (₹)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {itemRows.map((r: any, i: number) => (
-                    <tr key={i} style={{ textAlign: 'center' }}>
-                      <td style={{ border: '1px solid #000', padding: '3px' }}>{r.sNo}</td>
-                      <td style={{ border: '1px solid #000', padding: '3px 4px', textAlign: 'left', fontWeight: 600 }}>{r.name}</td>
-                      <td style={{ border: '1px solid #000', padding: '3px' }}>{r.hsn}</td>
-                      <td style={{ border: '1px solid #000', padding: '3px', fontWeight: 800 }}>{r.qty}</td>
-                      <td style={{ border: '1px solid #000', padding: '3px 4px', textAlign: 'right' }}>{r.unitPrice}</td>
-                      <td style={{ border: '1px solid #000', padding: '3px 4px', textAlign: 'right' }}>{r.taxableVal}</td>
-                      <td style={{ border: '1px solid #000', padding: '3px' }}>{r.cgstRate}</td>
-                      <td style={{ border: '1px solid #000', padding: '3px 4px', textAlign: 'right' }}>{r.cgstAmt}</td>
-                      <td style={{ border: '1px solid #000', padding: '3px' }}>{r.sgstRate}</td>
-                      <td style={{ border: '1px solid #000', padding: '3px 4px', textAlign: 'right' }}>{r.sgstAmt}</td>
-                      <td style={{ border: '1px solid #000', padding: '3px 4px', textAlign: 'right', fontWeight: 800 }}>{r.total}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div>
+              <strong>Enrolment ID:</strong> {enrolmentId}
             </div>
-
-            {/* Financial Summary & Amount in Words */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1.4fr 1fr',
-                border: '1.5px solid #000000',
-                gap: '0',
-                margin: '6px 0',
-              }}
-            >
-              <div style={{ padding: '8px 10px', borderRight: '1.5px solid #000000', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                <div>
-                  <div style={{ fontSize: '9px', fontWeight: 800, textTransform: 'uppercase', color: '#333' }}>
-                    AMOUNT IN WORDS:
-                  </div>
-                  <div style={{ fontSize: '10.5px', fontWeight: 900, color: '#000', marginTop: '2px' }}>
-                    {paiseToWords(grandTotalPaise)}
-                  </div>
-                </div>
-
-                <div style={{ marginTop: '8px', borderTop: '1px solid #ddd', paddingTop: '4px', fontSize: '8.5px', color: '#444' }}>
-                  <div><strong>Customer Grievance & Support:</strong> +91 76270 49855 | support@esakhi.in</div>
-                  <div><strong>Return Window:</strong> 7 days return eligible with original packaging intact.</div>
-                </div>
-              </div>
-
-              <div style={{ padding: '8px 10px', fontSize: '10px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                  <span>Taxable Value:</span>
-                  <strong>₹ {(cumulativeTaxablePaise / 100).toFixed(2)}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                  <span>CGST (2.5%):</span>
-                  <span>₹ {(cumulativeCgstPaise / 100).toFixed(2)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                  <span>SGST (2.5%):</span>
-                  <span>₹ {(cumulativeSgstPaise / 100).toFixed(2)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                  <span>Delivery Charges:</span>
-                  <span>₹ {(deliveryFeePaise / 100).toFixed(2)}</span>
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    borderTop: '2px solid #000000',
-                    paddingTop: '4px',
-                    marginTop: '4px',
-                    fontSize: '13px',
-                    fontWeight: 900,
-                  }}
-                >
-                  <span>GRAND TOTAL:</span>
-                  <span>₹ {(grandTotalPaise / 100).toFixed(2)}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Handover & Legal Footer */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1.4fr 1fr',
-                borderTop: '1.5px solid #000000',
-                paddingTop: '6px',
-                marginTop: '6px',
-                alignItems: 'flex-end',
-                gap: '12px',
-                fontSize: '9px',
-              }}
-            >
-              <div>
-                <div><strong>Delivery Mode:</strong> {isCod ? 'Cash on Delivery (COD)' : 'Prepaid Online'}</div>
-                <div><strong>Verification OTP:</strong> [{order.deliveryOtp || ' _ _ _ _ '}] Verified upon handover</div>
-                <div style={{ marginTop: '2px', color: '#555' }}>
-                  This is a computer-generated tax invoice verified under the eSakhi Digital SHG Initiative.
-                </div>
-              </div>
-
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ height: '24px' }}></div>
-                <div style={{ borderTop: '1px solid #000', display: 'inline-block', minWidth: '160px', textAlign: 'center', paddingTop: '2px', fontWeight: 700 }}>
-                  Authorized Signatory (SHG Artisan)
-                </div>
-              </div>
+            <div>
+              <strong>State Code:</strong> 23 (Madhya Pradesh)
             </div>
           </div>
-        )}
+
+          {/* Right Column */}
+          <div>
+            <div>
+              <strong>Invoice No:</strong> {invoiceNo}
+            </div>
+            <div>
+              <strong>Order ID:</strong> {ref}
+            </div>
+            <div>
+              <strong>Date:</strong> {formattedDate}
+            </div>
+            <div>
+              <strong>PAN:</strong> {panNumber}
+            </div>
+          </div>
+        </div>
+
+        {/* ================================================================== */}
+        {/* BILL TO / SHIP TO (CUSTOMER)                                       */}
+        {/* ================================================================== */}
+        <div style={{ marginTop: '6px', paddingBottom: '4px' }}>
+          <div style={{ fontWeight: 900, textDecoration: 'underline', marginBottom: '2px' }}>
+            Bill To / Ship To:
+          </div>
+          <div style={{ fontWeight: 800 }}>{customerName}</div>
+          <div>{streetLine}</div>
+          <div>{cityStatePinLine}</div>
+          {customerPhone && <div>Contact: {customerPhone}</div>}
+          <div style={{ marginTop: '3px', fontWeight: 800 }}>
+            Place of Supply: Madhya Pradesh (23) — [Intra-State Only]
+          </div>
+        </div>
+
+        {/* ================================================================== */}
+        {/* LINE ITEMS TABLE                                                   */}
+        {/* ================================================================== */}
+        <div style={dashedRule} />
+
+        <table
+          style={{
+            width: '100%',
+            borderCollapse: 'collapse',
+            fontSize: '12.5px',
+          }}
+        >
+          <thead>
+            <tr style={{ fontWeight: 900, textAlign: 'left' }}>
+              <th style={{ padding: '4px 6px 6px 0', width: '52px' }}>S.No</th>
+              <th style={{ padding: '4px 6px 6px 0' }}>Item Description</th>
+              <th style={{ padding: '4px 6px 6px 0', width: '65px', textAlign: 'center' }}>Qty</th>
+              <th style={{ padding: '4px 6px 6px 0', width: '120px', textAlign: 'right' }}>Unit Price</th>
+              <th style={{ padding: '4px 0 6px 6px', width: '125px', textAlign: 'right' }}>Amount</th>
+            </tr>
+            <tr>
+              <td colSpan={5} style={{ padding: 0 }}>
+                <div style={{ borderTop: '1.5px dashed #000000', marginBottom: '6px' }} />
+              </td>
+            </tr>
+          </thead>
+          <tbody>
+            {lineRows.map((row: any) => (
+              <tr key={row.sNo}>
+                <td style={{ padding: '4px 6px 4px 0', verticalAlign: 'top' }}>{row.sNo}</td>
+                <td style={{ padding: '4px 6px 4px 0', fontWeight: 700, verticalAlign: 'top' }}>
+                  {row.description}
+                </td>
+                <td style={{ padding: '4px 6px 4px 0', textAlign: 'center', verticalAlign: 'top' }}>
+                  {row.qty}
+                </td>
+                <td style={{ padding: '4px 6px 4px 0', textAlign: 'right', verticalAlign: 'top' }}>
+                  {formatInr(row.unitPricePaise)}
+                </td>
+                <td style={{ padding: '4px 0 4px 6px', textAlign: 'right', fontWeight: 700, verticalAlign: 'top' }}>
+                  {formatInr(row.lineTotalPaise)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div style={dashedRule} />
+
+        {/* ================================================================== */}
+        {/* SUBTOTAL, DISCOUNT, SHIPPING, GST (0%), GRAND TOTAL                */}
+        {/* ================================================================== */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ width: '280px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+              <span>Subtotal:</span>
+              <strong>{formatInr(subtotalPaise)}</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+              <span>Discount:</span>
+              <span>-{formatInr(discountPaise)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+              <span>Shipping:</span>
+              <span>{formatInr(shippingPaise)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+              <span>GST (0%):</span>
+              <span>₹0.00</span>
+            </div>
+
+            <div style={dashedRule} />
+
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                fontSize: '15px',
+                fontWeight: 900,
+                padding: '2px 0',
+              }}
+            >
+              <span>GRAND TOTAL:</span>
+              <span>{formatInr(grandTotalPaise)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div style={doubleRule} />
+
+        {/* ================================================================== */}
+        {/* AMOUNT IN WORDS & STATUTORY DECLARATION                            */}
+        {/* ================================================================== */}
+        <div style={{ margin: '8px 0', fontWeight: 800 }}>
+          Amount in Words: {paiseToRupeesWords(grandTotalPaise)}
+        </div>
+
+        <div style={{ marginTop: '12px' }}>
+          <div style={{ fontWeight: 800 }}>Declaration:</div>
+          <div style={{ fontStyle: 'italic', marginTop: '2px', lineHeight: 1.45 }}>
+            &ldquo;Certified that the seller is exempt from GST registration under Notification No. 34/2023-CT and supplies goods strictly within Madhya Pradesh. No GST has been charged on this invoice.&rdquo;
+          </div>
+        </div>
+
+        {/* ================================================================== */}
+        {/* BOTTOM BARCODE & AUTHORIZED SIGNATORY                              */}
+        {/* ================================================================== */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-end',
+            marginTop: '22px',
+            paddingTop: '6px',
+          }}
+        >
+          <div>
+            <SvgBarcode value={invoiceNo} height={30} width={160} label={`*${invoiceNo}*`} />
+            <div style={{ fontSize: '9.5px', marginTop: '3px' }}>
+              Customer Support: +91 76270-49855 | support@esakhi.in
+            </div>
+          </div>
+
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontWeight: 800 }}>Authorized Signatory</div>
+            <div style={{ fontSize: '11px' }}>(Computer Generated Document)</div>
+          </div>
+        </div>
+
+        <div style={doubleRule} />
       </div>
 
-      {/* Embedded Print CSS to guarantee clean A4 print without browser chrome or modal overlays */}
+      {/* Print-specific CSS */}
       <style>{`
         @media print {
           body * {
@@ -879,7 +850,7 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
             width: 100% !important;
             max-width: 100% !important;
             margin: 0 !important;
-            padding: 8mm !important;
+            padding: 10mm !important;
             box-shadow: none !important;
             border-radius: 0 !important;
           }
@@ -888,7 +859,7 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
           }
           @page {
             size: A4 portrait;
-            margin: 6mm;
+            margin: 8mm;
           }
         }
       `}</style>

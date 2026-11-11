@@ -1668,9 +1668,17 @@ function CustomerOrderPage(): ReactNode {
         ? 'Package picked up from Artisan Hub — en route to your locality'
         : item.fulfilmentStatus === 'out_for_delivery'
           ? 'Delivery partner is out for delivery to your doorstep'
-          : ['delivered', 'completed'].includes(item.fulfilmentStatus)
-            ? 'Handed over safely to you & delivery completed'
-            : 'Artisans are crafting and inspecting your items with care';
+          : item.fulfilmentStatus === 'delivery_failed'
+            ? '⚠️ Delivery delayed / attempt could not be completed — return pickup initiated'
+            : item.fulfilmentStatus === 'return_partner_assigned'
+              ? `🔄 Return Pickup Partner ${item.deliveryPartner?.name ?? ''} assigned to return parcel to Seller`
+              : item.fulfilmentStatus === 'return_picked_up'
+                ? `🔄 Partner ${item.deliveryPartner?.name ?? ''} is returning the parcel to Artisan SHG Hub`
+                : item.fulfilmentStatus === 'return_delivered_to_seller'
+                  ? '🏢 Parcel handed back to Artisan SHG Seller Hub'
+                  : ['delivered', 'completed'].includes(item.fulfilmentStatus)
+                    ? 'Handed over safely to you & delivery completed'
+                    : 'Artisans are crafting and inspecting your items with care';
 
   const cancel = async () => {
     if (!window.confirm('Send an administrative cancellation review request for this order?')) return;
@@ -1858,16 +1866,18 @@ function CustomerOrderPage(): ReactNode {
 
       {error && <Notice tone="error">{error}</Notice>}
 
-      {/* Celebratory Hero Card */}
+      {/* Celebratory / Status Hero Card */}
       <div
         style={{
           background: isCancelled
             ? '#FEF2F2'
             : isDelivered
               ? 'linear-gradient(135deg, #F0FDF4 0%, #ECFDF5 50%, #FAF5FF 100%)'
-              : 'linear-gradient(135deg, #FFF7ED 0%, #FDF2F8 50%, #FAF5FF 100%)',
+              : item.fulfilmentStatus === 'delivery_failed' || item.fulfilmentStatus?.startsWith('return_')
+                ? 'linear-gradient(135deg, #FFF7ED 0%, #FFEDD5 60%, #FEF2F2 100%)'
+                : 'linear-gradient(135deg, #FFF7ED 0%, #FDF2F8 50%, #FAF5FF 100%)',
           borderRadius: 20,
-          border: `1px solid ${isCancelled ? '#FCA5A5' : isDelivered ? '#A7F3D0' : 'rgba(164, 61, 131, 0.2)'}`,
+          border: `1px solid ${isCancelled ? '#FCA5A5' : isDelivered ? '#A7F3D0' : item.fulfilmentStatus === 'delivery_failed' || item.fulfilmentStatus?.startsWith('return_') ? '#FDBA74' : 'rgba(164, 61, 131, 0.2)'}`,
           padding: '24px 28px',
           boxShadow: '0 8px 30px rgba(109, 40, 120, 0.05)',
           marginBottom: '1.5rem',
@@ -1880,8 +1890,36 @@ function CustomerOrderPage(): ReactNode {
               LIVE ORDER STATUS · DAMOH ARTISAN CLUSTER
             </div>
             <h1 style={{ margin: '4px 0 6px', fontSize: '1.75rem', fontWeight: 800, color: isCancelled ? '#991B1B' : '#1F2937', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span>{isCancelled ? '✕' : isDelivered ? '🌸' : item.fulfilmentStatus === 'out_for_delivery' ? '🛵' : '🎉'}</span>
-              <span>{isCancelled ? 'Order Cancelled' : isDelivered ? 'Delivered with Love!' : item.fulfilmentStatus === 'out_for_delivery' ? 'Out for Delivery!' : 'Order Placed & Confirmed!'}</span>
+              <span>
+                {isCancelled
+                  ? '✕'
+                  : isDelivered
+                    ? '🌸'
+                    : item.fulfilmentStatus === 'delivery_failed'
+                      ? '⚠️'
+                      : item.fulfilmentStatus?.startsWith('return_')
+                        ? '🔄'
+                        : item.fulfilmentStatus === 'out_for_delivery'
+                          ? '🛵'
+                          : '🎉'}
+              </span>
+              <span>
+                {isCancelled
+                  ? 'Order Cancelled'
+                  : isDelivered
+                    ? 'Delivered with Love!'
+                    : item.fulfilmentStatus === 'delivery_failed'
+                      ? 'Delivery Delayed · Return Initiated'
+                      : item.fulfilmentStatus === 'return_partner_assigned'
+                        ? 'Return Pickup Partner Assigned'
+                        : item.fulfilmentStatus === 'return_picked_up'
+                          ? 'Returning Parcel to Seller Hub'
+                          : item.fulfilmentStatus === 'return_delivered_to_seller'
+                            ? 'Parcel Returned to Seller Hub'
+                            : item.fulfilmentStatus === 'out_for_delivery'
+                              ? 'Out for Delivery!'
+                              : 'Order Placed & Confirmed!'}
+              </span>
             </h1>
             <p style={{ margin: 0, fontSize: 14, color: '#4B5563', lineHeight: 1.5 }}>
               Order Reference: <strong style={{ color: '#111827', fontFamily: 'monospace' }}>#{item.orderReference}</strong>
@@ -1920,6 +1958,105 @@ function CustomerOrderPage(): ReactNode {
           </div>
         </div>
       </div>
+
+      {/* Live Delivery Delay / Return Pickup Status Banner for Customer */}
+      {(item.fulfilmentStatus === 'delivery_failed' ||
+        item.fulfilmentStatus?.startsWith('return_') ||
+        Boolean(item.deliveryExceptions && item.deliveryExceptions.length > 0)) && (
+        <div
+          style={{
+            background: '#FFF7ED',
+            border: '1.5px solid #FB923C',
+            borderRadius: 16,
+            padding: '18px 22px',
+            marginBottom: '1.5rem',
+            boxShadow: '0 4px 14px rgba(234, 88, 12, 0.08)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 20 }}>🔄</span>
+              <strong style={{ fontSize: 15, color: '#9A3412', fontWeight: 800 }}>
+                Live Delivery &amp; Return Update
+              </strong>
+            </div>
+            <span
+              style={{
+                background: '#FFEDD5',
+                color: '#C2410C',
+                border: '1px solid #FDBA74',
+                padding: '3px 10px',
+                borderRadius: 999,
+                fontSize: 11,
+                fontWeight: 800,
+              }}
+            >
+              {orderStatusLabel(item.fulfilmentStatus, item.fulfilmentMethod)}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13.5, color: '#431407' }}>
+            {item.deliveryExceptions && item.deliveryExceptions.length > 0 && (() => {
+              const latestEx = item.deliveryExceptions[item.deliveryExceptions.length - 1];
+              return (
+                <div style={{ background: '#FFFFFF', padding: '10px 14px', borderRadius: 10, border: '1px solid #FED7AA' }}>
+                  <div style={{ fontWeight: 700, color: '#DC2626' }}>
+                    ⚠️ Delivery Delayed / Attempt Failed: {latestEx.reasonCode.replaceAll('_', ' ')}
+                  </div>
+                  {latestEx.reasonNotes && (
+                    <div style={{ marginTop: 3, color: '#475569' }}>
+                      <strong>Partner Note:</strong> &ldquo;{latestEx.reasonNotes}&rdquo;
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {item.deliveryPartner && (
+              <div style={{ background: '#F0FDF4', padding: '10px 14px', borderRadius: 10, border: '1px solid #BBF7D0', color: '#14532D', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <strong>🛵 Assigned Return / Delivery Partner:</strong> {item.deliveryPartner.name}{' '}
+                  {item.deliveryPartner.phoneE164 ? `(${item.deliveryPartner.phoneE164})` : ''}
+                  <div style={{ fontSize: 12, color: '#15803D', marginTop: 2 }}>
+                    {item.fulfilmentStatus === 'return_picked_up'
+                      ? `Partner is currently returning the parcel back to ${sellerName}.`
+                      : item.fulfilmentStatus === 'return_partner_assigned'
+                        ? `Partner has been automatically assigned for return pickup to ${sellerName}.`
+                        : item.fulfilmentStatus === 'return_delivered_to_seller'
+                          ? `Partner has handed the return parcel back over to ${sellerName}.`
+                          : 'Partner is assigned to handle your order.'}
+                  </div>
+                </div>
+                {item.deliveryPartner.phoneE164 && (
+                  <a
+                    href={`tel:${item.deliveryPartner.phoneE164}`}
+                    style={{
+                      background: '#16A34A',
+                      color: '#FFFFFF',
+                      padding: '6px 12px',
+                      borderRadius: 8,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    📞 Call Partner
+                  </a>
+                )}
+              </div>
+            )}
+
+            {/* Show latest 2 status history messages so customer sees every update immediately */}
+            {history.slice(-2).map((h, i) =>
+              h.note ? (
+                <div key={i} style={{ fontSize: 12.5, color: '#7C2D12', paddingLeft: 4 }}>
+                  • <strong>{orderStatusLabel(h.status, item.fulfilmentMethod)}:</strong> {h.note}
+                </div>
+              ) : null,
+            )}
+          </div>
+        </div>
+      )}
 
       {/* VIP Security Handover PIN */}
       {showDeliveryPin && (
@@ -2625,6 +2762,31 @@ function CustomerOrderPage(): ReactNode {
                 )}
               </div>
             )}
+
+            <button
+              type="button"
+              onClick={() => setShowInvoiceModal(true)}
+              style={{
+                marginTop: 14,
+                width: '100%',
+                background: '#6B215C',
+                color: '#FFFFFF',
+                border: 'none',
+                borderRadius: 10,
+                padding: '10px 14px',
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                boxShadow: '0 4px 12px rgba(107, 33, 92, 0.2)',
+              }}
+            >
+              <span>🧾</span>
+              <span>View / Print Tax Invoice & Package Slip</span>
+            </button>
           </div>
 
           {/* Dedicated Order Cancellation Window */}

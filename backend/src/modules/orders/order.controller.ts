@@ -57,19 +57,34 @@ export async function resolveOrderSellerPickup(order: {
   } | null;
   items?: Array<{ sellerId?: unknown }>;
   address?: { city?: string | null } | null;
-}) {
+}): Promise<{
+  sellerId?: string | undefined;
+  sellerName: string;
+  phoneE164?: string | undefined;
+  address: string;
+  city: string;
+  latitude: number;
+  longitude: number;
+  enrolmentId?: string | undefined;
+  panNumber?: string | undefined;
+}> {
+  const sellerId = order.sellerPickup?.sellerId || order.items?.find((item) => item.sellerId)?.sellerId;
   if (order.sellerPickup?.sellerName && order.sellerPickup?.address) {
+    const sellerProfile = sellerId ? await Seller.findOne({ userId: sellerId }).lean() : null;
     return {
-      sellerId: order.sellerPickup.sellerId ? String(order.sellerPickup.sellerId) : undefined,
+      sellerId: sellerId ? String(sellerId) : undefined,
       sellerName: order.sellerPickup.sellerName,
       phoneE164: order.sellerPickup.phoneE164 ?? undefined,
       address: order.sellerPickup.address,
       city: order.sellerPickup.city ?? order.address?.city ?? 'Damoh',
       latitude: order.sellerPickup.latitude ?? 23.8388,
       longitude: order.sellerPickup.longitude ?? 79.4422,
+      ...(sellerProfile?.taxDetails?.enrolmentId || sellerProfile?.taxDetails?.gstin
+        ? { enrolmentId: sellerProfile.taxDetails.enrolmentId || sellerProfile.taxDetails.gstin }
+        : {}),
+      ...(sellerProfile?.taxDetails?.panNumber ? { panNumber: sellerProfile.taxDetails.panNumber } : {}),
     };
   }
-  const sellerId = order.items?.find((item) => item.sellerId)?.sellerId;
   if (!sellerId) {
     return {
       sellerName: 'Damoh SHG Seller',
@@ -101,6 +116,10 @@ export async function resolveOrderSellerPickup(order: {
     city,
     latitude: sellerApp?.latitude ?? sellerUser?.currentLocation?.latitude ?? 23.8388,
     longitude: sellerApp?.longitude ?? sellerUser?.currentLocation?.longitude ?? 79.4422,
+    ...(sellerProfile?.taxDetails?.enrolmentId || sellerProfile?.taxDetails?.gstin
+      ? { enrolmentId: sellerProfile.taxDetails.enrolmentId || sellerProfile.taxDetails.gstin }
+      : {}),
+    ...(sellerProfile?.taxDetails?.panNumber ? { panNumber: sellerProfile.taxDetails.panNumber } : {}),
   };
 }
 
@@ -1011,7 +1030,12 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
 
       let nextDeliveryStatus = order.deliveryStatus || 'UNASSIGNED';
       const failureCount = status === 'delivery_failed' ? (order.deliveryExceptions?.length || 0) + 1 : 0;
-      const isAutoRtoTriggered = status === 'delivery_failed' && failureCount >= 2;
+
+      // Autonomous Return Pickup Assignment when Delivery Failure is raised
+      let assignedReturnPartnerObj: Record<string, unknown> | null = null;
+      let isPartnerReplacedOrCleared = false;
+      let autoReturnHistoryEvents: Array<Record<string, unknown>> = [];
+      let historyEntry: Record<string, unknown> | null = null;
 
       if (status === 'delivered') {
         nextDeliveryStatus = 'DELIVERED';
@@ -1020,20 +1044,185 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
       } else if (status === 'out_for_pickup' || status === 'picked_up') {
         nextDeliveryStatus = 'ASSIGNED';
       } else if (status === 'delivery_failed') {
-        if (isAutoRtoTriggered) {
-          nextDeliveryStatus = 'RETURN_TO_ORIGIN';
-          nextFulfilmentStatusVal = 'return_requested';
+        isPartnerReplacedOrCleared = true;
+        nextDeliveryStatus = 'RETURN_TO_ORIGIN';
+
+        const currentRider = await User.findById(partnerId)
+          .select('_id name phoneE164 isOnline availabilityStatus currentLocation assignedCity')
+          .session(session)
+          .lean();
+
+        const isCurrentRiderOnline =
+          Boolean(currentRider) &&
+          currentRider?.isOnline !== false &&
+          currentRider?.availabilityStatus !== 'offline';
+
+        const riderNeedsReplacement =
+          !isCurrentRiderOnline ||
+          riderRequestedAction === 'UNASSIGN_ME' ||
+          reasonCode === 'RIDER_VEHICLE_ISSUE' ||
+          reasonCode === 'RIDER_EMERGENCY';
+
+        const targetLat = order.address?.latitude ?? order.sellerPickup?.latitude ?? 23.8342;
+        const targetLng = order.address?.longitude ?? order.sellerPickup?.longitude ?? 79.4385;
+
+        let chosenPartner: typeof currentRider = null;
+        let isSameRiderReassigned = false;
+        let chosenDistanceKm = 0.5;
+
+        if (!riderNeedsReplacement && currentRider) {
+          chosenPartner = currentRider;
+          isSameRiderReassigned = true;
+          const rLat = currentRider.currentLocation?.latitude ?? order.deliveryPartner?.latitude ?? targetLat;
+          const rLng = currentRider.currentLocation?.longitude ?? order.deliveryPartner?.longitude ?? targetLng;
+          chosenDistanceKm = haversineDistanceKm(targetLat, targetLng, rLat, rLng) ?? 0.4;
+        } else {
+          // Current rider is offline or requested replacement: find nearest ONLINE delivery partner
+          const otherOnlinePartners = await User.find({
+            _id: { $ne: new mongoose.Types.ObjectId(partnerId) },
+            role: 'delivery_partner',
+            status: 'active',
+            isOnline: true,
+            availabilityStatus: { $ne: 'offline' },
+          })
+            .select('_id name phoneE164 isOnline availabilityStatus currentLocation assignedCity')
+            .session(session)
+            .lean();
+
+          let shortestDist = Infinity;
+          for (const candidate of otherOnlinePartners) {
+            const cLat = candidate.currentLocation?.latitude ?? 23.8415;
+            const cLng = candidate.currentLocation?.longitude ?? 79.445;
+            const dist = haversineDistanceKm(targetLat, targetLng, cLat, cLng) ?? 999;
+            if (dist < shortestDist) {
+              shortestDist = dist;
+              chosenPartner = candidate;
+            }
+          }
+
+          if (chosenPartner) {
+            isSameRiderReassigned = false;
+            chosenDistanceKm = Number.isFinite(shortestDist) ? Number(shortestDist.toFixed(2)) : 0.8;
+          } else if (isCurrentRiderOnline && currentRider) {
+            // Fallback to current online rider if no other rider is online in the city
+            chosenPartner = currentRider;
+            isSameRiderReassigned = true;
+            chosenDistanceKm = 0.4;
+          }
+        }
+
+        const reasonLabelMap: Record<string, string> = {
+          CUSTOMER_UNAVAILABLE: 'Customer Unavailable / Phone Unreachable',
+          INCORRECT_ADDRESS: 'Incorrect or Incomplete Address',
+          CUSTOMER_REFUSED: 'Customer Refused Delivery at Door',
+          RIDER_VEHICLE_ISSUE: 'Delivery Partner Vehicle Breakdown',
+          WEATHER_OR_ROAD_BLOCK: 'Weather or Road Block Delay',
+          RIDER_EMERGENCY: 'Delivery Partner Emergency',
+          OTHER: 'Delivery Exception',
+        };
+        const readableReason = reasonLabelMap[reasonCode || 'OTHER'] || reasonCode || 'Delivery Exception';
+        const reasonDetail = (reasonNotes || note || 'Customer doorstep handover could not be completed').trim();
+
+        // 1. Always push the "Delivery Delayed / Failed" message for the customer
+        autoReturnHistoryEvents.push({
+          status: 'delivery_failed',
+          changedAt: new Date(),
+          actorType: 'user',
+          actorId: new mongoose.Types.ObjectId(partnerId),
+          note: `⚠️ Delivery Delayed / Attempt Failed (${readableReason}): ${reasonDetail}. Initiating automatic Return Pickup to Seller.`,
+        });
+
+        if (chosenPartner) {
+          const pLat = chosenPartner.currentLocation?.latitude ?? order.deliveryPartner?.latitude ?? 23.8388;
+          const pLng = chosenPartner.currentLocation?.longitude ?? order.deliveryPartner?.longitude ?? 79.4422;
+
+          // If the same online rider already has the package in hand, go straight to return_picked_up (Hand Over to Seller)
+          const hasPackageInHand =
+            isSameRiderReassigned && ['picked_up', 'out_for_delivery'].includes(priorStatus);
+          nextFulfilmentStatusVal = hasPackageInHand ? 'return_picked_up' : 'return_partner_assigned';
+
+          assignedReturnPartnerObj = {
+            userId: chosenPartner._id,
+            name: chosenPartner.name || 'Delivery Partner',
+            phoneE164: chosenPartner.phoneE164 || '',
+            distanceKm: chosenDistanceKm,
+            latitude: pLat,
+            longitude: pLng,
+            assignedAt: new Date(),
+            assignedBy: new mongoose.Types.ObjectId(partnerId),
+          };
+
           returnSubUpdates['returnRequest'] = {
-            status: 'requested',
+            status: hasPackageInHand ? 'picked_up' : 'partner_assigned',
             reasonCode: 'other',
-            reasonText: `Automated RTO: Exceeded maximum allowed delivery attempts (${failureCount}/2). Auto-return to seller hub triggered.`,
-            boxConditionImages: [],
+            reasonText: `Auto-Return Order (${readableReason}): ${reasonDetail}`,
+            boxConditionImages: proofImageUrl ? [proofImageUrl] : [],
+            productFaultImages: [],
+            requestedAt: new Date(),
+            reverseDeliveryPartner: {
+              userId: chosenPartner._id,
+              name: chosenPartner.name || 'Delivery Partner',
+              phoneE164: chosenPartner.phoneE164 || '',
+              distanceKm: chosenDistanceKm,
+              latitude: pLat,
+              longitude: pLng,
+              assignedAt: new Date(),
+              assignedBy: new mongoose.Types.ObjectId(partnerId),
+              ...(hasPackageInHand ? { pickedUpAt: new Date() } : {}),
+            },
+          };
+
+          returnSubUpdates['adminResolution'] = {
+            resolvedBy: new mongoose.Types.ObjectId(partnerId),
+            resolvedAt: new Date(),
+            action: 'TRIGGER_RTO',
+            adminNotes: isSameRiderReassigned
+              ? `Auto-Assigned Return Pickup to SAME online partner (${chosenPartner.name} · ${chosenPartner.phoneE164 || ''}). No manual City Admin action needed.`
+              : `Previous partner offline/unavailable — Auto-Assigned Return Pickup to NEARBY online partner (${chosenPartner.name} · ${chosenPartner.phoneE164 || ''}, ${chosenDistanceKm} km away). No manual City Admin action needed.`,
+          };
+
+          // 2. Push the "Return Pickup Partner Assigned" message for the customer
+          autoReturnHistoryEvents.push({
+            status: nextFulfilmentStatusVal,
+            changedAt: new Date(Date.now() + 500),
+            actorType: 'system',
+            actorId: new mongoose.Types.ObjectId(partnerId),
+            note: isSameRiderReassigned
+              ? `🔄 Return Pickup Partner Assigned: ${chosenPartner.name || 'Delivery Partner'} (${chosenPartner.phoneE164 || 'On-Duty'}) is online and has been automatically reassigned to return the parcel to ${order.sellerPickup?.sellerName || 'Artisan SHG Seller'}.`
+              : `🔄 Nearby Return Partner Assigned: Previous partner was offline/unavailable. Nearest online partner ${chosenPartner.name || 'Delivery Partner'} (${chosenPartner.phoneE164 || 'On-Duty'}, ${chosenDistanceKm} km away) has been automatically assigned to return the parcel to ${order.sellerPickup?.sellerName || 'Artisan SHG Seller'}.`,
+          });
+
+          if (!isSameRiderReassigned && order.deliveryPartner) {
+            historyEntry = {
+              ...(order.deliveryPartner.userId ? { userId: order.deliveryPartner.userId } : {}),
+              name: order.deliveryPartner.name,
+              phoneE164: order.deliveryPartner.phoneE164,
+              assignedAt: order.deliveryPartner.assignedAt,
+              assignedBy: order.deliveryPartner.assignedBy,
+              unassignedAt: new Date(),
+              unassignedBy: new mongoose.Types.ObjectId(partnerId),
+              changeReason: `Delivery failed [${readableReason}]: Auto-reassigned return pickup to nearby online partner ${chosenPartner.name}.`,
+            };
+          }
+        } else {
+          // No online partner at all right now: queue for auto-dispatch return
+          nextFulfilmentStatusVal = 'return_accepted';
+          assignedReturnPartnerObj = null;
+          returnSubUpdates['returnRequest'] = {
+            status: 'accepted',
+            reasonCode: 'other',
+            reasonText: `Auto-Return Order (${readableReason}): ${reasonDetail}. Queued for nearest online partner.`,
+            boxConditionImages: proofImageUrl ? [proofImageUrl] : [],
             productFaultImages: [],
             requestedAt: new Date(),
           };
-        } else {
-          nextDeliveryStatus = 'DELIVERY_FAILED';
-          nextFulfilmentStatusVal = 'delivery_failed';
+          autoReturnHistoryEvents.push({
+            status: 'return_accepted',
+            changedAt: new Date(Date.now() + 500),
+            actorType: 'system',
+            actorId: new mongoose.Types.ObjectId(partnerId),
+            note: `⏳ Return Pickup Scheduled: Waiting for nearest delivery partner to come online to return parcel to ${order.sellerPickup?.sellerName || 'Artisan SHG Seller'}.`,
+          });
         }
       }
 
@@ -1041,28 +1230,10 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
         attemptedAt: new Date(),
         riderId: new mongoose.Types.ObjectId(partnerId),
         reasonCode: reasonCode || 'OTHER',
-        reasonNotes: reasonNotes || note || (isAutoRtoTriggered ? 'Attempt 2 failed: Auto-RTO executed' : 'Attempt 1 failed: Re-attempt scheduled'),
+        reasonNotes: reasonNotes || note || 'Delivery attempt failed — auto-converted to Return Pickup',
         proofImageUrl: proofImageUrl || null,
-        riderRequestedAction: isAutoRtoTriggered ? 'CANCEL_ORDER' : (riderRequestedAction || 'RETRY_LATER'),
+        riderRequestedAction: riderRequestedAction || 'RETRY_LATER',
       } : null;
-
-      const unassignPartnerUpdate: Record<string, unknown> = {};
-      const historyEntry = (status === 'delivery_failed' && (riderRequestedAction === 'UNASSIGN_ME' || !riderRequestedAction || isAutoRtoTriggered) && order.deliveryPartner) ? {
-        ...(order.deliveryPartner.userId ? { userId: order.deliveryPartner.userId } : {}),
-        name: order.deliveryPartner.name,
-        phoneE164: order.deliveryPartner.phoneE164,
-        assignedAt: order.deliveryPartner.assignedAt,
-        assignedBy: order.deliveryPartner.assignedBy,
-        unassignedAt: new Date(),
-        unassignedBy: new mongoose.Types.ObjectId(partnerId),
-        changeReason: isAutoRtoTriggered
-          ? `Automated RTO executed after attempt ${failureCount}/2 failed.`
-          : `Delivery failed [${reasonCode || 'OTHER'}]: ${reasonNotes || note || ''} (Rider requested unassignment)`.trim(),
-      } : null;
-
-      if (status === 'delivery_failed' && (riderRequestedAction === 'UNASSIGN_ME' || !riderRequestedAction) && !isAutoRtoTriggered) {
-        unassignPartnerUpdate['deliveryPartner'] = null;
-      }
 
       const changed = await Order.findOneAndUpdate(
         { _id: id, fulfilmentStatus: priorStatus },
@@ -1082,23 +1253,25 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
                 remittedReceiptNumber: paymentMode === 'upi_qr' ? `ONLINE-UPI-${Date.now().toString().slice(-6)}` : undefined,
               },
             } : {}),
-            ...(finalLat !== undefined ? { 'deliveryPartner.latitude': finalLat } : {}),
-            ...(finalLng !== undefined ? { 'deliveryPartner.longitude': finalLng } : {}),
+            ...(isPartnerReplacedOrCleared
+              ? { deliveryPartner: assignedReturnPartnerObj }
+              : {
+                  ...(finalLat !== undefined ? { 'deliveryPartner.latitude': finalLat } : {}),
+                  ...(finalLng !== undefined ? { 'deliveryPartner.longitude': finalLng } : {}),
+                }),
             ...returnSubUpdates,
-            ...unassignPartnerUpdate,
           },
           $push: {
-            statusHistory: {
-              status: nextFulfilmentStatusVal,
-              changedAt: new Date(),
-              actorType: isAutoRtoTriggered ? 'system' : 'user',
-              actorId: partnerId,
-              note: note || (isAutoRtoTriggered
-                ? `Automated RTO Executed: Delivery failed attempt ${failureCount}/2. Package auto-scheduled for Return to Origin.`
-                : status === 'delivery_failed'
-                ? `Delivery attempt ${failureCount}/2 failed: ${reasonCode || 'OTHER'} - ${reasonNotes || ''}. Re-attempt auto-scheduled.`
-                : defaultNotes[status]) || `Status updated to ${status}`,
-            },
+            statusHistory:
+              autoReturnHistoryEvents.length > 0
+                ? { $each: autoReturnHistoryEvents }
+                : {
+                    status: nextFulfilmentStatusVal,
+                    changedAt: new Date(),
+                    actorType: 'user',
+                    actorId: partnerId,
+                    note: note || defaultNotes[status] || `Status updated to ${status}`,
+                  },
             ...(exceptionData ? { deliveryExceptions: exceptionData } : {}),
             ...(historyEntry ? { deliveryPartnerHistory: historyEntry } : {}),
             ...(shouldConfirmPayment && order.paymentStatus !== 'confirmed'
@@ -1117,12 +1290,29 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
       ).select('-internalNotes -paymentEvents -idempotencyKey -deliveryPartnerHistory -deliveryPartner.internalNotes -deliveryPartner.assignedBy -deliveryPartner.userId -cancellationRequest.reviewedBy -cancellationRequest.adminNote -statusHistory.actorId -statusHistory.actorType');
       if (!changed) throw new AppError(409, 'INVALID_STATUS_TRANSITION', 'The order status changed; reload and try again.');
 
-      const isTerminalTripState =
-        status === 'delivered' ||
-        status === 'delivery_failed' ||
-        status === 'return_delivered_to_seller';
-
-      if (isTerminalTripState) {
+      if (status === 'delivery_failed') {
+        const newAssignedUserId = assignedReturnPartnerObj?.userId
+          ? String(assignedReturnPartnerObj.userId)
+          : null;
+        if (newAssignedUserId && newAssignedUserId !== String(partnerId)) {
+          await User.updateOne(
+            { _id: newAssignedUserId },
+            { $set: { isOnline: true, availabilityStatus: 'busy' } },
+            { session },
+          );
+          await User.updateOne(
+            { _id: partnerId },
+            { $set: { availabilityStatus: 'available' } },
+            { session },
+          );
+        } else if (newAssignedUserId === String(partnerId)) {
+          await User.updateOne(
+            { _id: partnerId },
+            { $set: { isOnline: true, availabilityStatus: 'busy' } },
+            { session },
+          );
+        }
+      } else if (status === 'delivered' || status === 'return_delivered_to_seller') {
         const remainingActiveOrders = await Order.countDocuments({
           _id: { $ne: changed._id },
           $or: [

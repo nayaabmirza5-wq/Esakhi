@@ -1571,7 +1571,7 @@ export const listSellerOrders: RequestHandler = async (req, res) => {
     ...sellerOrdersFilter(sellerId),
     ...(status === 'all' ? {} : { fulfilmentStatus: { $in: sellerOrderStatuses[status] } }),
   };
-  const [orders, total] = await Promise.all([
+  const [orders, total, sellerProfile] = await Promise.all([
     Order.find(filter)
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
@@ -1579,8 +1579,34 @@ export const listSellerOrders: RequestHandler = async (req, res) => {
       .select('orderReference fulfilmentMethod fulfilmentStatus paymentMethod paymentStatus totalPaise deliveryFeePaise customerName customerPhoneE164 address sellerPickup deliveryOtp items.sellerId items.productName items.quantity items.unitPricePaise items.lineTotalPaise items.variantAttributes deliveryPartner.name deliveryPartner.phoneE164 deliveryPartner.distanceKm deliveryPartner.assignedAt preDispatchInspection returnRequest statusHistory createdAt')
       .lean(),
     Order.countDocuments(filter),
+    Seller.findOne({ userId: sellerId }).lean(),
   ]);
-  sendPage(res, orders.map((order) => sellerOrderSummary({ ...order, sellerId })), page, limit, total);
+  const defaultAddress = sellerProfile?.pickupAddress
+    ? `${sellerProfile.pickupAddress.streetAddress}, ${sellerProfile.pickupAddress.locality ? sellerProfile.pickupAddress.locality + ', ' : ''}${sellerProfile.pickupAddress.city}, ${sellerProfile.pickupAddress.state} - ${sellerProfile.pickupAddress.pincode}`
+    : undefined;
+  sendPage(
+    res,
+    orders.map((order) =>
+      sellerOrderSummary({
+        ...order,
+        sellerId,
+        sellerPickup: {
+          ...(order.sellerPickup ?? {}),
+          ...(sellerProfile?.supplierDetails?.shgName && !order.sellerPickup?.sellerName
+            ? { sellerName: sellerProfile.supplierDetails.shgName }
+            : {}),
+          ...(defaultAddress && !order.sellerPickup?.address ? { address: defaultAddress } : {}),
+          ...(sellerProfile?.taxDetails?.enrolmentId || sellerProfile?.taxDetails?.gstin
+            ? { enrolmentId: sellerProfile.taxDetails.enrolmentId || sellerProfile.taxDetails.gstin }
+            : {}),
+          ...(sellerProfile?.taxDetails?.panNumber ? { panNumber: sellerProfile.taxDetails.panNumber } : {}),
+        },
+      }),
+    ),
+    page,
+    limit,
+    total,
+  );
 };
 
 export const uploadSellerOrderInspectionImages: RequestHandler = async (req, res) => {
