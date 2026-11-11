@@ -21,9 +21,10 @@ import { env } from '../../config/env.js';
 
 const otpLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: env.NODE_ENV === 'production' ? 10 : 120,
+  limit: env.NODE_ENV === 'production' ? 40 : 120,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
+  validate: false,
   message: {
     success: false,
     error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many verification attempts. Try again later.' },
@@ -35,6 +36,7 @@ const refreshLimiter = rateLimit({
   limit: 60,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
+  validate: false,
   message: {
     success: false,
     error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many session refresh requests. Try again later.' },
@@ -43,9 +45,10 @@ const refreshLimiter = rateLimit({
 
 const addressLookupLimiter = rateLimit({
   windowMs: 60 * 1000,
-  limit: env.NODE_ENV === 'production' ? 20 : 60,
+  limit: env.NODE_ENV === 'production' ? 40 : 60,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
+  validate: false,
   message: {
     success: false,
     error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many address lookups. Try again shortly.' },

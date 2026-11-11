@@ -97,6 +97,7 @@ export const errorHandler: ErrorRequestHandler = (error: unknown, _req, res, _ne
 
   logger.error('Unhandled request error', {
     name: error instanceof Error ? error.name : 'UnknownError',
+    errorMessage: error instanceof Error ? error.message : 'Unknown error',
     ...(env.NODE_ENV === 'production' ? {} : {
       message: error instanceof Error ? error.message : 'Unknown error',
       stack: error instanceof Error ? error.stack : undefined,
@@ -110,7 +111,16 @@ export const errorHandler: ErrorRequestHandler = (error: unknown, _req, res, _ne
 
 function isDatabaseUnavailableError(error: unknown): boolean {
   if (error instanceof mongoose.Error.MongooseServerSelectionError) return true;
-  if (typeof error !== 'object' || error === null || !('name' in error)) return false;
-  return typeof error.name === 'string' &&
-    ['MongoNetworkError', 'MongoNetworkTimeoutError', 'MongoServerSelectionError'].includes(error.name);
+  if (typeof error !== 'object' || error === null) return false;
+  if ('name' in error && typeof error.name === 'string') {
+    if (['MongoNetworkError', 'MongoNetworkTimeoutError', 'MongoServerSelectionError', 'MongoTimeoutError'].includes(error.name)) {
+      return true;
+    }
+  }
+  if ('message' in error && typeof error.message === 'string') {
+    if (error.message.startsWith('querySrv ') || error.message.startsWith('queryTxt ')) {
+      return true;
+    }
+  }
+  return false;
 }

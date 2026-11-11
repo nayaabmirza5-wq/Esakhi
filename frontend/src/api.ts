@@ -56,6 +56,10 @@ const baseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 let accessToken: string | null = (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
 
 export function resolveProductImageUrl(imageUrl: string): string {
+  if (!imageUrl) return '';
+  if (imageUrl.startsWith('data:') || imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+    return imageUrl;
+  }
   return new URL(imageUrl, baseUrl || window.location.origin).toString();
 }
 

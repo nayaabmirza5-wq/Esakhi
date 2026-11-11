@@ -35,12 +35,29 @@ export const saveProductImage: RequestHandler = async (req, res) => {
     throw new AppError(400, 'INVALID_IMAGE', 'The selected file is not a valid JPEG, PNG, or WebP image.');
   }
 
-  const filename = `${randomUUID()}.${type.extension}`;
-  await mkdir(productImagesDirectory, { recursive: true });
-  await writeFile(join(productImagesDirectory, filename), file.buffer, { flag: 'wx' });
+  if (process.env.VERCEL) {
+    const dataUrl = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    res.status(201).json({
+      success: true,
+      data: { imageUrl: dataUrl },
+    });
+    return;
+  }
 
-  res.status(201).json({
-    success: true,
-    data: { imageUrl: `/uploads/product-images/${filename}` },
-  });
+  try {
+    const filename = `${randomUUID()}.${type.extension}`;
+    await mkdir(productImagesDirectory, { recursive: true });
+    await writeFile(join(productImagesDirectory, filename), file.buffer, { flag: 'wx' });
+
+    res.status(201).json({
+      success: true,
+      data: { imageUrl: `/uploads/product-images/${filename}` },
+    });
+  } catch {
+    const dataUrl = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+    res.status(201).json({
+      success: true,
+      data: { imageUrl: dataUrl },
+    });
+  }
 };

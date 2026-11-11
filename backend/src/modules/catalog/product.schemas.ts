@@ -28,7 +28,7 @@ function isHttpsUrl(value: string): boolean {
 }
 
 function isUploadedProductImage(value: string): boolean {
-  return /^\/uploads\/product-images\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:jpg|png|webp)$/i.test(value);
+  return /^\/uploads\/product-images\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:jpg|png|webp)$/i.test(value) || /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(value);
 }
 
 const variantInputSchema = z.object({

@@ -35,7 +35,7 @@ type HelmetFactory = () => express.RequestHandler;
 const helmet = ((helmetModule as unknown as { default?: HelmetFactory }).default ?? helmetModule) as unknown as HelmetFactory;
 
 export const app = express();
-app.set('trust proxy', env.TRUST_PROXY_HOPS);
+app.set('trust proxy', env.TRUST_PROXY_HOPS || 1);
 
 app.get('/', (_req, res) => {
   res.status(200).json({
@@ -78,7 +78,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json({ limit: '32kb' }));
+app.use(express.json({ limit: '5mb' }));
 app.use(cookieParser());
 app.use((req, res, next) => {
   const startedAt = Date.now();
@@ -100,8 +100,38 @@ app.use('/uploads/product-images', express.static(productImagesDirectory, {
   },
 }));
 
+const STATELESS_PATHS = new Set([
+  '/',
+  '/health',
+  '/api/health',
+  '/api/v1/health',
+  '/ready',
+  '/api/ready',
+  '/api/v1/ready',
+  '/api',
+  '/api/',
+  '/api/v1',
+  '/api/v1/',
+  '/api/categories',
+  '/api/v1/categories',
+  '/api/products/categories',
+  '/api/v1/products/categories',
+  '/api/auth/send-otp',
+  '/api/v1/auth/send-otp',
+  '/api/auth/otp/request',
+  '/api/v1/auth/otp/request',
+]);
+
 app.use(async (req, _res, next) => {
-  if (req.path === '/health') return next();
+  if (env.NODE_ENV === 'test' || process.env.NODE_ENV === 'test') {
+    return next();
+  }
+  if (STATELESS_PATHS.has(req.path)) {
+    if (req.path.includes('/send-otp') || req.path.includes('/otp/request')) {
+      void connectDatabase().catch(() => {});
+    }
+    return next();
+  }
   try {
     await connectDatabase();
     next();
@@ -129,6 +159,7 @@ const apiLimiter = rateLimit({
   limit: process.env.NODE_ENV === 'development' ? 2500 : 1500,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
+  validate: false,
   skip: (req) =>
     req.path === '/health' ||
     req.path === '/ready' ||
@@ -143,6 +174,18 @@ const apiLimiter = rateLimit({
 
 const api = express.Router();
 api.use(apiLimiter);
+api.get('/health', (_req, res) => {
+  res.status(200).json({ success: true, data: { status: 'ok' } });
+});
+api.get('/ready', (_req, res) => {
+  const ready = mongoose.connection.readyState === 1;
+  res.status(ready ? 200 : 503).json({
+    success: ready,
+    ...(ready
+      ? { data: { status: 'ready' } }
+      : { error: { code: 'NOT_READY', message: 'The database is not ready.' } }),
+  });
+});
 api.get('/', (_req, res) => {
   res.status(200).json({
     success: true,

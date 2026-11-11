@@ -1,6 +1,7 @@
 import type { RequestHandler } from 'express';
 import jwt from 'jsonwebtoken';
 import { env } from '../../config/env.js';
+import { connectDatabase } from '../../config/db.js';
 import { sendData } from '../../utils/apiResponse.js';
 import { requestOtpSchema, verifyOtpSchema } from './auth.schemas.js';
 import { replaceSavedAddressesSchema, updateProfileSchema } from './auth.schemas.js';
@@ -70,8 +71,8 @@ const refreshCookieName = 'esakhi_refresh';
 const refreshCookieOptions = {
   httpOnly: true,
   secure: env.NODE_ENV === 'production',
-  sameSite: 'strict' as const,
-  path: '/api/v1/auth',
+  sameSite: 'lax' as const,
+  path: '/',
   maxAge: env.JWT_REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000,
 };
 
@@ -80,6 +81,7 @@ export const requestOtpController: RequestHandler = async (req, res) => {
     const channel = (req.body?.channel || 'phone').toString().trim().toLowerCase();
     const rawPhone = (req.body?.phone || req.body?.phoneE164 || '').toString().trim();
     const rawEmail = (req.body?.email || '').toString().trim().toLowerCase();
+    const devCode = (process.env.DEV_OTP_CODE || env.DEV_OTP_CODE || '246810').toString().trim() || '246810';
 
     if (channel === 'email' || (!rawPhone && rawEmail)) {
       if (!rawEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)) {
@@ -89,7 +91,6 @@ export const requestOtpController: RequestHandler = async (req, res) => {
           error: { code: 'INVALID_EMAIL', message: 'Please provide a valid email address.' },
         });
       }
-      const devCode = process.env.DEV_OTP_CODE || env.DEV_OTP_CODE || '246810';
       console.log(`[OTP_SENT] Verification OTP for Email (${rawEmail}): ${devCode}`);
       return res.status(200).json({
         success: true,
@@ -107,8 +108,8 @@ export const requestOtpController: RequestHandler = async (req, res) => {
       });
     }
 
-    const formattedPhone = digits.length === 10 ? `+91${digits}` : (digits.startsWith('91') && digits.length === 12 ? `+${digits}` : rawPhone);
-    const devCode = process.env.DEV_OTP_CODE || env.DEV_OTP_CODE || '246810';
+    const last10 = digits.slice(-10);
+    const formattedPhone = `+91${last10}`;
     console.log(`[OTP_SENT] Verification OTP for Mobile (${formattedPhone}): ${devCode}`);
 
     return res.status(200).json({
@@ -132,7 +133,7 @@ export const verifyOtpController: RequestHandler = async (req, res) => {
     const rawPhone = (req.body?.phone || req.body?.phoneE164 || '').toString().trim();
     const rawEmail = (req.body?.email || '').toString().trim().toLowerCase();
     const rawOtp = (req.body?.otp || req.body?.code || '').toString().trim();
-    const expectedOtp = process.env.DEV_OTP_CODE || env.DEV_OTP_CODE || '246810';
+    const expectedOtp = (process.env.DEV_OTP_CODE || env.DEV_OTP_CODE || '246810').toString().trim() || '246810';
 
     if (!rawOtp || (rawOtp !== expectedOtp && rawOtp !== '246810')) {
       return res.status(400).json({
@@ -155,13 +156,13 @@ export const verifyOtpController: RequestHandler = async (req, res) => {
       });
     }
 
-    const digits = rawPhone.replace(/\D/g, '');
-    let formattedPhone = rawPhone;
-    if (digits.length === 10) {
-      formattedPhone = `+91${digits}`;
-    } else if (digits.length === 12 && digits.startsWith('91')) {
-      formattedPhone = `+${digits}`;
+    if (env.NODE_ENV !== 'test') {
+      await connectDatabase();
     }
+
+    const digits = rawPhone.replace(/\D/g, '');
+    const last10 = digits.slice(-10);
+    const formattedPhone = last10.length === 10 ? `+91${last10}` : rawPhone;
 
     const defaultName = req.body?.name || `User ${digits.slice(-4) || '0000'}`;
 
@@ -170,33 +171,43 @@ export const verifyOtpController: RequestHandler = async (req, res) => {
       $or: [
         { phoneE164: formattedPhone },
         { phone: formattedPhone },
+        ...(last10 ? [{ phoneE164: last10 }, { phone: last10 }] : []),
         ...(rawPhone && rawPhone !== formattedPhone ? [{ phoneE164: rawPhone }, { phone: rawPhone }] : []),
       ],
     });
 
     if (!user) {
-      user = await User.findOneAndUpdate(
-        {
+      try {
+        user = await User.findOneAndUpdate(
+          {
+            $or: [
+              { phoneE164: formattedPhone },
+              { phone: formattedPhone },
+            ],
+          },
+          {
+            $setOnInsert: {
+              phoneE164: formattedPhone,
+              phone: formattedPhone,
+              name: defaultName,
+              role: 'customer',
+              status: 'active',
+              ...(rawEmail ? { email: rawEmail } : {}),
+            },
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true },
+        );
+      } catch {
+        user = await User.findOne({
           $or: [
             { phoneE164: formattedPhone },
             { phone: formattedPhone },
           ],
-        },
-        {
-          $setOnInsert: {
-            phoneE164: formattedPhone,
-            phone: formattedPhone,
-            name: defaultName,
-            role: 'customer',
-            status: 'active',
-            ...(rawEmail ? { email: rawEmail } : {}),
-          },
-        },
-        { upsert: true, new: true, setDefaultsOnInsert: true },
-      );
+        });
+      }
     } else if (rawEmail && !user.email) {
       user.email = rawEmail;
-      await user.save();
+      await user.save().catch(() => {});
     }
 
     if (!user || user.status !== 'active') {
@@ -208,7 +219,12 @@ export const verifyOtpController: RequestHandler = async (req, res) => {
       });
     }
 
-    const secret = process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET || 'esakhi_default_jwt_secret_key_2026';
+    const secret = (
+      process.env.JWT_ACCESS_SECRET ||
+      process.env.JWT_SECRET ||
+      env.JWT_ACCESS_SECRET ||
+      'esakhi_default_jwt_secret_key_2026'
+    ).trim();
     const userRole = user.role || 'customer';
     const userPhone = user.phoneE164 || user.phone || formattedPhone;
     const userId = user._id.toString();
