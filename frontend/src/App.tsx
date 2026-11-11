@@ -485,6 +485,44 @@ function EmptyState({ title, children }: { title: string; children?: ReactNode }
   return <div className="empty-state"><span className="empty-mark" aria-hidden="true">✿</span><h3>{title}</h3>{children}</div>;
 }
 
+function ProductImageWithFallback({
+  src,
+  alt,
+  category,
+  name,
+  className = '',
+}: {
+  src?: string;
+  alt: string;
+  category?: string;
+  name?: string;
+  className?: string;
+}): ReactNode {
+  const [imgError, setImgError] = useState(false);
+
+  if (!src || imgError) {
+    return (
+      <div className={`image-placeholder ${className}`.trim()} aria-label={alt || 'eSakhi handcrafted piece'}>
+        <div className="artisan-card-fallback">
+          <span className="artisan-fallback-icon" role="img" aria-label="handcrafted">🪷</span>
+          <span className="artisan-fallback-cat">{name || category || 'Handcrafted Piece'}</span>
+          <span className="artisan-fallback-brand">eSakhi Artisan</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className={className}
+      loading="lazy"
+      onError={() => setImgError(true)}
+    />
+  );
+}
+
 function ProductCard({ product }: { product: Product }): ReactNode {
   const { add } = useCart();
   const navigate = useNavigate();
@@ -499,7 +537,12 @@ function ProductCard({ product }: { product: Product }): ReactNode {
         <span className="product-pop-badge">
           <span>✨</span> Handcrafted
         </span>
-        {image ? <img src={image} alt={product.name} loading="lazy" /> : <div className="image-placeholder" aria-label="No product image available"><img src="/images/esakhi-logo-transparent.png" alt="" /></div>}
+        <ProductImageWithFallback
+          src={image}
+          alt={product.name}
+          category={product.categoryName || product.subcategoryName}
+          name={product.name}
+        />
         {!available && <span className="image-badge">Out of stock</span>}
       </Link>
       <div className="product-card-body">
@@ -560,7 +603,7 @@ function HeroCarousel({ products }: { products: Product[] }): ReactNode {
         aria-label={activeProduct ? `View ${activeProduct.name}` : 'Browse handmade products'}
       >
         {image
-          ? <img src={resolveProductImageUrl(image)} alt={activeProduct.name} />
+          ? <ProductImageWithFallback src={resolveProductImageUrl(image)} alt={activeProduct.name} category={activeProduct.categoryName} name={activeProduct.name} />
           : <img src="/images/esakhi-logo-transparent.png" alt="eSakhi emblem representing women creating together" />}
       </Link>
       {products.length > 1 && (
@@ -726,6 +769,16 @@ function ShopPage(): ReactNode {
       return next;
     });
   };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const urlQ = params.get('q') || '';
+      if (search.trim() !== urlQ.trim()) {
+        updateFilters({ q: search });
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [search]);
   return (
     <div className="page-container">
       <PageIntro eyebrow="The eSakhi collection" title="Made by hand. Chosen by you." description="Explore pieces shaped by patience, skill, and a community of women makers." />
@@ -743,7 +796,7 @@ function ShopPage(): ReactNode {
         <label className="field shop-filter"><span>Main category</span><select value={categoryId} onChange={(event) => updateFilters({ categoryId: event.target.value })}><option value="">All categories</option>{(categories.data ?? []).map((category) => <option key={category.categoryId} value={category.categoryId}>{category.categoryName}</option>)}</select></label>
         <label className="field shop-filter"><span>Subcategory</span><select value={subcategoryId} disabled={!selectedCategory} onChange={(event) => updateFilters({ subcategoryId: event.target.value })}><option value="">All subcategories</option>{(selectedCategory?.subcategories ?? []).map((subcategory) => <option key={subcategory.subcategoryId} value={subcategory.subcategoryId}>{subcategory.subcategoryName}</option>)}</select></label>
         <label className="field shop-filter"><span>Sort by</span><select value={sort} onChange={(event) => updateFilters({ sort: event.target.value })}><option value="newest">Newest listings</option><option value="price_asc">Price: low to high</option><option value="price_desc">Price: high to low</option></select></label>
-        <label className="search-field shop-search"><span className="sr-only">Search products by name</span><input value={search} onChange={(event) => { setSearch(event.target.value); updateFilters({ q: event.target.value }); }} placeholder="Search products by name" /><span aria-hidden="true">⌕</span></label>
+        <label className="search-field shop-search"><span className="sr-only">Search products by name</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search products by name" /><span aria-hidden="true">⌕</span></label>
       </div>
       <ProductGrid products={result.data?.data ?? []} loading={result.loading} error={result.error} reload={result.reload} emptyTitle={selectedSubcategory ? `No approved products in ${selectedSubcategory.subcategoryName}` : selectedCategory ? `No approved products in ${selectedCategory.categoryName}` : 'No approved products yet'} />
       {result.data?.pagination && result.data.pagination.totalPages > 1 && <Pagination page={result.data.pagination.page} pages={result.data.pagination.totalPages} onChange={(next) => setParams((previous) => { const params = new URLSearchParams(previous); params.set('page', String(next)); return params; })} />}
@@ -773,7 +826,7 @@ function ProductPage(): ReactNode {
     <div className="page-container product-detail">
       <div className="breadcrumbs"><Link to="/shop">Shop</Link><span>/</span><Link to={`/shop?categoryId=${encodeURIComponent(item.categoryId)}`}>{item.categoryName}</Link><span>/</span><Link to={`/shop?categoryId=${encodeURIComponent(item.categoryId)}&subcategoryId=${encodeURIComponent(item.subcategoryId)}`}>{item.subcategoryName}</Link></div>
       <div className="detail-grid">
-        <div className="detail-gallery">{item.imageUrls.length ? item.imageUrls.map((image, index) => <img key={image} src={resolveProductImageUrl(image)} alt={`${item.name}, view ${index + 1}`} />) : <div className="detail-placeholder"><img src="/images/esakhi-logo-transparent.png" alt="" /><span>Product image coming soon</span></div>}</div>
+        <div className="detail-gallery">{item.imageUrls.length ? item.imageUrls.map((image, index) => <ProductImageWithFallback key={image} src={resolveProductImageUrl(image)} alt={`${item.name}, view ${index + 1}`} name={item.name} category={item.categoryName} />) : <div className="detail-placeholder"><img src="/images/esakhi-logo-transparent.png" alt="" /><span>Product image coming soon</span></div>}</div>
         <div className="detail-copy"><span className="eyebrow">{item.categoryName} · {item.subcategoryName}</span><h1>{item.name}</h1><p className="detail-price">{formatMoney(item.pricePaise)}</p><p className="detail-description">{item.description}</p>
           <p className="detail-seller">Seller / SHG: <strong>{item.sellerName || 'Seller details unavailable'}</strong></p>
           {item.variants.length > 0 && <label className="field"><span>Choose an option</span><select value={variantId} onChange={(event) => setVariantId(event.target.value)}><option value="">Select an option</option>{item.variants.map((option) => <option key={option._id} value={option._id}>{Object.values(option.attributes).join(' · ') || option.sku || 'Option'}{option.stock <= 0 ? ' — unavailable' : ''}</option>)}</select></label>}

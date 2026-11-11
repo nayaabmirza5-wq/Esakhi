@@ -92,14 +92,22 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
   let response: Response;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
   try {
     response = await fetch(`${baseUrl}${path}`, {
       ...init,
       headers,
       credentials: 'include',
+      signal: init.signal || controller.signal,
     });
-  } catch {
+  } catch (err: unknown) {
+    if (err && typeof err === 'object' && 'name' in err && (err as { name: string }).name === 'AbortError') {
+      throw new ApiError(408, 'TIMEOUT', 'Request took too long to respond. Please check your connection and retry.');
+    }
     throw new ApiError(0, 'NETWORK_ERROR', 'Cannot reach eSakhi right now. Check that the backend is running and try again.');
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   if (response.status === 401 && retry && !path.endsWith('/auth/refresh') && !path.includes('/auth/otp/')) {

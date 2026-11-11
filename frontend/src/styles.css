@@ -309,8 +309,52 @@ h1 em, h2 em { color: var(--rose); font-weight: 500; }
 .product-card:hover .product-image > img { transform: scale(1.09) rotate(0.5deg); }
 .product-pop-badge { position: absolute; top: 12px; left: 12px; z-index: 3; display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: 30px; background: rgba(255, 255, 255, 0.94); backdrop-filter: blur(8px); color: var(--saffron); font-size: 0.72rem; font-weight: 800; letter-spacing: 0.02em; box-shadow: 0 6px 16px rgba(74, 14, 78, 0.12), inset 0 0 0 1px rgba(232, 99, 10, 0.2); transition: transform .3s ease, box-shadow .3s ease; }
 .product-card:hover .product-pop-badge { transform: translateY(-2px) scale(1.06); background: #FFF; box-shadow: 0 8px 20px rgba(232, 99, 10, 0.28); }
-.image-placeholder, .detail-placeholder { height: 100%; display: grid; place-items: center; background: radial-gradient(circle, var(--surface) 20%, var(--rose-soft)); }
-.image-placeholder img { width: 44%; height: 44%; object-fit: contain; opacity: .78; }
+.image-placeholder, .detail-placeholder {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background: linear-gradient(135deg, #FDFBF7 0%, #F5EDE6 100%);
+  position: relative;
+  overflow: hidden;
+}
+.image-placeholder img { width: 50%; height: 50%; object-fit: contain; opacity: .85; }
+.artisan-card-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  padding: 20px;
+  z-index: 2;
+}
+.artisan-fallback-icon {
+  font-size: 2.8rem;
+  line-height: 1;
+  filter: drop-shadow(0 4px 10px rgba(74, 14, 78, 0.15));
+}
+.artisan-fallback-cat {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.05rem;
+  color: var(--plum, #4A0E4E);
+  line-height: 1.25;
+  max-width: 200px;
+}
+.artisan-fallback-brand {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--saffron, #E8630A);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 3px 10px;
+  border-radius: 20px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
 .image-badge { position: absolute; left: 12px; top: 12px; padding: 6px 10px; border-radius: 30px; background: var(--surface); font-size: .7rem; }
 .product-card-body { padding: 16px; }
 .product-category { color: var(--rose); font-size: .69rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
