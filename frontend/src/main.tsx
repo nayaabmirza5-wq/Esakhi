@@ -79,7 +79,7 @@ class RootErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
                 type="button"
                 onClick={() => { window.location.href = '/'; }}
                 style={{
-                  background: '#6b215c',
+                  background: '#4A0E4E',
                   color: '#ffffff',
                   border: 'none',
                   borderRadius: '8px',

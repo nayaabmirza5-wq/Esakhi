@@ -214,7 +214,7 @@ export function SellerOrderCard({
                 fontFamily: 'monospace',
                 fontWeight: 800,
                 fontSize: '0.95rem',
-                color: 'var(--brand, #6b215c)',
+                color: 'var(--brand, #4A0E4E)',
                 background: 'rgba(107, 33, 92, 0.08)',
                 padding: '0.2rem 0.55rem',
                 borderRadius: '6px',
@@ -297,7 +297,7 @@ export function SellerOrderCard({
                 borderRadius: '8px',
                 fontSize: '0.76rem',
                 fontWeight: active ? 800 : 600,
-                background: active ? 'var(--brand, #6b215c)' : completed ? 'rgba(29, 107, 67, 0.12)' : 'transparent',
+                background: active ? 'var(--brand, #4A0E4E)' : completed ? 'rgba(29, 107, 67, 0.12)' : 'transparent',
                 color: active ? '#ffffff' : completed ? '#166534' : 'var(--muted, #7a6874)',
               }}
             >
@@ -367,7 +367,7 @@ export function SellerOrderCard({
                       display: 'inline-block',
                       marginTop: 2,
                       fontSize: 9,
-                      color: '#6b215c',
+                      color: '#4A0E4E',
                       fontWeight: 700,
                       cursor: 'pointer',
                     }}
@@ -468,7 +468,7 @@ export function SellerOrderCard({
             gap: '0.65rem',
           }}
         >
-          <strong style={{ fontSize: '0.84rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--brand, #6b215c)' }}>
+          <strong style={{ fontSize: '0.84rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--brand, #4A0E4E)' }}>
             Order Line Items & Timestamps
           </strong>
           <div style={{ display: 'grid', gap: '0.35rem' }}>

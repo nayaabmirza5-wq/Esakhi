@@ -23,10 +23,9 @@ export async function connectDatabase(): Promise<void> {
   }
   if (!connectionPromise) {
     let mongoUri = sanitizeMongoUri(process.env.MONGODB_URI || env.MONGODB_URI || FALLBACK_ATLAS_URI);
-    const isProductionOrVercel = env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
     if (
-      !mongoUri ||
-      (isProductionOrVercel && (mongoUri.includes('127.0.0.1') || mongoUri.includes('localhost')))
+      env.NODE_ENV !== 'test' &&
+      (!mongoUri || !mongoUri.includes('cluster0.sc3agyn.mongodb.net'))
     ) {
       mongoUri = FALLBACK_ATLAS_URI;
     }
@@ -34,7 +33,8 @@ export async function connectDatabase(): Promise<void> {
     const connectWithUri = async (uri: string): Promise<void> => {
       await mongoose.connect(uri, {
         dbName: 'Esakhi',
-        serverSelectionTimeoutMS: 8_000,
+        serverSelectionTimeoutMS: 5_000,
+        maxPoolSize: 10,
       });
       void Promise.all([NotificationEvent.init(), PushToken.init()]).catch((err) => {
         logger.warn('Index init warning', { error: String(err) });

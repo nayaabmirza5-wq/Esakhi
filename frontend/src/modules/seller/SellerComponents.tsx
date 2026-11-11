@@ -135,7 +135,7 @@ export function SellerProfileView({
         </div>
 
         <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem' }}>
-          <button className="seller-primary-action" type="submit" disabled={saving} style={{ background: '#6b215c', color: '#ffffff', fontWeight: 800, padding: '0.65rem 1.4rem' }}>
+          <button className="seller-primary-action" type="submit" disabled={saving} style={{ background: '#4A0E4E', color: '#ffffff', fontWeight: 800, padding: '0.65rem 1.4rem' }}>
             {saving ? 'Saving…' : 'Save Store Profile'}
           </button>
           <Link className="seller-secondary-action" to="/help">Get Help</Link>
@@ -209,7 +209,7 @@ export function DamohCityAdminHelpModal({ isOpen, onClose }: { isOpen: boolean; 
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #e2e8f0', paddingBottom: '0.85rem' }}>
           <div>
-            <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#6b215c', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#4A0E4E', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
               Damoh City Admin Support Desk
             </div>
             <h3 style={{ margin: '0.2rem 0 0', fontSize: '1.35rem', color: '#0f172a' }}>

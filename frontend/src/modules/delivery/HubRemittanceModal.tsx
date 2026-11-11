@@ -421,7 +421,7 @@ const handleUpiRemit = async () => {
                   onClick={() => void handleUpiRemit()}
                   style={{
                     width: '100%',
-                    background: '#6b215c',
+                    background: '#4A0E4E',
                     color: '#ffffff',
                     border: 'none',
                     padding: '0.85rem',

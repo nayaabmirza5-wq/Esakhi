@@ -37,6 +37,10 @@ const helmet = ((helmetModule as unknown as { default?: HelmetFactory }).default
 export const app = express();
 app.set('trust proxy', env.TRUST_PROXY_HOPS || 1);
 
+if (env.NODE_ENV !== 'test' && process.env.NODE_ENV !== 'test') {
+  void connectDatabase().catch(() => {});
+}
+
 app.get('/', (_req, res) => {
   res.status(200).json({
     success: true,

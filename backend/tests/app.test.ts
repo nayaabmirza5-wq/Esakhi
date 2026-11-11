@@ -345,17 +345,17 @@ describe('backend API foundation', () => {
     expect(nextFulfilmentStatus('cancelled', 'delivery')).toBeNull();
   });
 
-  it('allows delivery partner assignment only once until a delivery attempt fails', () => {
-    expect(canAssignDeliveryPartner('preparing', false)).toBe(true);
-    expect(canAssignDeliveryPartner('preparing', true)).toBe(false);
+  it('allows delivery partner assignment only once ready for pickup or after delivery failure', () => {
+    expect(canAssignDeliveryPartner('ready_for_pickup', false)).toBe(true);
+    expect(canAssignDeliveryPartner('preparing', false)).toBe(false);
     expect(canAssignDeliveryPartner('out_for_delivery', true)).toBe(false);
     expect(canAssignDeliveryPartner('delivery_failed', true)).toBe(true);
     expect(canAssignDeliveryPartner('delivered', false)).toBe(false);
   });
 
-  it('resets a failed delivery to preparing when a new partner is assigned', () => {
-    expect(statusAfterDeliveryPartnerAssignment('delivery_failed')).toBe('preparing');
-    expect(statusAfterDeliveryPartnerAssignment('preparing')).toBe('preparing');
+  it('sets status to delivery_partner_assigned when a partner is assigned for delivery', () => {
+    expect(statusAfterDeliveryPartnerAssignment('delivery_failed')).toBe('delivery_partner_assigned');
+    expect(statusAfterDeliveryPartnerAssignment('ready_for_pickup')).toBe('delivery_partner_assigned');
     expect(statusAfterDeliveryPartnerAssignment('out_for_delivery')).toBe('out_for_delivery');
   });
 

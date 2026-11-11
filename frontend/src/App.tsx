@@ -423,7 +423,7 @@ function Header({ theme, setTheme }: { theme: string; setTheme: (value: string) 
     <header className="site-header">
       <div className="header-inner">
         <Link to="/" className="brand" aria-label="eSakhi home">
-          <img src="/images/maitri-sisterhood-logo.png" alt="eSakhi — Handmade by women, made for you" />
+          <img src="/images/esakhi-logo-transparent.png" alt="eSakhi — Handmade with Love. Empowered by You." />
         </Link>
         <nav className="main-nav" aria-label="Main navigation">
           <NavLink to="/shop">Shop</NavLink>
@@ -460,7 +460,7 @@ function Footer(): ReactNode {
   return (
     <footer className="site-footer">
       <div className="footer-main">
-        <Link to="/" className="footer-brand"><img src="/images/maitri-sisterhood-logo.png" alt="" /><span>Handmade with love.<br />Empowered by you.</span></Link>
+        <Link to="/" className="footer-brand"><img src="/images/esakhi-logo-transparent.png" alt="eSakhi" /><span>Handmade with Love.<br />Empowered by You.</span></Link>
         <div><strong>Explore</strong><Link to="/shop">Shop handmade</Link><Link to="/our-story">Our story</Link><Link to="/service-area">Service area</Link><Link to="/help">Help & policies</Link><Link to="/cart">Your bag</Link></div>
         <div><strong>Your account</strong><Link to="/account">Profile</Link><Link to="/orders">Order history</Link><Link to="/sign-in">Sign in</Link></div>
       </div>
@@ -496,7 +496,10 @@ function ProductCard({ product }: { product: Product }): ReactNode {
   return (
     <article className="product-card">
       <Link to={`/products/${encodeURIComponent(product.slug)}`} className="product-image">
-        {image ? <img src={image} alt={product.name} loading="lazy" /> : <div className="image-placeholder" aria-label="No product image available"><img src="/images/maitri-sisterhood-logo.png" alt="" /></div>}
+        <span className="product-pop-badge">
+          <span>✨</span> Handcrafted
+        </span>
+        {image ? <img src={image} alt={product.name} loading="lazy" /> : <div className="image-placeholder" aria-label="No product image available"><img src="/images/esakhi-logo-transparent.png" alt="" /></div>}
         {!available && <span className="image-badge">Out of stock</span>}
       </Link>
       <div className="product-card-body">
@@ -558,7 +561,7 @@ function HeroCarousel({ products }: { products: Product[] }): ReactNode {
       >
         {image
           ? <img src={resolveProductImageUrl(image)} alt={activeProduct.name} />
-          : <img src="/images/maitri-sisterhood-logo.png" alt="eSakhi emblem representing women creating together" />}
+          : <img src="/images/esakhi-logo-transparent.png" alt="eSakhi emblem representing women creating together" />}
       </Link>
       {products.length > 1 && (
         <div className="hero-carousel-controls" aria-label="Featured product slides">
@@ -577,7 +580,7 @@ function HeroCarousel({ products }: { products: Product[] }): ReactNode {
           <button className="hero-carousel-arrow" onClick={() => showProduct(activeIndex + 1)} aria-label="Next product">›</button>
         </div>
       )}
-      <div className="hero-stamp"><img src="/images/maitri-sisterhood-logo.png" alt="" /><span>Made<br />together</span></div>
+      <div className="hero-stamp"><img src="/images/esakhi-logo-transparent.png" alt="" /><span>Made<br />together</span></div>
       <div className="hero-note">
         <span className="note-flower" aria-hidden="true">✿</span>
         <span>
@@ -610,6 +613,38 @@ function HomePage(): ReactNode {
           <HeroCarousel products={products.data ?? []} />
         </div>
       </section>
+      <section className="marquee-3d-wrapper" aria-label="eSakhi highlights">
+        <div className="marquee-3d-track">
+          <div className="marquee-3d-group">
+            <span>🌸 100% Handcrafted by Rural Women</span>
+            <span className="marquee-dot">•</span>
+            <span>✨ Direct from Damoh Clusters — Zero Middlemen</span>
+            <span className="marquee-dot">•</span>
+            <span>🌿 Eco-friendly, Natural & Pure Craft</span>
+            <span className="marquee-dot">•</span>
+            <span>🛍️ Handmade with Love. Empowered by You.</span>
+            <span className="marquee-dot">•</span>
+            <span>💖 Supporting 500+ Sisterhood Artisans</span>
+            <span className="marquee-dot">•</span>
+            <span>🚚 Safe & Swift Doorstep Delivery</span>
+            <span className="marquee-dot">•</span>
+          </div>
+          <div className="marquee-3d-group" aria-hidden="true">
+            <span>🌸 100% Handcrafted by Rural Women</span>
+            <span className="marquee-dot">•</span>
+            <span>✨ Direct from Damoh Clusters — Zero Middlemen</span>
+            <span className="marquee-dot">•</span>
+            <span>🌿 Eco-friendly, Natural & Pure Craft</span>
+            <span className="marquee-dot">•</span>
+            <span>🛍️ Handmade with Love. Empowered by You.</span>
+            <span className="marquee-dot">•</span>
+            <span>💖 Supporting 500+ Sisterhood Artisans</span>
+            <span className="marquee-dot">•</span>
+            <span>🚚 Safe & Swift Doorstep Delivery</span>
+            <span className="marquee-dot">•</span>
+          </div>
+        </div>
+      </section>
       <section className="section section-categories">
         <div className="section-heading"><div><span className="eyebrow">Find your favorite</span><h2>Made to be <em>treasured.</em></h2></div><Link to="/shop" className="quiet-link">Explore everything →</Link></div>
         {categories.error && <div className="section-state"><Notice tone="error">{categories.error}</Notice><button className="button button-outline" onClick={() => void categories.reload()}>Retry categories</button></div>}
@@ -624,7 +659,7 @@ function HomePage(): ReactNode {
         <ProductGrid products={(products.data ?? []).slice(0, 4)} loading={products.loading} error={products.error} reload={products.reload} />
       </section>
       <section className="story-band">
-        <div className="story-band-mark"><img src="/images/maitri-sisterhood-logo.png" alt="" /></div>
+        <div className="story-band-mark"><img src="/images/esakhi-logo-transparent.png" alt="" /></div>
         <div><span className="eyebrow">More than a purchase</span><h2>Every order helps<br />a story <em>continue.</em></h2><p>When you choose eSakhi, you celebrate skill, support a community, and help handmade traditions find a place in modern homes.</p><Link to="/our-story" className="button button-light">Read our story <span>→</span></Link></div>
         <div className="story-band-side"><span>01</span><span>Skill</span><span>02</span><span>Community</span><span>03</span><span>Independence</span></div>
       </section>
@@ -738,7 +773,7 @@ function ProductPage(): ReactNode {
     <div className="page-container product-detail">
       <div className="breadcrumbs"><Link to="/shop">Shop</Link><span>/</span><Link to={`/shop?categoryId=${encodeURIComponent(item.categoryId)}`}>{item.categoryName}</Link><span>/</span><Link to={`/shop?categoryId=${encodeURIComponent(item.categoryId)}&subcategoryId=${encodeURIComponent(item.subcategoryId)}`}>{item.subcategoryName}</Link></div>
       <div className="detail-grid">
-        <div className="detail-gallery">{item.imageUrls.length ? item.imageUrls.map((image, index) => <img key={image} src={resolveProductImageUrl(image)} alt={`${item.name}, view ${index + 1}`} />) : <div className="detail-placeholder"><img src="/images/maitri-sisterhood-logo.png" alt="" /><span>Product image coming soon</span></div>}</div>
+        <div className="detail-gallery">{item.imageUrls.length ? item.imageUrls.map((image, index) => <img key={image} src={resolveProductImageUrl(image)} alt={`${item.name}, view ${index + 1}`} />) : <div className="detail-placeholder"><img src="/images/esakhi-logo-transparent.png" alt="" /><span>Product image coming soon</span></div>}</div>
         <div className="detail-copy"><span className="eyebrow">{item.categoryName} · {item.subcategoryName}</span><h1>{item.name}</h1><p className="detail-price">{formatMoney(item.pricePaise)}</p><p className="detail-description">{item.description}</p>
           <p className="detail-seller">Seller / SHG: <strong>{item.sellerName || 'Seller details unavailable'}</strong></p>
           {item.variants.length > 0 && <label className="field"><span>Choose an option</span><select value={variantId} onChange={(event) => setVariantId(event.target.value)}><option value="">Select an option</option>{item.variants.map((option) => <option key={option._id} value={option._id}>{Object.values(option.attributes).join(' · ') || option.sku || 'Option'}{option.stock <= 0 ? ' — unavailable' : ''}</option>)}</select></label>}
@@ -754,7 +789,7 @@ function ProductPage(): ReactNode {
 function StoryPage(): ReactNode {
   return (
     <div className="story-page">
-      <section className="story-hero"><div className="story-hero-logo"><img src="/images/maitri-sisterhood-logo.png" alt="eSakhi — Handmade by women, made for you" /></div><div><span className="eyebrow">The people behind every piece</span><h1>From her hands<br />to your <em>heart.</em></h1><p>Every handmade product carries a story of courage, creativity, and independence.</p></div></section>
+      <section className="story-hero"><div className="story-hero-logo"><img src="/images/esakhi-logo-transparent.png" alt="eSakhi — Handmade by women, made for you" /></div><div><span className="eyebrow">The people behind every piece</span><h1>From her hands<br />to your <em>heart.</em></h1><p>Every handmade product carries a story of courage, creativity, and independence.</p></div></section>
       <article className="story-article">
         <div className="story-article-aside"><span className="story-aside-mark">✿</span><span>Made together,<br />with care.</span></div>
         <div className="story-article-copy"><p className="story-lead">Meet Sita, a woman from a small town in Madhya Pradesh. Like many women in her community, she had creative skills but limited opportunities to earn an income of her own.</p><p>Her journey changed when she joined a Self-Help Group with other women in her community. Together, they began making beautiful bangles, jewellery, and traditional dupattas using their skills, patience, and creativity.</p><p>Initially, reaching customers beyond their local neighbourhood was difficult. Their products were made with care, but finding the right market was a challenge.</p><p>With the support of her group, Sita continued improving her craft and learning how to present and sell her products. Every order became a reason to feel proud, and every sale brought her one step closer to financial independence.</p><p>Today, her work represents more than handmade products. It represents the strength of women working together, supporting their families, preserving traditional skills, and building a brighter future.</p></div>
@@ -867,24 +902,25 @@ function SignInPage(): ReactNode {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    void api.discovery().catch(() => {});
+  }, []);
+
   const signInState = location.state as { from?: string; checkoutState?: unknown } | null;
   if (user) return <div className="page-container narrow"><Notice tone="success">You are signed in as {user.name || user.phone}.</Notice><Link to={workspacePathForRole(user.role)} className="button">Continue to your workspace</Link></div>;
 
-  const submitPhone = async (event: FormEvent) => {
+  const submitPhone = (event: FormEvent) => {
     event.preventDefault();
-    setLoading(true);
     setError('');
     try {
       const formattedNumber = formatE164(phone);
       if (!/^\+91[6-9]\d{9}$/.test(formattedNumber)) {
         throw new Error('Please enter a valid 10-digit Indian mobile number.');
       }
-      await api.sendOtp(formattedNumber);
       setRequested(true);
+      void api.sendOtp(formattedNumber).catch(() => {});
     } catch (cause) {
       setError(displayError(cause));
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -900,11 +936,7 @@ function SignInPage(): ReactNode {
         localStorage.setItem('token', token);
       }
       setSession(session.user, token);
-      try {
-        await reloadUser();
-      } catch (err) {
-        console.warn('reloadUser failed, continuing navigation:', err);
-      }
+      void reloadUser().catch(() => {});
       navigate(signInState?.from || '/', { replace: true, state: signInState?.checkoutState });
     } catch (cause) {
       setError(displayError(cause));
@@ -916,7 +948,7 @@ function SignInPage(): ReactNode {
   return (
     <div className="auth-layout">
       <div className="auth-art">
-        <img src="/images/maitri-sisterhood-logo.png" alt="" />
+        <img src="/images/esakhi-logo-transparent.png" alt="" />
         <span>Handmade by women,<br />made for you.</span>
       </div>
       <section className="auth-card">
@@ -963,7 +995,7 @@ function CartPage(): ReactNode {
     const fresh = currentProducts.data?.find((entry) => entry.key === productKey(line))?.product;
     return sum + (fresh?.pricePaise ?? line.product.pricePaise) * line.quantity;
   }, 0);
-  return <div className="page-container"><PageIntro eyebrow="Your selection" title="Your bag" description="Your total is confirmed by eSakhi when you place your order." />{!lines.length ? <EmptyState title="Your bag is waiting for something lovely"><Link to="/shop" className="button">Explore the collection</Link></EmptyState> : <div className="cart-layout"><div className="cart-list">{currentProducts.loading && <Loading label="Checking current product details…" />}{lines.map((line) => { const refreshed = currentProducts.data?.find((entry) => entry.key === productKey(line)); const displayProduct = refreshed?.product ?? line.product; const failed = Boolean(refreshed && !refreshed.product); const unavailable = line.unavailable; return <article key={productKey(line)} className="cart-item"><Link to={`/products/${displayProduct.slug}`} className="cart-thumb">{displayProduct.imageUrls[0] ? <img src={resolveProductImageUrl(displayProduct.imageUrls[0])} alt="" /> : <img src="/images/maitri-sisterhood-logo.png" alt="" />}</Link><div className="cart-item-info"><span className="product-category">{displayProduct.category}</span><Link to={`/products/${displayProduct.slug}`} className="product-name">{displayProduct.name}</Link><span>{formatMoney(displayProduct.pricePaise)}</span>{unavailable && <span className="stock-note unavailable">No longer available — remove to continue.</span>}{failed && !unavailable && <span className="stock-note unavailable">{refreshed?.error || 'Could not refresh product details.'}</span>}</div><div className="cart-quantity"><button onClick={() => line.quantity > 1 ? setQuantity(productKey(line), line.quantity - 1) : remove(productKey(line))} aria-label="Decrease quantity">−</button><span>{line.quantity}</span><button onClick={() => setQuantity(productKey(line), Math.min(99, line.quantity + 1))} aria-label="Increase quantity">+</button></div><strong>{formatMoney(displayProduct.pricePaise * line.quantity)}</strong><button className="remove-button" onClick={() => remove(productKey(line))} aria-label={`Remove ${displayProduct.name}`}>×</button></article>; })}</div><aside className="summary-card"><span className="eyebrow">Order summary</span><div><span>Estimated subtotal</span><strong>{formatMoney(subtotal)}</strong></div><small>Final price, delivery fee, stock and payment options are checked by the server at checkout.</small>{currentProducts.data?.some((entry) => !entry.product) && <Notice tone="error">Refresh current product details or remove unavailable items before continuing.</Notice>}{currentProducts.data?.some((entry) => !entry.product) && <button className="button button-outline" onClick={() => void currentProducts.reload()}>Retry product check</button>}<Link aria-disabled={currentProducts.loading || currentProducts.data?.some((entry) => !entry.product)} onClick={(event) => { if (currentProducts.loading || currentProducts.data?.some((entry) => !entry.product)) event.preventDefault(); }} to="/checkout" className={`button button-full ${currentProducts.loading || currentProducts.data?.some((entry) => !entry.product) ? 'button-disabled' : ''}`}>Continue to checkout</Link><Link to="/shop" className="quiet-link">Continue shopping</Link></aside></div>}</div>;
+  return <div className="page-container"><PageIntro eyebrow="Your selection" title="Your bag" description="Your total is confirmed by eSakhi when you place your order." />{!lines.length ? <EmptyState title="Your bag is waiting for something lovely"><Link to="/shop" className="button">Explore the collection</Link></EmptyState> : <div className="cart-layout"><div className="cart-list">{currentProducts.loading && <Loading label="Checking current product details…" />}{lines.map((line) => { const refreshed = currentProducts.data?.find((entry) => entry.key === productKey(line)); const displayProduct = refreshed?.product ?? line.product; const failed = Boolean(refreshed && !refreshed.product); const unavailable = line.unavailable; return <article key={productKey(line)} className="cart-item"><Link to={`/products/${displayProduct.slug}`} className="cart-thumb">{displayProduct.imageUrls[0] ? <img src={resolveProductImageUrl(displayProduct.imageUrls[0])} alt="" /> : <img src="/images/esakhi-logo-transparent.png" alt="" />}</Link><div className="cart-item-info"><span className="product-category">{displayProduct.category}</span><Link to={`/products/${displayProduct.slug}`} className="product-name">{displayProduct.name}</Link><span>{formatMoney(displayProduct.pricePaise)}</span>{unavailable && <span className="stock-note unavailable">No longer available — remove to continue.</span>}{failed && !unavailable && <span className="stock-note unavailable">{refreshed?.error || 'Could not refresh product details.'}</span>}</div><div className="cart-quantity"><button onClick={() => line.quantity > 1 ? setQuantity(productKey(line), line.quantity - 1) : remove(productKey(line))} aria-label="Decrease quantity">−</button><span>{line.quantity}</span><button onClick={() => setQuantity(productKey(line), Math.min(99, line.quantity + 1))} aria-label="Increase quantity">+</button></div><strong>{formatMoney(displayProduct.pricePaise * line.quantity)}</strong><button className="remove-button" onClick={() => remove(productKey(line))} aria-label={`Remove ${displayProduct.name}`}>×</button></article>; })}</div><aside className="summary-card"><span className="eyebrow">Order summary</span><div><span>Estimated subtotal</span><strong>{formatMoney(subtotal)}</strong></div><small>Final price, delivery fee, stock and payment options are checked by the server at checkout.</small>{currentProducts.data?.some((entry) => !entry.product) && <Notice tone="error">Refresh current product details or remove unavailable items before continuing.</Notice>}{currentProducts.data?.some((entry) => !entry.product) && <button className="button button-outline" onClick={() => void currentProducts.reload()}>Retry product check</button>}<Link aria-disabled={currentProducts.loading || currentProducts.data?.some((entry) => !entry.product)} onClick={(event) => { if (currentProducts.loading || currentProducts.data?.some((entry) => !entry.product)) event.preventDefault(); }} to="/checkout" className={`button button-full ${currentProducts.loading || currentProducts.data?.some((entry) => !entry.product) ? 'button-disabled' : ''}`}>Continue to checkout</Link><Link to="/shop" className="quiet-link">Continue shopping</Link></aside></div>}</div>;
 }
 
 function CheckoutPage(): ReactNode {
@@ -1351,7 +1383,7 @@ function CheckoutPage(): ReactNode {
                 fontWeight: 900,
                 padding: '0.95rem 1.25rem',
                 borderRadius: '12px',
-                background: 'linear-gradient(135deg, #6b215c 0%, #4a044e 100%)',
+                background: 'linear-gradient(135deg, #4A0E4E 0%, #4a044e 100%)',
                 color: '#ffffff',
                 border: 'none',
                 boxShadow: '0 4px 15px rgba(107, 33, 92, 0.35)',
@@ -1829,7 +1861,7 @@ function CustomerOrderPage(): ReactNode {
               alignItems: 'center',
               gap: 6,
               background: '#FDF4FF',
-              color: '#6B215C',
+              color: '#4A0E4E',
               border: '1px solid #E879F9',
               borderRadius: 8,
               padding: '5px 12px',
@@ -1885,7 +1917,7 @@ function CustomerOrderPage(): ReactNode {
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
           <div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: 'rgba(255,255,255,0.85)', border: '1px solid rgba(0,0,0,0.06)', fontSize: 12, fontWeight: 700, color: '#6D2878', marginBottom: 8 }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: 'rgba(255,255,255,0.85)', border: '1px solid rgba(0,0,0,0.06)', fontSize: 12, fontWeight: 700, color: '#4A0E4E', marginBottom: 8 }}>
               <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#10B981', boxShadow: '0 0 0 3px rgba(16, 185, 129, 0.25)' }} />
               LIVE ORDER STATUS · DAMOH ARTISAN CLUSTER
             </div>
@@ -1940,7 +1972,7 @@ function CustomerOrderPage(): ReactNode {
                 fontSize: 13,
                 fontWeight: 700,
                 background: isCancelled ? '#FEE2E2' : isDelivered ? '#DCFCE7' : '#FDF2F8',
-                color: isCancelled ? '#991B1B' : isDelivered ? '#15803D' : '#6D2878',
+                color: isCancelled ? '#991B1B' : isDelivered ? '#15803D' : '#4A0E4E',
                 border: `1.5px solid ${isCancelled ? '#FCA5A5' : isDelivered ? '#86EFAC' : 'rgba(164, 61, 131, 0.3)'}`,
               }}
             >
@@ -2140,7 +2172,7 @@ function CustomerOrderPage(): ReactNode {
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: '1.5rem' }}>
             <div>
-              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', color: '#6D2878', textTransform: 'uppercase' }}>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', color: '#4A0E4E', textTransform: 'uppercase' }}>
                 Order Progress Tracker
               </div>
               <h2 style={{ margin: '2px 0 0', fontSize: '1.25rem', fontWeight: 800, color: '#111827' }}>
@@ -2182,7 +2214,7 @@ function CustomerOrderPage(): ReactNode {
                 style={{
                   height: '100%',
                   width: `${getProgressPercentage()}%`,
-                  background: 'linear-gradient(90deg, #6D2878 0%, #10B981 100%)',
+                  background: 'linear-gradient(90deg, #4A0E4E 0%, #10B981 100%)',
                   borderRadius: 999,
                   transition: 'width 0.4s ease',
                 }}
@@ -2199,8 +2231,8 @@ function CustomerOrderPage(): ReactNode {
                         width: 44,
                         height: 44,
                         borderRadius: '50%',
-                        background: m.reached ? '#6D2878' : '#FFFFFF',
-                        border: `3px solid ${m.reached ? '#6D2878' : '#D1D5DB'}`,
+                        background: m.reached ? '#4A0E4E' : '#FFFFFF',
+                        border: `3px solid ${m.reached ? '#4A0E4E' : '#D1D5DB'}`,
                         color: m.reached ? '#FFFFFF' : '#9CA3AF',
                         display: 'grid',
                         placeItems: 'center',
@@ -2231,7 +2263,7 @@ function CustomerOrderPage(): ReactNode {
               style={{
                 background: 'transparent',
                 border: 'none',
-                color: '#6D2878',
+                color: '#4A0E4E',
                 fontSize: 12,
                 fontWeight: 700,
                 cursor: 'pointer',
@@ -2269,16 +2301,16 @@ function CustomerOrderPage(): ReactNode {
                     style={{
                       padding: '8px 10px',
                       borderRadius: 8,
-                      border: isCurrent ? '1.5px solid #6D2878' : reached ? '1px solid #A7F3D0' : '1px solid #E5E7EB',
+                      border: isCurrent ? '1.5px solid #4A0E4E' : reached ? '1px solid #A7F3D0' : '1px solid #E5E7EB',
                       background: isCurrent ? '#FDF2F8' : reached ? '#ECFDF5' : '#FFFFFF',
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: reached ? (isCurrent ? '#6D2878' : '#047857') : '#9CA3AF' }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: reached ? (isCurrent ? '#4A0E4E' : '#047857') : '#9CA3AF' }}>
                         {reached ? '✓ ' : `${index + 1}. `}{step.label}
                       </span>
                       {isCurrent && (
-                        <span style={{ fontSize: 9, fontWeight: 800, background: '#6D2878', color: '#FFF', padding: '1px 5px', borderRadius: 999 }}>
+                        <span style={{ fontSize: 9, fontWeight: 800, background: '#4A0E4E', color: '#FFF', padding: '1px 5px', borderRadius: 999 }}>
                           NOW
                         </span>
                       )}
@@ -2520,7 +2552,7 @@ function CustomerOrderPage(): ReactNode {
               <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#111827', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span>🛍️</span> Handcrafted Pieces ({item.items.reduce((acc, curr) => acc + curr.quantity, 0)})
               </h2>
-              <span style={{ fontSize: 11, fontWeight: 700, color: '#6D2878', background: '#FDF2F8', padding: '3px 10px', borderRadius: 999 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#4A0E4E', background: '#FDF2F8', padding: '3px 10px', borderRadius: 999 }}>
                 Direct from SHG
               </span>
             </div>
@@ -2545,7 +2577,7 @@ function CustomerOrderPage(): ReactNode {
                         height: 44,
                         borderRadius: 10,
                         background: '#FDF2F8',
-                        color: '#6D2878',
+                        color: '#4A0E4E',
                         display: 'grid',
                         placeItems: 'center',
                         fontSize: 22,
@@ -2603,7 +2635,7 @@ function CustomerOrderPage(): ReactNode {
                 }}
               >
                 <span>Total Amount</span>
-                <span style={{ fontSize: 18, color: '#6D2878' }}>{formatMoney(item.totalPaise)}</span>
+                <span style={{ fontSize: 18, color: '#4A0E4E' }}>{formatMoney(item.totalPaise)}</span>
               </div>
             </div>
           </div>
@@ -2769,7 +2801,7 @@ function CustomerOrderPage(): ReactNode {
               style={{
                 marginTop: 14,
                 width: '100%',
-                background: '#6B215C',
+                background: '#4A0E4E',
                 color: '#FFFFFF',
                 border: 'none',
                 borderRadius: 10,
@@ -3068,7 +3100,7 @@ function SuperAdminLayout({ children }: { children: ReactNode }): ReactNode {
       {mobileOpen && <button className="super-admin-backdrop" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
       <aside className={`super-admin-sidebar${mobileOpen ? ' is-open' : ''}`}>
         <Link to="/super-admin" className="super-admin-brand">
-          <img src="/images/maitri-sisterhood-logo.png" alt="" />
+          <img src="/images/esakhi-logo-transparent.png" alt="" />
           <span>eSakhi<small>Super Admin Portal</small></span>
         </Link>
         <nav className="super-admin-nav" aria-label="Super Admin navigation">
@@ -4984,7 +5016,7 @@ function CityAdminLayout({ children }: { children: ReactNode }): ReactNode {
     <div className="city-admin-shell">
       {mobileOpen && <button className="city-admin-backdrop" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
       <aside className={`city-admin-sidebar${mobileOpen ? ' is-open' : ''}`}>
-        <Link to="/city-admin" className="city-admin-brand"><img src="/images/maitri-sisterhood-logo.png" alt="" /><span>eSakhi<small>CITY ADMIN</small></span></Link>
+        <Link to="/city-admin" className="city-admin-brand"><img src="/images/esakhi-logo-transparent.png" alt="" /><span>eSakhi<small>CITY ADMIN</small></span></Link>
         <div className="city-admin-assigned-city"><span>ASSIGNED CITY</span><strong>{user?.assignedCity}</strong><small>City Admin scope</small></div>
         <nav className="city-admin-nav" aria-label="City Admin navigation">
           {cityAdminNavGroups.map((group) => (
@@ -5067,12 +5099,12 @@ function CityAdminLayout({ children }: { children: ReactNode }): ReactNode {
                 borderRadius: '18px',
                 padding: '1.5rem',
                 boxShadow: '0 24px 60px rgba(25, 10, 20, 0.28)',
-                border: '2px solid var(--brand, #6b215c)',
+                border: '2px solid var(--brand, #4A0E4E)',
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', marginBottom: '1rem' }}>
                 <div>
-                  <p className="city-admin-eyebrow" style={{ color: 'var(--brand, #6b215c)', fontWeight: 700 }}>🔔 SELLER READY FOR PICKUP NOTIFICATION</p>
+                  <p className="city-admin-eyebrow" style={{ color: 'var(--brand, #4A0E4E)', fontWeight: 700 }}>🔔 SELLER READY FOR PICKUP NOTIFICATION</p>
                   <h2 id="city-admin-ready-popup-title" style={{ margin: '0.25rem 0', fontSize: '1.35rem' }}>
                     {unassignedReadyOrders.length
                       ? `Order Ready for Pickup — Assign a Delivery Partner (${unassignedReadyOrders.length})`
@@ -5383,7 +5415,7 @@ function CityAdminServiceZonesPage(): ReactNode {
         <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '18px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
           <span style={{ fontSize: '11px', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em', display: 'block' }}>Designated Administrator</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
-            <span style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#f3e8f7', color: '#6d2878', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: '13px' }}>
+            <span style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#f3e8f7', color: '#4A0E4E', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: '13px' }}>
               {(admin?.name || 'A').slice(0, 1).toUpperCase()}
             </span>
             <div>
@@ -5870,7 +5902,7 @@ function AdminGate({ children, adminOnly = false }: { children: ReactNode; admin
 function AdminLayout({ children }: { children: ReactNode }): ReactNode {
   const { user } = useAuth();
   const admin = user?.role === 'admin' || user?.role === 'super_admin';
-  return <div className="admin-shell"><aside className="admin-sidebar"><Link to="/admin" className="admin-brand"><img src="/images/maitri-sisterhood-logo.png" alt="" /><span>eSakhi<br /><small>Maker workspace</small></span></Link><span className="sidebar-label">WORKSPACE</span><nav className="admin-nav"><NavLink to="/admin" end>Overview</NavLink><NavLink to="/admin/products">Products</NavLink>{admin && <NavLink to="/admin/inventory">Inventory</NavLink>}<NavLink to="/admin/orders">Orders</NavLink>{admin && <NavLink to="/admin/delivery-partners">Delivery Partners</NavLink>}{admin && <NavLink to="/admin/customers">Customers</NavLink>}{admin && <NavLink to="/admin/settings">Store settings</NavLink>}<NavLink to="/admin/system">API status</NavLink></nav><div className="sidebar-user"><span className="avatar">{(user?.name || 'E').slice(0, 1).toUpperCase()}</span><span><strong>{user?.name || user?.phone}</strong><small>{user?.role}</small></span></div></aside><section className="admin-content">{children}</section></div>;
+  return <div className="admin-shell"><aside className="admin-sidebar"><Link to="/admin" className="admin-brand"><img src="/images/esakhi-logo-transparent.png" alt="" /><span>eSakhi<br /><small>Maker workspace</small></span></Link><span className="sidebar-label">WORKSPACE</span><nav className="admin-nav"><NavLink to="/admin" end>Overview</NavLink><NavLink to="/admin/products">Products</NavLink>{admin && <NavLink to="/admin/inventory">Inventory</NavLink>}<NavLink to="/admin/orders">Orders</NavLink>{admin && <NavLink to="/admin/delivery-partners">Delivery Partners</NavLink>}{admin && <NavLink to="/admin/customers">Customers</NavLink>}{admin && <NavLink to="/admin/settings">Store settings</NavLink>}<NavLink to="/admin/system">API status</NavLink></nav><div className="sidebar-user"><span className="avatar">{(user?.name || 'E').slice(0, 1).toUpperCase()}</span><span><strong>{user?.name || user?.phone}</strong><small>{user?.role}</small></span></div></aside><section className="admin-content">{children}</section></div>;
 }
 
 function AdminDashboardPage(): ReactNode {

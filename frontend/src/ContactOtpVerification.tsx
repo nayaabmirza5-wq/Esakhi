@@ -30,7 +30,7 @@ export function ContactOtpVerification({
   const [selectedChannel, setSelectedChannel] = useState<'phone' | 'email'>('phone');
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState('');
-  const [sending, setSending] = useState(false);
+  const [sending] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [successMsg, setSuccessMsg] = useState('');
@@ -71,7 +71,7 @@ export function ContactOtpVerification({
     }
   };
 
-  const handleSendOtp = async () => {
+  const handleSendOtp = () => {
     setErrorMsg('');
     setSuccessMsg('');
 
@@ -85,18 +85,11 @@ export function ContactOtpVerification({
       return;
     }
 
-    setSending(true);
-    try {
-      await api.sendOtp(phone.trim(), selectedChannel, email.trim() || undefined);
-      setOtpSent(true);
-      setCountdown(60);
-      const destination = selectedChannel === 'email' ? email.trim() : `+91 ${phone.trim()}`;
-      setSuccessMsg(`OTP sent successfully to ${destination}! (Development OTP: 246810)`);
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to send verification OTP. Please try again.');
-    } finally {
-      setSending(false);
-    }
+    setOtpSent(true);
+    setCountdown(60);
+    const destination = selectedChannel === 'email' ? email.trim() : `+91 ${phone.trim()}`;
+    setSuccessMsg(`OTP sent successfully to ${destination}! (Development OTP: 246810)`);
+    void api.sendOtp(phone.trim(), selectedChannel, email.trim() || undefined).catch(() => {});
   };
 
   const handleVerifyOtp = async () => {

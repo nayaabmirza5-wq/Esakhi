@@ -253,8 +253,8 @@ export function SellerStockStepper({
                 transition: 'all 0.15s ease',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = '#6b215c';
-                e.currentTarget.style.color = '#6b215c';
+                e.currentTarget.style.borderColor = '#4A0E4E';
+                e.currentTarget.style.color = '#4A0E4E';
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.borderColor = '#cbd5e1';

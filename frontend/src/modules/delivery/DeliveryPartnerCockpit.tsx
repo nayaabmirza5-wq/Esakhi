@@ -265,7 +265,7 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
       {/* Top Mobile Bar - Sleek Glassmorphism Gradient */}
       <header
         style={{
-          background: 'linear-gradient(135deg, #3d0c45 0%, #6b215c 55%, #831843 100%)',
+          background: 'linear-gradient(135deg, #3d0c45 0%, #4A0E4E 55%, #831843 100%)',
           color: '#ffffff',
           padding: '0.85rem 1.25rem',
           display: 'flex',
@@ -368,7 +368,7 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
       </header>
 
       {loading && (
-        <div style={{ textAlign: 'center', padding: '0.85rem', color: '#6b215c', fontWeight: 800, fontSize: '0.86rem', background: '#fdf2f8' }}>
+        <div style={{ textAlign: 'center', padding: '0.85rem', color: '#4A0E4E', fontWeight: 800, fontSize: '0.86rem', background: '#fdf2f8' }}>
           ⚡ Syncing live Damoh dispatch & GPS telemetry…
         </div>
       )}
@@ -526,10 +526,10 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
             }}
           >
             <span style={{ fontSize: '1.1rem', display: 'block', marginBottom: '0.2rem' }}>📲</span>
-            <small style={{ fontSize: '0.68rem', color: '#6b215c', fontWeight: 800, display: 'block', textTransform: 'uppercase' }}>
+            <small style={{ fontSize: '0.68rem', color: '#4A0E4E', fontWeight: 800, display: 'block', textTransform: 'uppercase' }}>
               Doorstep UPI
             </small>
-            <strong style={{ fontSize: '1.35rem', color: '#6b215c', fontWeight: 900 }}>
+            <strong style={{ fontSize: '1.35rem', color: '#4A0E4E', fontWeight: 900 }}>
               ₹{shiftMetrics.doorstepUpiRupees}
             </strong>
             <small style={{ display: 'block', fontSize: '0.62rem', color: '#16a34a', fontWeight: 700, marginTop: '0.15rem' }}>
@@ -621,7 +621,7 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
           >
             <span>⚡</span>
             <span>Active Task</span>
-            <span style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem', borderRadius: '999px', backgroundColor: activeTab === 'focus' ? '#6b215c' : '#cbd5e1', color: activeTab === 'focus' ? '#ffffff' : '#475569', fontWeight: 800 }}>
+            <span style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem', borderRadius: '999px', backgroundColor: activeTab === 'focus' ? '#4A0E4E' : '#cbd5e1', color: activeTab === 'focus' ? '#ffffff' : '#475569', fontWeight: 800 }}>
               {activeOrdersCount(orders)}
             </span>
           </button>
@@ -754,7 +754,7 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
                 style={{
                   background: '#ffffff',
                   borderRadius: '20px',
-                  border: isReverseOrder ? '2px solid #ea580c' : '2px solid #6b215c',
+                  border: isReverseOrder ? '2px solid #ea580c' : '2px solid #4A0E4E',
                   padding: '1.25rem',
                   boxShadow: '0 8px 28px rgba(0, 0, 0, 0.08)',
                   position: 'relative',
@@ -765,7 +765,7 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
                   <span
                     style={{
                       backgroundColor: isReverseOrder ? '#ffedd5' : '#fdf2f8',
-                      color: isReverseOrder ? '#c2410c' : '#6b215c',
+                      color: isReverseOrder ? '#c2410c' : '#4A0E4E',
                       border: `1px solid ${isReverseOrder ? '#fed7aa' : '#fbcfe8'}`,
                       padding: '0.25rem 0.65rem',
                       borderRadius: '6px',
@@ -803,8 +803,8 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
                         borderRadius: '8px',
                         textAlign: 'center',
                         background: isPickupStage ? '#fdf2f8' : '#ffffff',
-                        border: isPickupStage ? '1.5px solid #6b215c' : '1px solid #cbd5e1',
-                        color: isPickupStage ? '#6b215c' : '#64748b',
+                        border: isPickupStage ? '1.5px solid #4A0E4E' : '1px solid #cbd5e1',
+                        color: isPickupStage ? '#4A0E4E' : '#64748b',
                       }}
                     >
                       <span style={{ fontSize: '0.72rem', fontWeight: 800, display: 'block', textTransform: 'uppercase' }}>
@@ -920,7 +920,7 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
                               padding: '0.55rem',
                               border: 'none',
                               borderRadius: '8px',
-                              backgroundColor: selectedPaymentMode === 'upi_qr' ? '#6b215c' : 'transparent',
+                              backgroundColor: selectedPaymentMode === 'upi_qr' ? '#4A0E4E' : 'transparent',
                               color: '#ffffff',
                               fontWeight: 800,
                               fontSize: '0.8rem',
@@ -940,10 +940,10 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
                 {isPickupStage && (
                   <section style={{ background: '#fdf2f8', padding: '1.15rem', borderRadius: '14px', border: '1.5px solid #fbcfe8', marginBottom: '1.25rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                      <strong style={{ fontSize: '0.84rem', color: '#6b215c', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      <strong style={{ fontSize: '0.84rem', color: '#4A0E4E', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                         📍 STEP 1 · PICK UP FROM ARTISAN
                       </strong>
-                      <span style={{ fontSize: '0.76rem', background: '#ffffff', padding: '0.2rem 0.6rem', borderRadius: '999px', color: '#6b215c', fontWeight: 800, border: '1px solid #fbcfe8' }}>
+                      <span style={{ fontSize: '0.76rem', background: '#ffffff', padding: '0.2rem 0.6rem', borderRadius: '999px', color: '#4A0E4E', fontWeight: 800, border: '1px solid #fbcfe8' }}>
                         {activeDelivery.deliveryPartner?.distanceKm ? `${activeDelivery.deliveryPartner.distanceKm} km away` : 'Damoh Fleet Hub'}
                       </span>
                     </div>
@@ -987,7 +987,7 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
                           justifyContent: 'center',
                           gap: '0.4rem',
                           padding: '0.7rem',
-                          background: '#6b215c',
+                          background: '#4A0E4E',
                           color: '#ffffff',
                           borderRadius: '10px',
                           fontWeight: 800,
@@ -1004,7 +1004,7 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
                     <SwipeToConfirmSlider
                       label="Swipe: Confirmed Picked Up from Seller"
                       confirmLabel="Package Picked Up!"
-                      themeColor="#6b215c"
+                      themeColor="#4A0E4E"
                       onConfirm={() => executeStatusTransition('picked_up')}
                     />
                   </section>

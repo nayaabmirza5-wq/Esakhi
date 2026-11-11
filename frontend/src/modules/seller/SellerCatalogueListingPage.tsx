@@ -422,7 +422,7 @@ export function SellerCatalogueListingPage({
               type="submit"
               className="seller-primary-action"
               disabled={saving || uploadingImage || categories.loading || !categories.data?.length}
-              style={{ background: '#6b215c', color: '#ffffff', fontWeight: 800, padding: '0.65rem 1.4rem' }}
+              style={{ background: '#4A0E4E', color: '#ffffff', fontWeight: 800, padding: '0.65rem 1.4rem' }}
             >
               {saving ? 'Submitting…' : 'Submit for Approval'}
             </button>

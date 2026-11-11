@@ -166,25 +166,22 @@ export const verifyOtpController: RequestHandler = async (req, res) => {
 
     const defaultName = req.body?.name || `User ${digits.slice(-4) || '0000'}`;
 
-    // Find or create user in MongoDB Atlas
-    let user = await User.findOne({
-      $or: [
-        { phoneE164: formattedPhone },
-        { phone: formattedPhone },
-        ...(last10 ? [{ phoneE164: last10 }, { phone: last10 }] : []),
-        ...(rawPhone && rawPhone !== formattedPhone ? [{ phoneE164: rawPhone }, { phone: rawPhone }] : []),
-      ],
-    });
+    // Fast indexed lookup on phoneE164 first, with fallback for legacy records
+    let user = await User.findOne({ phoneE164: formattedPhone }).lean();
+    if (!user) {
+      user = await User.findOne({
+        $or: [
+          { phone: formattedPhone },
+          ...(last10 ? [{ phoneE164: last10 }, { phone: last10 }] : []),
+          ...(rawPhone && rawPhone !== formattedPhone ? [{ phoneE164: rawPhone }, { phone: rawPhone }] : []),
+        ],
+      }).lean();
+    }
 
     if (!user) {
       try {
         user = await User.findOneAndUpdate(
-          {
-            $or: [
-              { phoneE164: formattedPhone },
-              { phone: formattedPhone },
-            ],
-          },
+          { phoneE164: formattedPhone },
           {
             $setOnInsert: {
               phoneE164: formattedPhone,
@@ -196,18 +193,13 @@ export const verifyOtpController: RequestHandler = async (req, res) => {
             },
           },
           { upsert: true, new: true, setDefaultsOnInsert: true },
-        );
+        ).lean();
       } catch {
-        user = await User.findOne({
-          $or: [
-            { phoneE164: formattedPhone },
-            { phone: formattedPhone },
-          ],
-        });
+        user = await User.findOne({ phoneE164: formattedPhone }).lean();
       }
     } else if (rawEmail && !user.email) {
+      void User.updateOne({ _id: user._id }, { $set: { email: rawEmail } }).catch(() => {});
       user.email = rawEmail;
-      await user.save().catch(() => {});
     }
 
     if (!user || user.status !== 'active') {
@@ -250,6 +242,7 @@ export const verifyOtpController: RequestHandler = async (req, res) => {
       status: user.status,
       assignedCity: user.assignedCity,
       email: user.email || rawEmail || undefined,
+      savedAddresses: (user.savedAddresses || []).map(addressResponse),
     };
 
     try {

@@ -142,7 +142,7 @@ export function CityAdminLiveTracker({
     return () => stopPolling();
   }, [fetchTrackingSnapshot, hasPartner, orderStatus, stopPolling]);
 
-  const sellerIcon = useMemo(() => createMarkerIcon('S', '#6b215c', false), []);
+  const sellerIcon = useMemo(() => createMarkerIcon('S', '#4A0E4E', false), []);
   const customerIcon = useMemo(() => createMarkerIcon('C', '#1d6b43', false), []);
   const partnerIcon = useMemo(
     () => createMarkerIcon('🛵', streamDisconnected ? '#64748b' : '#2563eb', !streamDisconnected),
@@ -317,7 +317,7 @@ export function CityAdminLiveTracker({
           {/* Route Polyline: Seller -> Partner -> Customer */}
           <Polyline
             positions={[sellerPos, partnerPos]}
-            pathOptions={{ color: '#6b215c', weight: 4, dashArray: '6 6', opacity: 0.8 }}
+            pathOptions={{ color: '#4A0E4E', weight: 4, dashArray: '6 6', opacity: 0.8 }}
           />
           <Polyline
             positions={[partnerPos, customerPos]}

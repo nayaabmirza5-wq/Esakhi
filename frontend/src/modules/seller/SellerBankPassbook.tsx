@@ -62,7 +62,7 @@ export function SellerBankPassbook({
       {/* SHG Transparent Passbook Hero Banner */}
       <section
         style={{
-          background: 'linear-gradient(135deg, #4a1553 0%, #6d2878 100%)',
+          background: 'linear-gradient(135deg, #4a1553 0%, #4A0E4E 100%)',
           borderRadius: '18px',
           padding: '1.75rem',
           color: '#ffffff',
@@ -343,7 +343,7 @@ export function SellerBankPassbook({
             </div>
           </div>
 
-          <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#6b215c', background: 'rgba(107, 33, 92, 0.08)', padding: '0.3rem 0.65rem', borderRadius: '6px' }}>
+          <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#4A0E4E', background: 'rgba(107, 33, 92, 0.08)', padding: '0.3rem 0.65rem', borderRadius: '6px' }}>
             {settlements?.monthLabel || 'Current Cycle'}
           </span>
         </div>

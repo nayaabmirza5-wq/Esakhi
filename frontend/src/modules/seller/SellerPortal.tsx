@@ -186,7 +186,7 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
       <header
         style={{
           width: '100%',
-          background: 'linear-gradient(135deg, #4a1553 0%, #6d2878 100%)',
+          background: 'linear-gradient(135deg, #4a1553 0%, #4A0E4E 100%)',
           color: '#ffffff',
           padding: '1.25rem 2rem',
           boxShadow: '0 4px 20px rgba(74, 21, 83, 0.2)',
@@ -343,7 +343,7 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
                 fontWeight: view === 'overview' ? 800 : 600,
                 fontSize: '0.9rem',
                 cursor: 'pointer',
-                background: view === 'overview' ? '#6b215c' : 'transparent',
+                background: view === 'overview' ? '#4A0E4E' : 'transparent',
                 color: view === 'overview' ? '#ffffff' : '#475569',
                 transition: 'all 0.15s ease',
               }}
@@ -366,7 +366,7 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
                 fontWeight: view === 'orders' ? 800 : 600,
                 fontSize: '0.9rem',
                 cursor: 'pointer',
-                background: view === 'orders' ? '#6b215c' : 'transparent',
+                background: view === 'orders' ? '#4A0E4E' : 'transparent',
                 color: view === 'orders' ? '#ffffff' : '#475569',
                 transition: 'all 0.15s ease',
               }}
@@ -394,7 +394,7 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
                 fontWeight: view === 'products' ? 800 : 600,
                 fontSize: '0.9rem',
                 cursor: 'pointer',
-                background: view === 'products' ? '#6b215c' : 'transparent',
+                background: view === 'products' ? '#4A0E4E' : 'transparent',
                 color: view === 'products' ? '#ffffff' : '#475569',
                 transition: 'all 0.15s ease',
               }}
@@ -422,7 +422,7 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
                 fontWeight: view === 'passbook' ? 800 : 600,
                 fontSize: '0.9rem',
                 cursor: 'pointer',
-                background: view === 'passbook' ? '#6b215c' : 'transparent',
+                background: view === 'passbook' ? '#4A0E4E' : 'transparent',
                 color: view === 'passbook' ? '#ffffff' : '#475569',
                 transition: 'all 0.15s ease',
               }}
@@ -656,7 +656,7 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
                     <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#0f172a' }}>Sales Trend</h3>
                     <div style={{ fontSize: '0.82rem', color: '#64748b' }}>Confirmed paid product sales over the last 6 months</div>
                   </div>
-                  <span style={{ fontWeight: 800, color: '#6b215c', fontSize: '0.92rem' }}>
+                  <span style={{ fontWeight: 800, color: '#4A0E4E', fontSize: '0.92rem' }}>
                     {metrics ? formatMoney(metrics.grossPaidProductSalesThisMonthPaise) : '₹0'} <small>this month</small>
                   </span>
                 </div>
@@ -691,8 +691,8 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
                   style={{
                     padding: '0.5rem 1.05rem',
                     borderRadius: '8px',
-                    border: orderStatus === tab.key ? '1.5px solid #6b215c' : '1px solid #cbd5e1',
-                    background: orderStatus === tab.key ? '#6b215c' : '#ffffff',
+                    border: orderStatus === tab.key ? '1.5px solid #4A0E4E' : '1px solid #cbd5e1',
+                    background: orderStatus === tab.key ? '#4A0E4E' : '#ffffff',
                     color: orderStatus === tab.key ? '#ffffff' : '#475569',
                     fontWeight: 700,
                     fontSize: '0.85rem',
@@ -747,7 +747,7 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
                 type="button"
                 className="seller-primary-action"
                 onClick={() => setView('new_product')}
-                style={{ background: '#6b215c', color: '#ffffff', fontWeight: 800, padding: '0.65rem 1.35rem' }}
+                style={{ background: '#4A0E4E', color: '#ffffff', fontWeight: 800, padding: '0.65rem 1.35rem' }}
               >
                 ＋ Add New Product
               </button>
@@ -857,7 +857,7 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
                             <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
                               {product.categoryName} · {product.subcategoryName}
                             </div>
-                            <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#6b215c', marginTop: '0.2rem' }}>
+                            <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#4A0E4E', marginTop: '0.2rem' }}>
                               {formatMoney(product.pricePaise)}
                             </div>
                           </div>
@@ -921,7 +921,7 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
                     type="button"
                     className="seller-primary-action"
                     onClick={() => setView('new_product')}
-                    style={{ marginTop: '0.75rem', background: '#6b215c', color: '#ffffff' }}
+                    style={{ marginTop: '0.75rem', background: '#4A0E4E', color: '#ffffff' }}
                   >
                     ＋ Add Your First Product
                   </button>

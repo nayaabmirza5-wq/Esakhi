@@ -11,7 +11,7 @@ interface SwipeToConfirmSliderProps {
 export const SwipeToConfirmSlider: React.FC<SwipeToConfirmSliderProps> = ({
   label,
   confirmLabel = 'Confirmed!',
-  themeColor = '#6b215c',
+  themeColor = '#4A0E4E',
   onConfirm,
   disabled = false,
 }) => {

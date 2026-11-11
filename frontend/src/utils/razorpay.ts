@@ -146,7 +146,7 @@ export async function launchRazorpayPayment(params: LaunchRazorpayParams): Promi
         orderReference,
       },
       theme: {
-        color: '#6b215c',
+        color: '#4A0E4E',
       },
       modal: {
         ondismiss: () => {

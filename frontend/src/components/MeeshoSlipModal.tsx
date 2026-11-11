@@ -394,7 +394,7 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         <div>
-          <strong style={{ fontSize: '1rem', color: '#6b215c', display: 'block' }}>
+          <strong style={{ fontSize: '1rem', color: '#4A0E4E', display: 'block' }}>
             Bill of Supply · Package Proof Slip
           </strong>
           <span style={{ fontSize: '0.76rem', color: '#64748b' }}>
@@ -407,8 +407,8 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
             type="button"
             onClick={() => setScanPreview((prev) => (prev === 'qr' ? null : 'qr'))}
             style={{
-              background: scanPreview ? '#6b215c' : '#f3e8ff',
-              color: scanPreview ? '#ffffff' : '#6b215c',
+              background: scanPreview ? '#4A0E4E' : '#f3e8ff',
+              color: scanPreview ? '#ffffff' : '#4A0E4E',
               border: '1px solid #d8b4fe',
               padding: '0.5rem 0.9rem',
               borderRadius: '8px',
