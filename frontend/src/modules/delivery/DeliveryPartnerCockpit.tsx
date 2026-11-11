@@ -36,6 +36,7 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
   // GPS Telemetry stream
   const [gpsStreamState, setGpsStreamState] = useState<'GPS_STREAM_ACTIVE' | 'GPS_STREAM_INACTIVE'>('GPS_STREAM_INACTIVE');
   const watchIdRef = useRef<number | null>(null);
+  const isExecutingTransitionRef = useRef(false);
 
   // Load partner data
   const loadData = useCallback(async () => {
@@ -206,7 +207,8 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
       note?: string;
     },
   ) => {
-    if (!activeDelivery) return;
+    if (!activeDelivery || isExecutingTransitionRef.current) return;
+    isExecutingTransitionRef.current = true;
     setError('');
     setSuccessMsg('');
     try {
@@ -234,6 +236,8 @@ export const DeliveryPartnerCockpit: React.FC<DeliveryPartnerCockpitProps> = ({
       await loadData();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Failed to update order status.');
+    } finally {
+      isExecutingTransitionRef.current = false;
     }
   };
 

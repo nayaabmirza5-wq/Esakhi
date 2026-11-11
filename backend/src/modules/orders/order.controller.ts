@@ -960,6 +960,9 @@ export const updatePartnerOrderStatus: RequestHandler = async (req, res) => {
   if (!order) throw new AppError(404, 'NOT_FOUND', 'Order not found for this delivery partner.');
 
   const priorStatus = order.fulfilmentStatus;
+  if (priorStatus === status || (status === 'delivered' && priorStatus === 'completed')) {
+    return sendData(res, order);
+  }
   if (!canPartnerTransitionOrder(priorStatus, status)) {
     throw new AppError(409, 'INVALID_STATUS_TRANSITION', `Cannot transition order from ${priorStatus.replaceAll('_', ' ')} to ${status.replaceAll('_', ' ')}.`);
   }

@@ -21,6 +21,7 @@ export const SwipeToConfirmSlider: React.FC<SwipeToConfirmSliderProps> = ({
   const [loading, setLoading] = useState(false);
   const trackRef = useRef<HTMLDivElement>(null);
   const startXRef = useRef(0);
+  const isTriggeredRef = useRef(false);
 
   const handleConfirm = useCallback(async () => {
     setIsConfirmed(true);
@@ -39,18 +40,19 @@ export const SwipeToConfirmSlider: React.FC<SwipeToConfirmSliderProps> = ({
       setTimeout(() => {
         setIsConfirmed(false);
         setSliderPosition(0);
+        isTriggeredRef.current = false;
       }, 1500);
     }
   }, [onConfirm]);
 
   const onStartDrag = (clientX: number) => {
-    if (disabled || isConfirmed || loading) return;
+    if (disabled || isConfirmed || loading || isTriggeredRef.current) return;
     setIsDragging(true);
     startXRef.current = clientX - sliderPosition;
   };
 
   const onMoveDrag = useCallback((clientX: number) => {
-    if (!isDragging || !trackRef.current || isConfirmed || loading) return;
+    if (!isDragging || !trackRef.current || isConfirmed || loading || isTriggeredRef.current) return;
     const trackWidth = trackRef.current.offsetWidth;
     const handleWidth = 56;
     const maxDrag = Math.max(0, trackWidth - handleWidth);
@@ -58,7 +60,8 @@ export const SwipeToConfirmSlider: React.FC<SwipeToConfirmSliderProps> = ({
     setSliderPosition(newPos);
 
     // If dragged >= 85% of track width, trigger confirmation
-    if (newPos >= maxDrag * 0.85) {
+    if (newPos >= maxDrag * 0.85 && !isTriggeredRef.current) {
+      isTriggeredRef.current = true;
       setIsDragging(false);
       setSliderPosition(maxDrag);
       void handleConfirm();
