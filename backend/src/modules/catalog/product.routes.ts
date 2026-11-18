@@ -3,13 +3,16 @@ import { requireAuth } from '../../middleware/requireAuth.js';
 import { requireRole } from '../../middleware/requireRole.js';
 import {
   archiveProduct,
+  backfillSellerProductSkusController,
   listBestSellingProducts,
   categoriesController,
   createProduct,
+  generateSkuPreviewController,
   getAdminProduct,
   getProductBySlug,
   listAllProductsForAdmin,
   listProducts,
+  lookupMasterCatalogBySkuController,
   updateProduct,
 } from './product.controller.js';
 import { receiveProductImage, saveProductImage } from './productImageUpload.js';
@@ -20,10 +23,13 @@ export const adminProductRoutes = Router();
 productRoutes.get('/', listProducts);
 productRoutes.get('/categories', categoriesController);
 productRoutes.get('/bestsellers', listBestSellingProducts);
+productRoutes.get('/lookup-sku', lookupMasterCatalogBySkuController);
+productRoutes.post('/generate-sku', generateSkuPreviewController);
 productRoutes.get('/:slug', getProductBySlug);
 
 adminProductRoutes.use(requireAuth, requireRole('admin', 'staff', 'super_admin'));
 adminProductRoutes.get('/', listAllProductsForAdmin);
+adminProductRoutes.post('/backfill-skus', backfillSellerProductSkusController);
 adminProductRoutes.get('/:id', getAdminProduct);
 adminProductRoutes.post('/images', requireRole('admin', 'super_admin'), receiveProductImage, saveProductImage);
 adminProductRoutes.post('/', requireRole('admin', 'super_admin'), createProduct);

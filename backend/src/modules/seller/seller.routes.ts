@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { requireAuth, optionalAuth } from '../../middleware/requireAuth.js';
 import { requireRole } from '../../middleware/requireRole.js';
-import { createSellerProduct } from '../catalog/product.controller.js';
+import {
+  backfillSellerProductSkusController,
+  createSellerProduct,
+  generateSkuPreviewController,
+} from '../catalog/product.controller.js';
 import { receiveProductImage, saveProductImage } from '../catalog/productImageUpload.js';
 import {
   adjustSellerInventory,
@@ -22,6 +26,7 @@ import {
   updateSellerOrderStatus,
   updateSellerProfile,
   uploadSellerOrderInspectionImages,
+  seedSellerSampleProducts,
 } from './seller.controller.js';
 
 export const sellerRoutes = Router();
@@ -42,8 +47,11 @@ sellerRoutes.get('/dashboard', getSellerDashboard);
 sellerRoutes.get('/settlements', getSellerSettlements);
 sellerRoutes.patch('/profile', updateSellerProfile);
 sellerRoutes.get('/products', listSellerProducts);
+sellerRoutes.post('/products/generate-sku', generateSkuPreviewController);
+sellerRoutes.post('/products/backfill-skus', backfillSellerProductSkusController);
 sellerRoutes.post('/products/images', receiveProductImage, saveProductImage);
 sellerRoutes.post('/products', createSellerProduct);
+sellerRoutes.post('/seed-sample-products', seedSellerSampleProducts);
 sellerRoutes.post('/products/:productId/inventory-adjustments', adjustSellerInventory);
 sellerRoutes.get('/products/:productId/inventory-adjustments', listSellerInventoryHistory);
 sellerRoutes.get('/orders', listSellerOrders);

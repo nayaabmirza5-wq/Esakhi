@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { Schema, model } from 'mongoose';
 import type { InferSchemaType } from 'mongoose';
 
@@ -84,11 +85,17 @@ const orderItemSchema = new Schema(
     productId: { type: Schema.Types.ObjectId, required: true, ref: 'Product' },
     sellerId: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     variantId: { type: Schema.Types.ObjectId },
+    sku: { type: String, trim: true },
     productName: { type: String, required: true },
     variantAttributes: { type: Map, of: String, default: {} },
     unitPricePaise: { type: Number, required: true, min: 1 },
     quantity: { type: Number, required: true, min: 1 },
     lineTotalPaise: { type: Number, required: true, min: 1 },
+    hsnCode: { type: String, trim: true },
+    gstRate: { type: Number, default: 0 },
+    cgstPaise: { type: Number, default: 0 },
+    sgstPaise: { type: Number, default: 0 },
+    igstPaise: { type: Number, default: 0 },
   },
   { _id: false },
 );
@@ -151,6 +158,11 @@ const sellerPickupSchema = new Schema(
     city: { type: String, trim: true, maxlength: 100 },
     latitude: { type: Number, min: -90, max: 90 },
     longitude: { type: Number, min: -180, max: 180 },
+    hasGst: { type: Boolean },
+    taxType: { type: String, enum: ['GSTIN', 'ENROLMENT_ID'] },
+    gstin: { type: String, trim: true },
+    enrolmentId: { type: String, trim: true },
+    panNumber: { type: String, trim: true },
   },
   { _id: false },
 );
@@ -369,7 +381,7 @@ const orderSchema = new Schema(
 orderSchema.pre('validate', function () {
   const self = this as unknown as { deliveryOtp?: string };
   if (!self.deliveryOtp) {
-    self.deliveryOtp = String(Math.floor(1000 + Math.random() * 9000));
+    self.deliveryOtp = randomInt(1000, 10000).toString();
   }
 });
 

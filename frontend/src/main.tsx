@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import 'leaflet/dist/leaflet.css';
 import './styles.css';
+import './tailwind.css';
 
 interface ErrorBoundaryProps {
   children: ReactNode;

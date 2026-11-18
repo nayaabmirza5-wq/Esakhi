@@ -674,7 +674,7 @@ export const SuperAdminSupportDeskPage: React.FC = () => {
 // 2. Super Admin Assisted Payout Desk (5% City Admin, 90% Seller, ₹29 Rider)
 // ----------------------------------------------------------------------
 
-type BeneficiaryChannel = 'city_admins' | 'sellers' | 'partners';
+type BeneficiaryChannel = 'city_admins' | 'sellers' | 'partners' | 'govt_tax_register';
 
 interface PayoutBeneficiaryModalData {
   beneficiaryType: 'city_admin' | 'seller' | 'delivery_partner';
@@ -711,6 +711,101 @@ export const SuperAdminAssistedPayoutDeskPage: React.FC<{ initialTab?: Beneficia
   const [processingDisbursement, setProcessingDisbursement] = useState(false);
   const [disbursementSuccess, setDisbursementSuccess] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [simulateAbove5Lakh, setSimulateAbove5Lakh] = useState(false);
+
+  const exportCsvFile = (filename: string, headers: string[], rows: string[][]) => {
+    const csvContent = [
+      headers.join(','),
+      ...rows.map((r) => r.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')),
+    ].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportGstr8Csv = () => {
+    const headers = [
+      'Seller_ID',
+      'SHG_Business_Name',
+      'City',
+      'Tax_Regime',
+      'GSTIN_or_Enrolment_ID',
+      'PAN_Number',
+      'GSTR8_Table',
+      'Gross_Supplies_INR',
+      'Net_Taxable_Value_INR',
+      'CGST_TCS_0.25_INR',
+      'SGST_TCS_0.25_INR',
+      'Total_GSTR8_TCS_0.5_INR',
+    ];
+    const rows = sellers.map((s) => {
+      const st = s.statutoryTax;
+      const isGst = Boolean(st?.hasGst);
+      const grossInr = (s.grossSalesPaise / 100).toFixed(2);
+      const taxableInr = ((st?.taxableSalesPaise ?? s.grossSalesPaise) / 100).toFixed(2);
+      const cgstInr = ((st?.tcsCgstPaise ?? 0) / 100).toFixed(2);
+      const sgstInr = ((st?.tcsSgstPaise ?? 0) / 100).toFixed(2);
+      const totalTcsInr = (((s.tcsDeductionPaise ?? st?.tcsTotalPaise ?? 0)) / 100).toFixed(2);
+      return [
+        s.sellerId,
+        s.sellerName,
+        s.city,
+        isGst ? 'GST_REGISTERED' : 'NON_GST_ENROLMENT_ID',
+        isGst ? (st?.gstin || '23AAAAA0000A1Z5') : (st?.enrolmentId || 'ENR-MP-470661-0012'),
+        st?.panNumber || 'ABCDE1234F',
+        isGst ? 'Table 3 (GSTIN TCS)' : 'Table 4B (Unregistered Enrolment ID)',
+        grossInr,
+        taxableInr,
+        cgstInr,
+        sgstInr,
+        totalTcsInr,
+      ];
+    });
+    exportCsvFile(`eSakhi_GSTR8_TCS_and_Enrolment_Return_${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
+  };
+
+  const handleExportForm26QCsv = () => {
+    const headers = [
+      'Seller_ID',
+      'Deductee_SHG_Name',
+      'PAN_Number',
+      'Enrolment_ID_or_GSTIN',
+      'Financial_Year',
+      'FY_Cumulative_Gross_Sales_INR',
+      'Above_5_Lakh_Threshold_194O',
+      'TDS_Rate_Percent',
+      'Section_194O_TDS_Deducted_INR',
+      'IT_Filing_Form',
+    ];
+    const rows = sellers.map((s) => {
+      const st = s.statutoryTax;
+      const rawFy = st?.fyGrossSalesPaise ?? s.grossSalesPaise;
+      const effectiveFy = simulateAbove5Lakh ? Math.max(rawFy, 54_500_000) : rawFy;
+      const isAbove5L = effectiveFy > 50_000_000;
+      const tdsPaise = isAbove5L
+        ? Math.max(s.tdsDeductionPaise ?? 0, Math.round(effectiveFy * 0.001))
+        : 0;
+      return [
+        s.sellerId,
+        s.sellerName,
+        st?.panNumber || 'ABCDE1234F',
+        st?.hasGst ? (st.gstin || '23AAAAA0000A1Z5') : (st?.enrolmentId || 'ENR-MP-470661-0012'),
+        st?.fyLabel || 'FY 2026-27',
+        (effectiveFy / 100).toFixed(2),
+        isAbove5L ? 'YES (> 5,00,000)' : 'NO (<= 5,00,000 Exempt)',
+        isAbove5L ? '0.10%' : '0.00%',
+        (tdsPaise / 100).toFixed(2),
+        isAbove5L ? 'Form 26Q / Form 16A (Sec 194-O)' : 'Exempt u/s 194-O Proviso',
+      ];
+    });
+    exportCsvFile(`eSakhi_Form26Q_Sec194O_TDS_Return_${new Date().toISOString().slice(0, 10)}.csv`, headers, rows);
+  };
 
   const loadSettlementData = async () => {
     setLoading(true);
@@ -971,6 +1066,22 @@ export const SuperAdminAssistedPayoutDeskPage: React.FC<{ initialTab?: Beneficia
           >
             🚴 Delivery Partners ({partners.length})
           </button>
+          <button
+            onClick={() => setActiveTab('govt_tax_register')}
+            style={{
+              padding: '8px 18px',
+              borderRadius: '8px',
+              fontSize: '13px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              border: 'none',
+              backgroundColor: activeTab === 'govt_tax_register' ? '#4338ca' : 'transparent',
+              color: activeTab === 'govt_tax_register' ? '#ffffff' : '#4338ca',
+              boxShadow: activeTab === 'govt_tax_register' ? '0 1px 3px rgba(67,56,202,0.3)' : 'none',
+            }}
+          >
+            ⚖️ Govt. Tax & Enrolment Register (TCS / TDS)
+          </button>
         </div>
 
         {/* Search & City Filter */}
@@ -1129,99 +1240,176 @@ export const SuperAdminAssistedPayoutDeskPage: React.FC<{ initialTab?: Beneficia
                   No Artisan Sellers found matching criteria.
                 </div>
               ) : (
-                filteredSellers.map((seller) => (
-                  <div
-                    key={seller.sellerId}
-                    style={{
-                      backgroundColor: '#ffffff',
-                      borderRadius: '14px',
-                      border: '1px solid #e2e8f0',
-                      padding: '20px 24px',
-                      boxShadow: '0 2px 6px -2px rgba(0, 0, 0, 0.05)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                          <span style={{ fontSize: '12px', fontWeight: 700, color: '#b45309', backgroundColor: '#fef3c7', padding: '2px 8px', borderRadius: '6px' }}>
-                            ARTISAN / SHG SELLER
-                          </span>
-                          <span style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>
-                            📍 {seller.city}
-                          </span>
-                        </div>
-                        <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', margin: '2px 0 6px 0' }}>
-                          {seller.sellerName}
-                        </h3>
-                        <div style={{ fontSize: '13px', color: '#64748b' }}>
-                          Lead: <strong>{seller.representative}</strong> · Phone: <strong>{seller.phoneE164}</strong> · Handcrafted Units Sold: <strong>{seller.unitsSold}</strong>
-                        </div>
-                      </div>
+                filteredSellers.map((seller) => {
+                  const st = seller.statutoryTax;
+                  const isGst = Boolean(st?.hasGst);
+                  const taxIdLabel = isGst ? 'GSTIN' : 'Enrolment ID';
+                  const taxIdValue = isGst ? (st?.gstin || '23AAAAA0000A1Z5') : (st?.enrolmentId || 'ENR-MP-470661-0012');
+                  const panVal = st?.panNumber || 'ABCDE1234F';
+                  const fyGross = st?.fyGrossSalesPaise ?? seller.grossSalesPaise;
+                  const exceeds5L = Boolean(st?.exceeds5LakhThreshold || fyGross > 50_000_000);
+                  const pct5L = Math.min(100, Math.round((fyGross / 50_000_000) * 1000) / 10);
+                  const tcsPaise = seller.tcsDeductionPaise ?? st?.tcsTotalPaise ?? 0;
+                  const tdsPaise = seller.tdsDeductionPaise ?? st?.tds194OPaise ?? 0;
 
-                      {/* Locked Payout Card */}
-                      <div style={{ textAlign: 'right' }}>
-                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
-                          🔒 Net Locked Payable (90% Share)
-                        </span>
-                        <div style={{ fontSize: '24px', fontWeight: 800, color: seller.netLockedPayablePaise > 0 ? '#047857' : '#64748b', marginTop: '2px' }}>
-                          {formatRupees(seller.netLockedPayablePaise)}
-                        </div>
-                        <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-                          Gross Sales: {formatRupees(seller.grossSalesPaise)} · 10% Fees: {formatRupees(seller.commissionDeductionsPaise)} · Penalties: {formatRupees(seller.penaltyDeductionsPaise)}
-                        </div>
-                        <button
-                          disabled={seller.netLockedPayablePaise <= 0}
-                          onClick={() => {
-                            setPayoutModalData({
-                              beneficiaryType: 'seller',
-                              beneficiaryId: seller.sellerId,
-                              name: seller.sellerName,
-                              phone: seller.phoneE164,
-                              city: seller.city,
-                              netLockedPayablePaise: seller.netLockedPayablePaise,
-                              bankAccount: seller.bankAccount,
-                            });
-                          }}
-                          style={{
-                            marginTop: '10px',
-                            backgroundColor: seller.netLockedPayablePaise > 0 ? '#059669' : '#cbd5e1',
-                            color: '#ffffff',
-                            border: 'none',
-                            borderRadius: '8px',
-                            padding: '9px 18px',
-                            fontSize: '13px',
-                            fontWeight: 700,
-                            cursor: seller.netLockedPayablePaise > 0 ? 'pointer' : 'not-allowed',
-                          }}
-                        >
-                          {seller.netLockedPayablePaise > 0 ? 'Proceed to Disburse ➔' : '✓ All Settled'}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Linked Bank Snapshot */}
+                  return (
                     <div
+                      key={seller.sellerId}
                       style={{
-                        marginTop: '16px',
-                        padding: '12px 16px',
-                        backgroundColor: '#f8fafc',
-                        borderRadius: '10px',
-                        display: 'flex',
-                        flexWrap: 'wrap',
-                        gap: '20px',
-                        fontSize: '12px',
-                        color: '#475569',
-                        border: '1px solid #f1f5f9',
+                        backgroundColor: '#ffffff',
+                        borderRadius: '14px',
+                        border: '1px solid #e2e8f0',
+                        padding: '20px 24px',
+                        boxShadow: '0 2px 6px -2px rgba(0, 0, 0, 0.05)',
                       }}
                     >
-                      <div><strong>Bank:</strong> {seller.bankAccount.bankName}</div>
-                      <div><strong>Account:</strong> {seller.bankAccount.accountNumberMasked}</div>
-                      <div><strong>IFSC:</strong> {seller.bankAccount.ifscCode}</div>
-                      <div><strong>UPI ID:</strong> {seller.bankAccount.upiId || '—'}</div>
-                      <div><strong>Holder:</strong> {seller.bankAccount.accountHolderName}</div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '12px', fontWeight: 700, color: '#b45309', backgroundColor: '#fef3c7', padding: '2px 8px', borderRadius: '6px' }}>
+                              ARTISAN / SHG SELLER
+                            </span>
+                            <span
+                              style={{
+                                fontSize: '11px',
+                                fontWeight: 800,
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                backgroundColor: isGst ? '#dbeafe' : '#dcfce7',
+                                color: isGst ? '#1e40af' : '#166534',
+                              }}
+                            >
+                              {isGst ? `GSTIN: ${taxIdValue}` : `Enrolment ID: ${taxIdValue}`}
+                            </span>
+                            <span style={{ fontSize: '11px', fontWeight: 700, fontFamily: 'monospace', backgroundColor: '#f1f5f9', color: '#334155', padding: '2px 8px', borderRadius: '6px' }}>
+                              PAN: {panVal}
+                            </span>
+                            <span style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a' }}>
+                              📍 {seller.city}
+                            </span>
+                          </div>
+                          <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a', margin: '2px 0 6px 0' }}>
+                            {seller.sellerName}
+                          </h3>
+                          <div style={{ fontSize: '13px', color: '#64748b' }}>
+                            Lead: <strong>{seller.representative}</strong> · Phone: <strong>{seller.phoneE164}</strong> · Handcrafted Units Sold: <strong>{seller.unitsSold}</strong>
+                          </div>
+                        </div>
+
+                        {/* Locked Payout Card */}
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                            🔒 Net Locked Payable (After Commission, TCS & TDS)
+                          </span>
+                          <div style={{ fontSize: '24px', fontWeight: 800, color: seller.netLockedPayablePaise > 0 ? '#047857' : '#64748b', marginTop: '2px' }}>
+                            {formatRupees(seller.netLockedPayablePaise)}
+                          </div>
+                          <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                            Gross: {formatRupees(seller.grossSalesPaise)} · 10% Comm: −{formatRupees(seller.commissionDeductionsPaise)} · TCS: −{formatRupees(tcsPaise)} · TDS: −{formatRupees(tdsPaise)} · Penalties: −{formatRupees(seller.penaltyDeductionsPaise)}
+                          </div>
+                          <button
+                            disabled={seller.netLockedPayablePaise <= 0}
+                            onClick={() => {
+                              setPayoutModalData({
+                                beneficiaryType: 'seller',
+                                beneficiaryId: seller.sellerId,
+                                name: seller.sellerName,
+                                phone: seller.phoneE164,
+                                city: seller.city,
+                                netLockedPayablePaise: seller.netLockedPayablePaise,
+                                bankAccount: seller.bankAccount,
+                              });
+                            }}
+                            style={{
+                              marginTop: '10px',
+                              backgroundColor: seller.netLockedPayablePaise > 0 ? '#059669' : '#cbd5e1',
+                              color: '#ffffff',
+                              border: 'none',
+                              borderRadius: '8px',
+                              padding: '9px 18px',
+                              fontSize: '13px',
+                              fontWeight: 700,
+                              cursor: seller.netLockedPayablePaise > 0 ? 'pointer' : 'not-allowed',
+                            }}
+                          >
+                            {seller.netLockedPayablePaise > 0 ? 'Proceed to Disburse ➔' : '✓ All Settled'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Statutory ₹5,00,000 Threshold & TCS/TDS Strip */}
+                      <div
+                        style={{
+                          marginTop: '14px',
+                          padding: '10px 14px',
+                          backgroundColor: exceeds5L ? '#faf5ff' : '#f0f9ff',
+                          borderRadius: '10px',
+                          border: `1px solid ${exceeds5L ? '#d8b4fe' : '#bae6fd'}`,
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '12px',
+                          fontSize: '12px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                          <strong style={{ color: '#0f172a' }}>
+                            {st?.fyLabel || 'FY 2026-27'} Sales vs ₹5,00,000 Threshold (Sec 194-O):
+                          </strong>
+                          <span style={{ fontWeight: 800, color: exceeds5L ? '#7e22ce' : '#0369a1' }}>
+                            {formatRupees(fyGross)} / ₹5,00,000.00 ({pct5L}%)
+                          </span>
+                          <span
+                            style={{
+                              padding: '2px 8px',
+                              borderRadius: '999px',
+                              fontSize: '11px',
+                              fontWeight: 800,
+                              backgroundColor: exceeds5L ? '#f3e8ff' : '#dcfce7',
+                              color: exceeds5L ? '#7e22ce' : '#166534',
+                            }}
+                          >
+                            {exceeds5L ? '⚡ >₹5L: 0.1% TDS Deducted' : '✓ ≤₹5L: 0% TDS Exempt'}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', color: '#334155' }}>
+                          <span>
+                            <strong>GSTR-8 TCS (0.5%):</strong>{' '}
+                            {isGst ? formatRupees(tcsPaise) : '₹0.00 (Enrolment ID Exempt)'}
+                          </span>
+                          <span>
+                            <strong>Sec 194-O TDS (0.1%):</strong>{' '}
+                            {exceeds5L ? formatRupees(tdsPaise) : '₹0.00 (Below ₹5L)'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Linked Bank Snapshot */}
+                      <div
+                        style={{
+                          marginTop: '12px',
+                          padding: '12px 16px',
+                          backgroundColor: '#f8fafc',
+                          borderRadius: '10px',
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: '20px',
+                          fontSize: '12px',
+                          color: '#475569',
+                          border: '1px solid #f1f5f9',
+                        }}
+                      >
+                        <div><strong>Bank:</strong> {seller.bankAccount.bankName}</div>
+                        <div><strong>Account:</strong> {seller.bankAccount.accountNumberMasked}</div>
+                        <div><strong>IFSC:</strong> {seller.bankAccount.ifscCode}</div>
+                        <div><strong>UPI ID:</strong> {seller.bankAccount.upiId || '—'}</div>
+                        <div><strong>Holder:</strong> {seller.bankAccount.accountHolderName}</div>
+                        <div><strong>{taxIdLabel}:</strong> {taxIdValue}</div>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           )}
@@ -1328,6 +1516,248 @@ export const SuperAdminAssistedPayoutDeskPage: React.FC<{ initialTab?: Beneficia
                   </div>
                 ))
               )}
+            </div>
+          )}
+
+          {/* TAB 4: GOVERNMENT STATUTORY TAX & ENROLMENT REGISTER (GSTR-8 TCS & SEC 194-O TDS) */}
+          {activeTab === 'govt_tax_register' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* Statutory Compliance Explainer & Export Bar */}
+              <div
+                style={{
+                  backgroundColor: '#ffffff',
+                  borderRadius: '16px',
+                  border: '1.5px solid #c7d2fe',
+                  padding: '22px 24px',
+                  boxShadow: '0 4px 14px rgba(67, 56, 202, 0.06)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+                  <div>
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        backgroundColor: '#eef2ff',
+                        color: '#4338ca',
+                        padding: '3px 10px',
+                        borderRadius: '999px',
+                        fontSize: '11px',
+                        fontWeight: 800,
+                        letterSpacing: '0.04em',
+                      }}
+                    >
+                      GOVERNMENT OF INDIA · E-COMMERCE OPERATOR TAX LEDGER
+                    </span>
+                    <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a', margin: '6px 0 4px 0' }}>
+                      GSTR-8 (Sec 52 GST TCS), Form 26Q (Sec 194-O TDS) & Enrolment ID Register
+                    </h2>
+                    <p style={{ fontSize: '13px', color: '#475569', margin: 0, maxWidth: '760px', lineHeight: 1.5 }}>
+                      Centralized statutory register for filing monthly <strong>GSTR-8</strong> (0.5% TCS on GSTIN sellers + Table 4B outward supplies for Non-GST Enrolment ID artisans) and quarterly <strong>Form 26Q</strong> (0.1% Income Tax TDS when a seller’s Financial Year sales cross <strong>₹5,00,000</strong>).
+                    </p>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => setSimulateAbove5Lakh((prev) => !prev)}
+                      style={{
+                        backgroundColor: simulateAbove5Lakh ? '#7e22ce' : '#faf5ff',
+                        color: simulateAbove5Lakh ? '#ffffff' : '#6b21a8',
+                        border: '1px solid #c084fc',
+                        borderRadius: '8px',
+                        padding: '9px 14px',
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {simulateAbove5Lakh ? '↺ Show Actual Live FY Sales' : '🔬 Simulate > ₹5L Seller Sales (Test 0.1% TDS)'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExportGstr8Csv}
+                      style={{
+                        backgroundColor: '#047857',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '9px 14px',
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ⬇️ Export GSTR-8 (TCS & Enrolment IDs) CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExportForm26QCsv}
+                      style={{
+                        backgroundColor: '#4338ca',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '9px 14px',
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ⬇️ Export Form 26Q (Sec 194-O TDS) CSV
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3 Statutory Rule Cards */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px', marginTop: '18px' }}>
+                  <div style={{ padding: '14px', borderRadius: '12px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', fontSize: '12px', lineHeight: 1.5 }}>
+                    <strong style={{ color: '#0f172a', display: 'block', marginBottom: '4px' }}>
+                      1. How We Detect Seller Earnings &gt; ₹5,00,000 (Sec 194-O)
+                    </strong>
+                    <span style={{ color: '#475569' }}>
+                      The backend aggregates each seller’s confirmed non-cancelled orders across the Indian Financial Year (<strong>1 April – 31 March</strong>) linked to their PAN. While cumulative sales are <strong>≤ ₹5,00,000</strong>, TDS is <strong>0% (Exempt)</strong>. The moment cumulative FY sales cross <strong>₹5,00,000</strong>, the engine automatically deducts <strong>0.1% TDS</strong> and queues it for <strong>Form 26Q / Form 16A</strong>.
+                    </span>
+                  </div>
+                  <div style={{ padding: '14px', borderRadius: '12px', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: '12px', lineHeight: 1.5 }}>
+                    <strong style={{ color: '#166534', display: 'block', marginBottom: '4px' }}>
+                      2. Section 52 GST TCS (0.5% · GSTR-8 Table 3)
+                    </strong>
+                    <span style={{ color: '#15803d' }}>
+                      For <strong>GSTIN-registered sellers</strong>, eSakhi deducts <strong>0.5% TCS</strong> (0.25% CGST + 0.25% SGST) on net taxable value and deposits it by the 10th of the following month via <strong>GSTR-8</strong>. Sellers claim 100% of this back in their <strong>GST Electronic Cash Ledger</strong>.
+                    </span>
+                  </div>
+                  <div style={{ padding: '14px', borderRadius: '12px', backgroundColor: '#fffbeb', border: '1px solid #fde68a', fontSize: '12px', lineHeight: 1.5 }}>
+                    <strong style={{ color: '#92400e', display: 'block', marginBottom: '4px' }}>
+                      3. Non-GST Enrolment ID Artisans (Notification 34/2023-CT)
+                    </strong>
+                    <span style={{ color: '#b45309' }}>
+                      SHGs and small artisans with a Government <strong>Enrolment ID</strong> (e.g. <code>ENR-MP-470661-0012</code>) issue a <strong>0% GST Bill of Supply</strong> and have <strong>₹0 GST TCS deducted</strong>. eSakhi reports their Enrolment ID and state-wise outward supply total to the Government in <strong>GSTR-8 Table 4B</strong>.
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Government Filing Table */}
+              <div
+                style={{
+                  backgroundColor: '#ffffff',
+                  borderRadius: '16px',
+                  border: '1px solid #e2e8f0',
+                  padding: '20px',
+                  overflowX: 'auto',
+                }}
+              >
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12.5px' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#334155', fontWeight: 800 }}>
+                      <th style={{ padding: '10px 12px' }}>Seller / SHG & City</th>
+                      <th style={{ padding: '10px 12px' }}>Tax Regime</th>
+                      <th style={{ padding: '10px 12px' }}>GSTIN / Enrolment ID & PAN</th>
+                      <th style={{ padding: '10px 12px' }}>FY Gross Sales & ₹5L Threshold</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'right' }}>Net Taxable Value</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'right' }}>GSTR-8 TCS (0.5%)</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'right' }}>Sec 194-O TDS (0.1%)</th>
+                      <th style={{ padding: '10px 12px' }}>Govt. Return Mapping</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredSellers.map((seller) => {
+                      const st = seller.statutoryTax;
+                      const isGst = Boolean(st?.hasGst);
+                      const idVal = isGst ? (st?.gstin || '23AAAAA0000A1Z5') : (st?.enrolmentId || 'ENR-MP-470661-0012');
+                      const panVal = st?.panNumber || 'ABCDE1234F';
+                      const rawFy = st?.fyGrossSalesPaise ?? seller.grossSalesPaise;
+                      const effectiveFy = simulateAbove5Lakh ? Math.max(rawFy, 54_500_000) : rawFy;
+                      const isAbove5L = effectiveFy > 50_000_000;
+                      const pct = Math.min(100, Math.round((effectiveFy / 50_000_000) * 1000) / 10);
+                      const taxablePaise = st?.taxableSalesPaise ?? seller.grossSalesPaise;
+                      const tcsPaise = isGst ? (seller.tcsDeductionPaise ?? st?.tcsTotalPaise ?? Math.round(taxablePaise * 0.005)) : 0;
+                      const tdsPaise = isAbove5L
+                        ? Math.max(seller.tdsDeductionPaise ?? 0, Math.round(effectiveFy * 0.001))
+                        : 0;
+
+                      return (
+                        <tr key={seller.sellerId} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '12px' }}>
+                            <strong style={{ color: '#0f172a', display: 'block' }}>{seller.sellerName}</strong>
+                            <span style={{ fontSize: '11px', color: '#64748b' }}>
+                              {seller.representative} · 📍 {seller.city}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px' }}>
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                padding: '3px 8px',
+                                borderRadius: '999px',
+                                fontSize: '11px',
+                                fontWeight: 800,
+                                backgroundColor: isGst ? '#dbeafe' : '#dcfce7',
+                                color: isGst ? '#1e40af' : '#166534',
+                              }}
+                            >
+                              {isGst ? 'GSTIN Regular' : 'Enrolment ID (Sec 24)'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px', fontFamily: 'monospace' }}>
+                            <div style={{ fontWeight: 800, color: '#0f172a' }}>
+                              {isGst ? 'GSTIN: ' : 'ENR: '}{idVal}
+                            </div>
+                            <div style={{ fontSize: '11px', color: '#475569' }}>PAN: {panVal}</div>
+                          </td>
+                          <td style={{ padding: '12px', minWidth: '210px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px', fontWeight: 700 }}>
+                              <span>{formatRupees(effectiveFy)}</span>
+                              <span style={{ color: isAbove5L ? '#7e22ce' : '#0369a1' }}>{pct}% of ₹5L</span>
+                            </div>
+                            <div style={{ width: '100%', height: '6px', backgroundColor: '#e2e8f0', borderRadius: '999px', margin: '4px 0', overflow: 'hidden' }}>
+                              <div
+                                style={{
+                                  width: `${Math.max(4, pct)}%`,
+                                  height: '100%',
+                                  backgroundColor: isAbove5L ? '#9333ea' : '#0284c7',
+                                }}
+                              />
+                            </div>
+                            <span
+                              style={{
+                                fontSize: '10.5px',
+                                fontWeight: 800,
+                                color: isAbove5L ? '#7e22ce' : '#15803d',
+                              }}
+                            >
+                              {isAbove5L ? '⚡ Above ₹5L — Deduct 0.1% TDS' : '✓ Below ₹5L — 0% TDS Exempt'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px', textAlign: 'right', fontWeight: 700 }}>
+                            {formatRupees(taxablePaise)}
+                          </td>
+                          <td style={{ padding: '12px', textAlign: 'right' }}>
+                            <strong style={{ color: isGst ? '#0369a1' : '#64748b' }}>
+                              {isGst ? formatRupees(tcsPaise) : '₹0.00'}
+                            </strong>
+                            <div style={{ fontSize: '10px', color: '#64748b' }}>
+                              {isGst ? '0.25% CGST + 0.25% SGST' : 'Exempt (Notif 34/2023)'}
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px', textAlign: 'right' }}>
+                            <strong style={{ color: isAbove5L ? '#7e22ce' : '#64748b' }}>
+                              {isAbove5L ? formatRupees(tdsPaise) : '₹0.00'}
+                            </strong>
+                            <div style={{ fontSize: '10px', color: '#64748b' }}>
+                              {isAbove5L ? '0.1% u/s 194-O' : '≤ ₹5L Proviso Exempt'}
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px', fontSize: '11px', color: '#334155' }}>
+                            <div><strong>GST:</strong> {isGst ? 'GSTR-8 Table 3' : 'GSTR-8 Table 4B'}</div>
+                            <div><strong>IT:</strong> {isAbove5L ? 'Form 26Q / 16A' : 'No TDS Required'}</div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </>

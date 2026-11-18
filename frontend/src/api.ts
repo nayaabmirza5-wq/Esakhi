@@ -92,22 +92,25 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
   let response: Response;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000);
+  const timeoutSignal = AbortSignal.timeout(12000);
+  const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal;
   try {
     response = await fetch(`${baseUrl}${path}`, {
       ...init,
       headers,
       credentials: 'include',
-      signal: init.signal || controller.signal,
+      signal,
     });
   } catch (err: unknown) {
-    if (err && typeof err === 'object' && 'name' in err && (err as { name: string }).name === 'AbortError') {
+    if (
+      err &&
+      typeof err === 'object' &&
+      'name' in err &&
+      ((err as { name: string }).name === 'AbortError' || (err as { name: string }).name === 'TimeoutError')
+    ) {
       throw new ApiError(408, 'TIMEOUT', 'Request took too long to respond. Please check your connection and retry.');
     }
     throw new ApiError(0, 'NETWORK_ERROR', 'Cannot reach eSakhi right now. Check that the backend is running and try again.');
-  } finally {
-    clearTimeout(timeoutId);
   }
 
   if (response.status === 401 && retry && !path.endsWith('/auth/refresh') && !path.includes('/auth/otp/')) {
@@ -176,6 +179,34 @@ export const api = {
   products: (query: URLSearchParams = new URLSearchParams()) => request<PageResult<Product>>(`/api/v1/products${query.size ? `?${query}` : ''}`),
   bestSellingProducts: (limit = 5) => request<Product[]>(`/api/v1/products/bestsellers?limit=${limit}`),
   product: (slug: string) => request<Product>(`/api/v1/products/${encodeURIComponent(slug)}`),
+  lookupProductBySku: (q: string) =>
+    request<{ masterTemplate: import('./data/masterProductCatalog').MasterCatalogProduct | null; existingProduct: Product | null }>(
+      `/api/v1/products/lookup-sku?q=${encodeURIComponent(q)}`,
+    ),
+  generateProductSkusPreview: (payload: {
+    categoryId?: string;
+    brandOrShg?: string;
+    productName: string;
+    variantLabels?: string[];
+  }) =>
+    request<{
+      masterSku: string;
+      barcode: string;
+      variantSkus: Array<{ label: string; sku: string }>;
+    }>('/api/v1/products/generate-sku', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  backfillSellerProductSkus: () =>
+    request<{ scannedCount: number; updatedCount: number; message: string }>('/api/v1/seller/products/backfill-skus', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  backfillAdminProductSkus: () =>
+    request<{ scannedCount: number; updatedCount: number; message: string }>('/api/v1/admin/products/backfill-skus', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
   serviceArea: () => request<ServiceArea>('/api/v1/service-area'),
   razorpayConfig: () => request<{ configured: boolean; keyId: string | null }>('/api/v1/payments/razorpay/config'),
   createRazorpayOrder: (orderId: string) =>
@@ -576,14 +607,113 @@ export const api = {
       status: string;
     }>('/api/v1/seller/profile'),
   sellerSettlements: () => request<SellerSettlementsResponse>('/api/v1/seller/settlements'),
-  updateSellerProfile: (payload: { shgName: string; representative: string; registeredAddress: string; storeDescription: string }) => request<Pick<NonNullable<SellerDashboard['storeProfile']>, 'shgName' | 'representative' | 'registeredAddress' | 'storeDescription' | 'city' | 'phoneE164' | 'fssaiStatus'>>('/api/v1/seller/profile', { method: 'PATCH', body: JSON.stringify(payload) }),
+  updateSellerProfile: (payload: {
+    shgName: string;
+    representative: string;
+    registeredAddress: string;
+    storeDescription?: string;
+    taxDetails?: {
+      hasGst?: boolean;
+      gstin?: string;
+      hasEnrolmentId?: boolean;
+      enrolmentId?: string;
+      panNumber?: string;
+      panCardUrl?: string;
+      gstCertificateUrl?: string;
+      businessName?: string;
+      email?: string;
+    };
+    pickupAddress?: {
+      streetAddress?: string;
+      locality?: string;
+      city?: string;
+      state?: string;
+      pincode?: string;
+      landmark?: string;
+      latitude?: number;
+      longitude?: number;
+      storefrontPhotoUrl?: string;
+    };
+    bankDetails?: {
+      accountHolderName?: string;
+      bankName?: string;
+      accountNumber?: string;
+      ifscCode?: string;
+      accountType?: 'SAVINGS' | 'CURRENT';
+    };
+    supplierDetails?: {
+      category?: 'HANDICRAFT' | 'TEXTILES' | 'FOOD' | 'HERBAL';
+      fssaiNumber?: string;
+      numberOfMembers?: number;
+    };
+    operatingHours?: {
+      openTime?: string;
+      closeTime?: string;
+      splitShift?: {
+        enabled?: boolean;
+        breakStart?: string;
+        breakEnd?: string;
+      };
+      weeklyOffDays?: string[];
+      isClosedOverride?: boolean;
+    };
+  }) => request<Record<string, unknown>>('/api/v1/seller/profile', { method: 'PATCH', body: JSON.stringify(payload) }),
   sellerProducts: (query: URLSearchParams = new URLSearchParams()) => request<PageResult<Product>>(`/api/v1/seller/products${query.size ? `?${query}` : ''}`),
   uploadSellerProductImage: (file: File) => {
     const body = new FormData();
     body.append('image', file);
     return request<{ imageUrl: string }>('/api/v1/seller/products/images', { method: 'POST', body });
   },
-  createSellerProduct: (payload: { name: string; slug: string; description: string; categoryId: string; subcategoryId: string; productType: string; pricePaise: number; imageUrls?: string[]; stock: number; lowStockThreshold: number }) => request<Product>('/api/v1/seller/products', { method: 'POST', body: JSON.stringify(payload) }),
+  createMerchantProduct: (payload: {
+    name: string;
+    slug?: string;
+    description: string;
+    category?: string;
+    categoryId: string;
+    subcategoryId?: string;
+    productType?: string;
+    masterSku?: string;
+    barcode?: string;
+    hsnCode?: string;
+    productGstRate?: number;
+    printedUnitMrp: number;
+    sellerBasePrice: number;
+    minOrderQuantity?: number;
+    bestBeforeDate: string;
+    stock: number;
+    lowStockThreshold?: number;
+    imageUrls?: string[];
+    sellerTaxProfile?: 'GST_REGISTERED' | 'NON_GST_ENROLMENT';
+    isInterState?: boolean;
+    sellerAnnualSalesExceeds5Lakh?: boolean;
+  }) => request<{ product: Product; financials: any }>('/api/merchant/products', { method: 'POST', body: JSON.stringify(payload) }),
+  getMasterCatalogue: (q?: string) => request<{ items: any[]; count: number }>(`/api/merchant/master-catalogue${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  getSimilarProductsByMasterSku: (masterSku: string) => request<{ masterSku: string; alternatives: Array<Product & { sellerName?: string }> }>(`/api/merchant/products/similar/${encodeURIComponent(masterSku)}`),
+  createSellerProduct: (payload: {
+    name: string;
+    slug?: string;
+    description: string;
+    categoryId: string;
+    subcategoryId: string;
+    productType: string;
+    pricePaise: number;
+    basePricePaise?: number;
+    imageUrls?: string[];
+    stock: number;
+    lowStockThreshold?: number;
+    variants?: Array<{ sku?: string; attributes?: Record<string, string>; stock: number }>;
+    masterSku?: string;
+    barcode?: string;
+    hsnCode?: string;
+    printedUnitMrpPaise?: number;
+    sellerBasePricePaise?: number;
+    customerUnitPricePaise?: number;
+    minOrderQuantity?: number;
+    productGstRate?: number;
+    bestBeforeDate?: string;
+    isActive?: boolean;
+  }) => request<Product>('/api/v1/seller/products', { method: 'POST', body: JSON.stringify(payload) }),
+  seedSellerSampleProducts: () => request<{ count: number; message: string }>('/api/v1/seller/seed-sample-products', { method: 'POST' }),
   adjustSellerInventory: (productId: string, payload: { quantityChange: number; reason: string; variantId?: string }) => request<Product>(`/api/v1/seller/products/${encodeURIComponent(productId)}/inventory-adjustments`, { method: 'POST', body: JSON.stringify(payload) }),
   sellerInventoryHistory: (productId: string, page = 1, limit = 20) => request<PageResult<SellerInventoryAdjustment>>(`/api/v1/seller/products/${encodeURIComponent(productId)}/inventory-adjustments?page=${page}&limit=${limit}`),
   sellerOrders: (page = 1, limit = 20, status: 'all' | 'new' | 'processing' | 'ready' | 'completed' | 'cancelled' = 'all') => request<PageResult<SellerOrder>>(`/api/v1/seller/orders?page=${page}&limit=${limit}&status=${status}`),

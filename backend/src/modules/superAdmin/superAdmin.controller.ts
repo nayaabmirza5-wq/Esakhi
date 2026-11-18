@@ -5,6 +5,7 @@ import { FULFILMENT_STATUS_ENUM, Order } from '../orders/order.model.js';
 import { PenaltyLedger } from '../orders/penaltyLedger.model.js';
 import { resolveOrderSellerPickup } from '../orders/order.controller.js';
 import { Product } from '../catalog/product.model.js';
+import { computeSellerStatutoryTaxSummary, getIndianFinancialYearBounds } from '../catalog/pricingTaxEngine.js';
 import { User } from '../auth/user.model.js';
 import { Seller } from '../../models/Seller.js';
 import { sendData, sendPage } from '../../utils/apiResponse.js';
@@ -815,28 +816,71 @@ export const updateSuperAdminCityAdmin: RequestHandler = async (req, res) => {
 
 export const getSuperAdminSellers: RequestHandler = async (req, res) => {
   const query = cityAdminListQuerySchema.parse(req.query);
-  const [sellers, total] = await Promise.all([
+  const [sellers, total, completedOrders] = await Promise.all([
     User.find({ role: 'seller' })
-      .select('name phoneE164 email assignedCity status createdAt')
+      .select('name phoneE164 email assignedCity status bankAccount createdAt')
       .sort({ createdAt: -1 })
       .skip((query.page - 1) * query.limit)
       .limit(query.limit)
       .lean(),
     User.countDocuments({ role: 'seller' }),
+    Order.find({
+      fulfilmentStatus: { $in: ['delivered', 'completed', 'return_delivered_to_seller', 'ready_for_refund', 'refund_completed'] },
+      paymentStatus: 'confirmed',
+    })
+      .select('items sellerPickup subtotalPaise createdAt')
+      .lean(),
   ]);
   const sellerIds = sellers.map((s) => s._id);
   const sellerDocs = await Seller.find({ userId: { $in: sellerIds } } as any).lean();
   const sellerDocMap = new Map((sellerDocs as any[]).map((s) => [String(s.userId), s]));
+  const { fyStart, fyEnd } = getIndianFinancialYearBounds();
+
   const enriched = sellers.map((seller: any) => {
-    const profile = sellerDocMap.get(String(seller._id)) as any;
+    const sId = String(seller._id);
+    const profile = sellerDocMap.get(sId) as any;
+
+    let grossSalesPaise = 0;
+    let fyGrossPaise = 0;
+    for (const o of completedOrders as any[]) {
+      let matched = false;
+      let orderGross = 0;
+      for (const item of o.items || []) {
+        if (item.sellerId && String(item.sellerId) === sId) {
+          orderGross += item.lineTotalPaise || 0;
+          matched = true;
+        }
+      }
+      if (!matched && o.sellerPickup?.sellerId && String(o.sellerPickup.sellerId) === sId) {
+        orderGross += o.subtotalPaise || 0;
+      }
+      if (orderGross > 0) {
+        grossSalesPaise += orderGross;
+        const d = new Date(o.createdAt);
+        if (d >= fyStart && d <= fyEnd) fyGrossPaise += orderGross;
+      }
+    }
+
+    const statutoryTax = computeSellerStatutoryTaxSummary({
+      fyGrossSalesPaise: Math.max(fyGrossPaise, grossSalesPaise),
+      periodGrossSalesPaise: grossSalesPaise,
+      hasGst: profile?.taxDetails?.hasGst,
+      gstin: profile?.taxDetails?.gstin,
+      enrolmentId: profile?.taxDetails?.enrolmentId,
+      panNumber: profile?.taxDetails?.panNumber,
+    });
+
     return {
       ...seller,
       name: profile?.supplierDetails?.shgName || seller.name || 'Seller',
       shgName: profile?.supplierDetails?.shgName,
       shgLeaderName: profile?.supplierDetails?.shgLeaderName,
+      shgCode: profile?.supplierDetails?.shgCode,
       category: profile?.supplierDetails?.category,
       verificationStatus: profile?.status === 'ACTIVE' ? 'verified' : 'verified',
       sellerProfile: profile,
+      grossSalesPaise,
+      statutoryTax,
     };
   });
   sendPage(res, enriched, query.page, query.limit, total);
@@ -845,11 +889,58 @@ export const getSuperAdminSellers: RequestHandler = async (req, res) => {
 export const getSuperAdminSeller: RequestHandler = async (req, res) => {
   const { userId } = z.object({ userId: z.string().regex(/^[a-f\d]{24}$/i) }).strict().parse(req.params);
   const seller = await User.findOne({ _id: userId, role: 'seller' })
-    .select('name phoneE164 email assignedCity status createdAt')
+    .select('name phoneE164 email assignedCity status bankAccount createdAt')
     .lean();
   if (!seller) throw new AppError(404, 'NOT_FOUND', 'Seller not found.');
-  const sellerProfile = await Seller.findOne({ userId: new mongoose.Types.ObjectId(userId) }).lean();
-  sendData(res, { ...seller, sellerProfile });
+  const sellerObjId = new mongoose.Types.ObjectId(userId);
+  const [sellerProfile, sellerOrders] = await Promise.all([
+    Seller.findOne({ userId: sellerObjId }).lean(),
+    Order.find({
+      fulfilmentStatus: { $in: ['delivered', 'completed', 'return_delivered_to_seller', 'ready_for_refund', 'refund_completed'] },
+      paymentStatus: 'confirmed',
+      $or: [{ 'items.sellerId': sellerObjId }, { 'sellerPickup.sellerId': sellerObjId }],
+    })
+      .select('items sellerPickup subtotalPaise createdAt')
+      .lean(),
+  ]);
+
+  const { fyStart, fyEnd } = getIndianFinancialYearBounds();
+  let grossSalesPaise = 0;
+  let fyGrossPaise = 0;
+  for (const o of sellerOrders as any[]) {
+    let matched = false;
+    let orderGross = 0;
+    for (const item of o.items || []) {
+      if (item.sellerId && String(item.sellerId) === userId) {
+        orderGross += item.lineTotalPaise || 0;
+        matched = true;
+      }
+    }
+    if (!matched && o.sellerPickup?.sellerId && String(o.sellerPickup.sellerId) === userId) {
+      orderGross += o.subtotalPaise || 0;
+    }
+    if (orderGross > 0) {
+      grossSalesPaise += orderGross;
+      const d = new Date(o.createdAt);
+      if (d >= fyStart && d <= fyEnd) fyGrossPaise += orderGross;
+    }
+  }
+
+  const statutoryTax = computeSellerStatutoryTaxSummary({
+    fyGrossSalesPaise: Math.max(fyGrossPaise, grossSalesPaise),
+    periodGrossSalesPaise: grossSalesPaise,
+    hasGst: sellerProfile?.taxDetails?.hasGst,
+    gstin: sellerProfile?.taxDetails?.gstin,
+    enrolmentId: sellerProfile?.taxDetails?.enrolmentId,
+    panNumber: sellerProfile?.taxDetails?.panNumber,
+  });
+
+  sendData(res, {
+    ...seller,
+    sellerProfile,
+    grossSalesPaise,
+    statutoryTax,
+  });
 };
 
 const auditLogQuerySchema = z.object({

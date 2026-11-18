@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api, resolveProductImageUrl } from '../../api';
 import { useAuth } from '../../AuthContext';
 import { useLoad, useRefreshOnFocus, Loading, Notice, displayError } from '../../ui';
@@ -9,12 +9,14 @@ import { SellerOrderCard, SellerOrderSkeleton } from '../../SellerOrderCard';
 import { SellerStockStepper } from './SellerStockStepper';
 import { SellerBankPassbook } from './SellerBankPassbook';
 import { SellerCatalogueListingPage } from './SellerCatalogueListingPage';
+import { SellerProfileManagementView } from './SellerProfileManagementView';
 import {
   SellerSalesTrendChart,
-  SellerProfileView,
   SellerInventoryHistoryPanel,
   DamohCityAdminHelpModal,
 } from './SellerComponents';
+import { useBazaar } from '../bazaar/BazaarContext';
+import { SellerStoreToggleBanner } from '../bazaar/BazaarComponents';
 
 function formatMoney(paise: number): string {
   return new Intl.NumberFormat('en-IN', {
@@ -41,8 +43,63 @@ interface SellerPortalProps {
 
 export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): ReactNode {
   const { user, signOut } = useAuth();
-  const [view, setView] = useState<SellerPortalView>(initialView);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlTab = searchParams.get('tab') || searchParams.get('view');
+  const validViews: SellerPortalView[] = ['overview', 'orders', 'products', 'passbook', 'profile', 'new_product', 'settings'];
+  const [view, setViewState] = useState<SellerPortalView>(() => {
+    if (urlTab && validViews.includes(urlTab as SellerPortalView)) {
+      return urlTab as SellerPortalView;
+    }
+    return initialView;
+  });
+
+  const setView = (nextView: SellerPortalView) => {
+    setViewState(nextView);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (nextView === 'overview') {
+        next.delete('tab');
+        next.delete('view');
+      } else {
+        next.set('tab', nextView);
+        next.delete('view');
+      }
+      return next;
+    }, { replace: true });
+  };
+
   const [helpOpen, setHelpOpen] = useState(false);
+  const [seedingProducts, setSeedingProducts] = useState(false);
+  const [seedNotice, setSeedNotice] = useState('');
+
+  const handleSeedProducts = async () => {
+    setSeedingProducts(true);
+    setSeedNotice('');
+    try {
+      const res = await api.seedSellerSampleProducts();
+      setSeedNotice(`✓ ${res.message || 'Sample products created!'}`);
+      await Promise.all([products.reload(false), dashboard.reload(false)]);
+    } catch (err) {
+      setSeedNotice(displayError(err));
+    } finally {
+      setSeedingProducts(false);
+    }
+  };
+
+  const [backfillingSkus, setBackfillingSkus] = useState(false);
+  const handleBackfillSkus = async () => {
+    setBackfillingSkus(true);
+    setSeedNotice('');
+    try {
+      const res = await api.backfillSellerProductSkus();
+      setSeedNotice(`✓ ${res.message}`);
+      await products.reload(false);
+    } catch (err) {
+      setSeedNotice(displayError(err));
+    } finally {
+      setBackfillingSkus(false);
+    }
+  };
 
   // Draft management
   const draftKey = `esakhi.seller.productDraft:${user?.id ?? 'seller'}`;
@@ -62,6 +119,9 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
   // Dashboard & Seller Profile data
   const dashboard = useLoad(() => api.sellerDashboard(), [user?.id]);
   const [sellerRecord, setSellerRecord] = useState<SellerRecord | null>(null);
+  const { isShopOpen, toggleShopOpenStatus } = useBazaar();
+  const shopName = sellerRecord?.supplierDetails?.shgName || user?.name || 'My Local Shop';
+  const storeOpen = isShopOpen(shopName);
 
   useEffect(() => {
     api
@@ -457,12 +517,26 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
 
       {/* 3. Main Workspace Container */}
       <main style={{ width: '100%', maxWidth: '1440px', margin: '1.75rem auto', padding: '0 2rem', display: 'grid', gap: '1.75rem', flex: 1 }}>
+        {dashboard.error && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fee2e2', border: '1px solid #f87171', borderRadius: '10px', padding: '0.85rem 1.25rem' }}>
+            <span style={{ color: '#991b1b', fontWeight: 600 }}>Error loading dashboard: {dashboard.error}</span>
+            <button type="button" onClick={() => void dashboard.reload()} className="seller-secondary-action" style={{ fontSize: '0.8rem' }}>
+              Retry ↺
+            </button>
+          </div>
+        )}
+        {seedNotice && <Notice tone="info">{seedNotice}</Notice>}
         {orderActionMessage && <Notice tone="success">{orderActionMessage}</Notice>}
         {orderActionError && <Notice tone="error">{orderActionError}</Notice>}
 
         {/* WORKSPACE 1: OVERVIEW DASHBOARD */}
         {view === 'overview' && (
           <div style={{ display: 'grid', gap: '1.75rem' }}>
+            <SellerStoreToggleBanner
+              sellerName={shopName}
+              storeOpen={storeOpen}
+              onToggle={(next) => toggleShopOpenStatus(shopName, next)}
+            />
             {/* Draft notice banner if exists */}
             {savedDraft && (savedDraft.name || savedDraft.price) && (
               <div
@@ -629,39 +703,151 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
               </div>
             </section>
 
-            {/* Overview Detail Grid: Recent Orders & Sales Trend */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '1.75rem' }}>
-              {/* Recent Orders Overview */}
-              <section style={{ background: '#ffffff', borderRadius: '16px', padding: '1.75rem', border: '1px solid #e2e8f0', boxShadow: '0 4px 16px rgba(15, 23, 42, 0.03)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+            {/* Overview Detail Grid: Recent Orders (Left) & Analytics + Stock + Compliance Stack (Right) */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '1.75rem', alignItems: 'start' }}>
+              {/* LEFT COLUMN: Recent Orders Overview */}
+              <section style={{ background: '#ffffff', borderRadius: '16px', padding: '1.5rem', border: '1px solid #e2e8f0', boxShadow: '0 4px 16px rgba(15, 23, 42, 0.03)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.15rem' }}>
                   <div>
-                    <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#0f172a' }}>Recent Orders</h3>
-                    <div style={{ fontSize: '0.82rem', color: '#64748b' }}>1-Tap accept and mark ready for Damoh pickup fleet</div>
+                    <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#0f172a' }}>Recent Orders</h3>
+                    <div style={{ fontSize: '0.8rem', color: '#64748b' }}>1-Tap accept and mark ready for Damoh pickup fleet</div>
                   </div>
-                  <button type="button" onClick={() => setView('orders')} className="seller-secondary-action" style={{ fontSize: '0.84rem' }}>
+                  <button type="button" onClick={() => setView('orders')} className="seller-secondary-action" style={{ fontSize: '0.82rem' }}>
                     View All Orders →
                   </button>
                 </div>
                 {dashboard.loading && !data ? (
                   <SellerOrderSkeleton count={2} />
                 ) : (
-                  orderRows(data?.recentOrders ?? [])
+                  orderRows((data?.recentOrders ?? []).slice(0, 3))
                 )}
               </section>
 
-              {/* Sales Trend Chart */}
-              <section style={{ background: '#ffffff', borderRadius: '16px', padding: '1.75rem', border: '1px solid #e2e8f0', boxShadow: '0 4px 16px rgba(15, 23, 42, 0.03)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#0f172a' }}>Sales Trend</h3>
-                    <div style={{ fontSize: '0.82rem', color: '#64748b' }}>Confirmed paid product sales over the last 6 months</div>
+              {/* RIGHT COLUMN: Sales Trend + Top Products & Low Stock + Store Tax & Settlement Status */}
+              <div style={{ display: 'grid', gap: '1.35rem' }}>
+                {/* 1. Sales Trend Chart */}
+                <section style={{ background: '#ffffff', borderRadius: '16px', padding: '1.5rem', border: '1px solid #e2e8f0', boxShadow: '0 4px 16px rgba(15, 23, 42, 0.03)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.1rem' }}>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#0f172a' }}>Sales Trend</h3>
+                      <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Confirmed paid product sales over the last 6 months</div>
+                    </div>
+                    <span style={{ fontWeight: 800, color: '#4A0E4E', fontSize: '0.92rem' }}>
+                      {metrics ? formatMoney(metrics.grossPaidProductSalesThisMonthPaise) : '₹0'} <small>this month</small>
+                    </span>
                   </div>
-                  <span style={{ fontWeight: 800, color: '#4A0E4E', fontSize: '0.92rem' }}>
-                    {metrics ? formatMoney(metrics.grossPaidProductSalesThisMonthPaise) : '₹0'} <small>this month</small>
-                  </span>
-                </div>
-                {data ? <SellerSalesTrendChart rows={data.salesTrend} /> : <Loading label="Loading sales chart…" />}
-              </section>
+                  {data ? <SellerSalesTrendChart rows={data.salesTrend} /> : <Loading label="Loading sales chart…" />}
+                </section>
+
+                {/* 2. Top Selling Products & Inventory Alerts Card */}
+                <section style={{ background: '#ffffff', borderRadius: '16px', padding: '1.5rem', border: '1px solid #e2e8f0', boxShadow: '0 4px 16px rgba(15, 23, 42, 0.03)', display: 'grid', gap: '1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: '1.08rem', color: '#0f172a' }}>Catalog & Inventory Health</h3>
+                      <div style={{ fontSize: '0.78rem', color: '#64748b' }}>Top sellers & low-stock alerts in your Damoh store</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.45rem' }}>
+                      <button type="button" onClick={() => setView('new_product')} className="seller-primary-action" style={{ fontSize: '0.78rem', padding: '0.38rem 0.75rem', background: '#4A0E4E', color: '#fff', borderRadius: '8px', border: 'none', fontWeight: 700, cursor: 'pointer' }}>
+                        ＋ Add Catalog
+                      </button>
+                      <button type="button" onClick={() => setView('products')} className="seller-secondary-action" style={{ fontSize: '0.78rem', padding: '0.38rem 0.75rem' }}>
+                        Manage Stock →
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Low stock alert banner if any */}
+                  {(data?.lowStockProducts?.length ?? 0) > 0 && (
+                    <div style={{ padding: '0.75rem 0.95rem', borderRadius: '12px', background: '#fef2f2', border: '1px solid #fecaca', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <div style={{ fontSize: '0.82rem', color: '#991b1b' }}>
+                        <strong>⚠️ {data?.lowStockProducts?.length} Product(s) Running Low on Stock:</strong>{' '}
+                        {data?.lowStockProducts?.map((p) => `${p.name} (${p.stock} left)`).join(', ')}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProductStockStatus('low_stock');
+                          setView('products');
+                        }}
+                        style={{ background: '#dc2626', color: '#fff', border: 'none', borderRadius: '7px', padding: '0.3rem 0.7rem', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        Restock Now
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Top Selling Products list */}
+                  <div style={{ display: 'grid', gap: '0.55rem' }}>
+                    {(data?.topSellingProducts ?? []).slice(0, 4).map((prod, idx) => (
+                      <div
+                        key={prod._id || idx}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '0.65rem 0.85rem',
+                          borderRadius: '10px',
+                          background: '#f8fafc',
+                          border: '1px solid #e2e8f0',
+                        }}
+                      >
+                        <div>
+                          <strong style={{ fontSize: '0.88rem', color: '#0f172a', textTransform: 'capitalize' }}>
+                            {idx + 1}. {prod.productName}
+                          </strong>
+                          <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                            {prod.unitsSold} units sold · Confirmed orders
+                          </div>
+                        </div>
+                        <span style={{ fontWeight: 800, fontSize: '0.9rem', color: '#15803d' }}>
+                          {formatMoney(prod.grossSalesPaise)}
+                        </span>
+                      </div>
+                    ))}
+                    {(data?.topSellingProducts?.length ?? 0) === 0 && (
+                      <div style={{ padding: '0.85rem', borderRadius: '10px', background: '#f8fafc', color: '#64748b', fontSize: '0.82rem', textAlign: 'center' }}>
+                        Your top-selling products will appear here as orders are completed.
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                {/* 3. Store Compliance & Bank Passbook Quick Card */}
+                <section style={{ background: 'linear-gradient(135deg, #1e1b4b 0%, #3b0764 100%)', color: '#ffffff', borderRadius: '16px', padding: '1.4rem 1.5rem', boxShadow: '0 4px 16px rgba(15, 23, 42, 0.08)', display: 'grid', gap: '0.85rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem' }}>
+                    <div>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#d8b4fe' }}>
+                        Store Tax & Settlement Status
+                      </span>
+                      <h4 style={{ margin: '0.2rem 0 0', fontSize: '1.02rem', fontWeight: 800, color: '#ffffff' }}>
+                        {sellerRecord?.taxDetails?.hasGst
+                          ? `GSTIN Registered Merchant (${sellerRecord.taxDetails.gstin})`
+                          : `Non-GST Enrolment ID Artisan (${sellerRecord?.taxDetails?.enrolmentId || 'ENR-MP-470661-0012'})`}
+                      </h4>
+                    </div>
+                    <span style={{ background: 'rgba(163, 230, 53, 0.2)', color: '#bef264', border: '1px solid rgba(163, 230, 53, 0.4)', borderRadius: '999px', padding: '0.2rem 0.65rem', fontSize: '0.72rem', fontWeight: 800 }}>
+                      {sellerRecord?.taxDetails?.hasGst ? '✓ Tax Invoice (CGST+SGST)' : '✓ 0% GST Bill of Supply'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#e9d5ff', lineHeight: 1.5 }}>
+                    {sellerRecord?.taxDetails?.hasGst
+                      ? 'Intra-state supplies split 50/50 CGST + SGST. 0.5% Section 52 GST TCS is credited monthly to your GST Cash Ledger via GSTR-8.'
+                      : 'Exempt from charging GST under Notification No. 34/2023-CT (0.0% GST on customer bills, ₹0 GST TCS). Flat ₹15 customer delivery fee.'}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.14)' }}>
+                    <span style={{ fontSize: '0.78rem', color: '#fef08a', fontWeight: 700 }}>
+                      🏦 T+1 Direct Bank Settlement Active
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setView('passbook')}
+                      style={{ background: '#ffffff', color: '#1e1b4b', border: 'none', borderRadius: '8px', padding: '0.38rem 0.85rem', fontSize: '0.78rem', fontWeight: 800, cursor: 'pointer' }}
+                    >
+                      Open Bank Passbook →
+                    </button>
+                  </div>
+                </section>
+              </div>
             </div>
           </div>
         )}
@@ -738,25 +924,36 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
           <section style={{ background: '#ffffff', borderRadius: '16px', padding: '1.75rem', border: '1px solid #e2e8f0', boxShadow: '0 4px 16px rgba(15, 23, 42, 0.03)', display: 'grid', gap: '1.5rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.85rem' }}>
               <div>
-                <h2 style={{ margin: 0, fontSize: '1.4rem', color: '#0f172a' }}>Products & Quick Stock</h2>
+                <h2 style={{ margin: 0, fontSize: '1.4rem', color: '#0f172a' }}>Products, SKUs & Quick Stock</h2>
                 <p style={{ margin: '0.25rem 0 0', fontSize: '0.86rem', color: '#64748b' }}>
-                  Manage items, check approval review states, and update inventory with 1-tap steppers.
+                  Manage Master SKUs, variant size/weight SKUs, check approval review states, and update inventory with 1-tap steppers.
                 </p>
               </div>
-              <button
-                type="button"
-                className="seller-primary-action"
-                onClick={() => setView('new_product')}
-                style={{ background: '#4A0E4E', color: '#ffffff', fontWeight: 800, padding: '0.65rem 1.35rem' }}
-              >
-                ＋ Add New Product
-              </button>
+              <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="seller-secondary-action"
+                  onClick={() => void handleBackfillSkus()}
+                  disabled={backfillingSkus}
+                  style={{ fontWeight: 700, padding: '0.65rem 1.05rem', fontSize: '0.84rem' }}
+                >
+                  {backfillingSkus ? 'Generating SKUs…' : '⚡ Sync & Generate Missing SKUs'}
+                </button>
+                <button
+                  type="button"
+                  className="seller-primary-action"
+                  onClick={() => setView('new_product')}
+                  style={{ background: '#4A0E4E', color: '#ffffff', fontWeight: 800, padding: '0.65rem 1.35rem' }}
+                >
+                  ＋ Add New Product
+                </button>
+              </div>
             </div>
 
             {/* Filter Tools */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '0.85rem', background: '#f8fafc', padding: '1.15rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
               <label className="field" style={{ margin: 0 }}>
-                <span>Search Products</span>
+                <span>Search by Name, Master SKU, Variant SKU or Barcode</span>
                 <input
                   type="search"
                   value={productSearch}
@@ -764,7 +961,7 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
                     setProductPage(1);
                     setProductSearch(e.target.value);
                   }}
-                  placeholder="Search by craft name..."
+                  placeholder="e.g. ESK-WAP, 890..., or craft name"
                 />
               </label>
 
@@ -857,7 +1054,22 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
                             <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
                               {product.categoryName} · {product.subcategoryName}
                             </div>
-                            <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#4A0E4E', marginTop: '0.2rem' }}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', alignItems: 'center', marginTop: '0.35rem' }}>
+                              <span style={{ fontFamily: 'monospace', fontSize: '0.74rem', fontWeight: 800, background: '#eef2ff', color: '#3730a3', border: '1px solid #c7d2fe', borderRadius: '6px', padding: '0.15rem 0.5rem' }}>
+                                SKU: {product.masterSku || `ESK-${product._id.slice(-6).toUpperCase()}`}
+                              </span>
+                              {product.barcode && (
+                                <span style={{ fontFamily: 'monospace', fontSize: '0.72rem', fontWeight: 700, background: '#f8fafc', color: '#475569', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0.15rem 0.5rem' }}>
+                                  EAN: {product.barcode}
+                                </span>
+                              )}
+                              {product.hsnCode && (
+                                <span style={{ fontSize: '0.72rem', fontWeight: 700, background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '0.15rem 0.5rem' }}>
+                                  HSN: {product.hsnCode} · GST {product.productGstRate ?? 0}%
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#4A0E4E', marginTop: '0.25rem' }}>
                               {formatMoney(product.pricePaise)}
                             </div>
                           </div>
@@ -888,6 +1100,38 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
                         </div>
                       </div>
 
+                      {/* Variant SKUs Matrix Strip (if variants exist) */}
+                      {product.variants.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', padding: '0.55rem 0.75rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                          <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#475569', alignSelf: 'center' }}>
+                            Variant SKUs ({product.variants.length}):
+                          </span>
+                          {product.variants.map((v, vIdx) => {
+                            const labelEntries = Object.entries(v.attributes || {}).filter(
+                              ([k]) => !['sellingprice', 'mrp'].includes(k.toLowerCase())
+                            );
+                            const labelText = labelEntries.map(([, val]) => val).join(' ') || `Option ${vIdx + 1}`;
+                            const vPrice = v.attributes?.SellingPrice ? ` · ₹${v.attributes.SellingPrice}` : '';
+                            return (
+                              <span
+                                key={v._id || vIdx}
+                                style={{
+                                  fontSize: '0.74rem',
+                                  fontFamily: 'monospace',
+                                  background: '#ffffff',
+                                  border: '1px solid #cbd5e1',
+                                  borderRadius: '6px',
+                                  padding: '0.18rem 0.55rem',
+                                  color: '#0f172a',
+                                }}
+                              >
+                                <strong>{v.sku || `${product.masterSku || 'SKU'}-V${vIdx + 1}`}</strong> ({labelText}{vPrice} · Qty: {v.stock})
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+
                       {/* 1-Tap Quick Stock Stepper */}
                       <SellerStockStepper
                         productId={product._id}
@@ -917,14 +1161,25 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
                     : 'Add your first handcrafted craft to start building your shop!'}
                 </p>
                 {!productSearch && (
-                  <button
-                    type="button"
-                    className="seller-primary-action"
-                    onClick={() => setView('new_product')}
-                    style={{ marginTop: '0.75rem', background: '#4A0E4E', color: '#ffffff' }}
-                  >
-                    ＋ Add Your First Product
-                  </button>
+                  <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', marginTop: '1rem', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="seller-primary-action"
+                      onClick={() => setView('new_product')}
+                      style={{ background: '#4A0E4E', color: '#ffffff', fontWeight: 800, padding: '0.65rem 1.35rem' }}
+                    >
+                      ＋ Add Your First Product
+                    </button>
+                    <button
+                      type="button"
+                      className="seller-secondary-action"
+                      onClick={() => void handleSeedProducts()}
+                      disabled={seedingProducts}
+                      style={{ background: '#fdf4ff', borderColor: '#f0abfc', color: '#701a75', fontWeight: 700, padding: '0.65rem 1.15rem' }}
+                    >
+                      {seedingProducts ? 'Seeding…' : '⚡ Load Damoh Artisan Starter Catalog'}
+                    </button>
+                  </div>
                 )}
               </div>
             )}
@@ -941,10 +1196,13 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
 
         {/* WORKSPACE 5: STORE PROFILE */}
         {view === 'profile' && (
-          <SellerProfileView
-            profile={data?.storeProfile ?? null}
-            onSaved={async () => {
-              await Promise.all([dashboard.reload(false), api.getSellerProfile().then((res) => res.seller && setSellerRecord(res.seller))]);
+          <SellerProfileManagementView
+            user={user!}
+            onProfileUpdated={async () => {
+              await Promise.all([
+                dashboard.reload(false),
+                api.getSellerProfile().then((res) => res.seller && setSellerRecord(res.seller)),
+              ]);
             }}
           />
         )}
@@ -952,6 +1210,7 @@ export function SellerPortal({ initialView = 'overview' }: SellerPortalProps): R
         {/* WORKSPACE 6: ADD PRODUCT */}
         {view === 'new_product' && (
           <SellerCatalogueListingPage
+            sellerRecord={sellerRecord}
             onCancel={() => setView('products')}
             onSubmitted={() => {
               setView('products');

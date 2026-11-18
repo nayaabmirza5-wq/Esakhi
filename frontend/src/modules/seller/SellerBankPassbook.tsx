@@ -23,6 +23,7 @@ export function SellerBankPassbook({
   const [settlements, setSettlements] = useState<SellerSettlementsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [previewAbove5Lakh, setPreviewAbove5Lakh] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -52,6 +53,28 @@ export function SellerBankPassbook({
   const grossPaise = settlements?.grossMonthlyPayoutPaise ?? grossSalesMonthPaise;
   const penaltyPaise = settlements?.totalPenaltyDeductionsPaise ?? 0;
   const completedOrders = settlements?.completedOrdersCount ?? 0;
+  const taxLedger = settlements?.statutoryTaxLedger;
+  const isGstRegistered = Boolean(
+    taxLedger?.hasGst ?? (sellerRecord?.taxDetails?.hasGst && sellerRecord?.taxDetails?.gstin)
+  );
+  const gstinDisplay = taxLedger?.gstin || sellerRecord?.taxDetails?.gstin || '23AAAAA0000A1Z5';
+  const enrolmentIdDisplay =
+    taxLedger?.enrolmentId || sellerRecord?.taxDetails?.enrolmentId || 'ENR-MP-470661-0012';
+  const panDisplay = taxLedger?.panNumber || sellerRecord?.taxDetails?.panNumber || 'ABCDE1234F';
+
+  const FIVE_LAKH_PAISE = 50_000_000;
+  const realFyGrossPaise = taxLedger?.fyGrossSalesPaise ?? grossPaise;
+  const effectiveFyGrossPaise = previewAbove5Lakh ? Math.max(realFyGrossPaise, 54_500_000) : realFyGrossPaise;
+  const exceeds5Lakh = effectiveFyGrossPaise > FIVE_LAKH_PAISE;
+  const thresholdPercent = Math.min(100, Math.round((effectiveFyGrossPaise / FIVE_LAKH_PAISE) * 1000) / 10);
+  const remainingBeforeTdsPaise = Math.max(0, FIVE_LAKH_PAISE - effectiveFyGrossPaise);
+
+  const effectiveTcsPaise = isGstRegistered
+    ? (settlements?.tcsGstPaise ?? Math.round((grossPaise / 1.05) * 0.005))
+    : 0;
+  const effectiveTdsPaise = exceeds5Lakh
+    ? Math.max(settlements?.tds194OPaise ?? 0, Math.round((previewAbove5Lakh ? Math.max(grossPaise, 54_500_000) : grossPaise) * 0.001))
+    : 0;
 
   const handlePrint = () => {
     window.print();
@@ -179,6 +202,213 @@ export function SellerBankPassbook({
               {settlements?.monthLabel || 'Current Month'} Cycle
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* STATUTORY TAX LEDGER: GSTR-8 TCS & SECTION 194-O TDS */}
+      <section
+        style={{
+          background: '#ffffff',
+          borderRadius: '16px',
+          border: '1.5px solid #e2e8f0',
+          padding: '1.25rem 1.5rem',
+          boxShadow: '0 4px 16px rgba(15, 23, 42, 0.04)',
+          display: 'grid',
+          gap: '1.15rem',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#0f172a' }}>
+                ⚖️ Statutory Tax Ledger & Government Filings (TCS & TDS)
+              </h3>
+              <span
+                style={{
+                  padding: '0.2rem 0.6rem',
+                  borderRadius: '999px',
+                  fontSize: '0.75rem',
+                  fontWeight: 800,
+                  background: isGstRegistered ? '#dbeafe' : '#fef3c7',
+                  color: isGstRegistered ? '#1e40af' : '#92400e',
+                  border: `1px solid ${isGstRegistered ? '#93c5fd' : '#fde68a'}`,
+                }}
+              >
+                {isGstRegistered ? 'GSTIN Registered Merchant' : 'Non-GST / Enrolment ID Seller'}
+              </span>
+            </div>
+            <div style={{ fontSize: '0.82rem', color: '#64748b', marginTop: '0.2rem' }}>
+              Full transparency on statutory deductions deposited directly to the Government on your behalf.
+            </div>
+          </div>
+
+          <div style={{ fontSize: '0.82rem', color: '#475569', background: '#f8fafc', padding: '0.4rem 0.75rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+            <strong>{isGstRegistered ? 'GSTIN' : 'Enrolment ID'}:</strong>{' '}
+            <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#0f172a' }}>
+              {isGstRegistered ? gstinDisplay : enrolmentIdDisplay}
+            </span>{' '}
+            | <strong>PAN:</strong> <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{panDisplay}</span>
+          </div>
+        </div>
+
+        {/* LIVE ₹5,00,000 ANNUAL TURNOVER TRACKER (HOW PORTAL DETECTS >₹5L FOR SEC 194-O TDS) */}
+        <div
+          style={{
+            padding: '1.1rem 1.25rem',
+            borderRadius: '12px',
+            background: exceeds5Lakh ? '#faf5ff' : '#f0f9ff',
+            border: `1.5px solid ${exceeds5Lakh ? '#d8b4fe' : '#bae6fd'}`,
+            display: 'grid',
+            gap: '0.65rem',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <strong style={{ fontSize: '0.9rem', color: '#0f172a' }}>
+                  📊 Live {taxLedger?.fyLabel || 'FY 2026-27'} Portal Sales vs ₹5,00,000 TDS Threshold (Section 194-O)
+                </strong>
+                <span
+                  style={{
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    padding: '0.15rem 0.55rem',
+                    borderRadius: '999px',
+                    background: exceeds5Lakh ? '#f3e8ff' : '#dcfce7',
+                    color: exceeds5Lakh ? '#7e22ce' : '#166534',
+                    border: `1px solid ${exceeds5Lakh ? '#c084fc' : '#86efac'}`,
+                  }}
+                >
+                  {exceeds5Lakh
+                    ? '⚡ ABOVE ₹5,00,000 — 0.1% TDS DEDUCTION ACTIVE'
+                    : '✓ BELOW ₹5,00,000 — 0% TDS EXEMPT'}
+                </span>
+              </div>
+              <div style={{ fontSize: '0.78rem', color: '#475569', marginTop: '0.15rem' }}>
+                eSakhi automatically aggregates all your confirmed non-cancelled orders in the Indian Financial Year (1 Apr – 31 Mar) linked to PAN <strong>{panDisplay}</strong>.
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setPreviewAbove5Lakh((prev) => !prev)}
+              style={{
+                background: previewAbove5Lakh ? '#7e22ce' : '#ffffff',
+                color: previewAbove5Lakh ? '#ffffff' : '#6b21a8',
+                border: '1px solid #c084fc',
+                borderRadius: '8px',
+                padding: '0.35rem 0.75rem',
+                fontSize: '0.75rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              {previewAbove5Lakh ? '↺ Show Actual Live FY Sales' : '🔬 Simulate > ₹5,00,000 FY Sales (Test 0.1% TDS)'}
+            </button>
+          </div>
+
+          {/* Progress Bar */}
+          <div style={{ width: '100%', height: '10px', background: '#e2e8f0', borderRadius: '999px', overflow: 'hidden' }}>
+            <div
+              style={{
+                width: `${Math.max(4, thresholdPercent)}%`,
+                height: '100%',
+                background: exceeds5Lakh
+                  ? 'linear-gradient(90deg, #9333ea 0%, #c026d3 100%)'
+                  : 'linear-gradient(90deg, #0284c7 0%, #10b981 100%)',
+                transition: 'width 0.3s ease',
+              }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', fontSize: '0.78rem', color: '#334155' }}>
+            <span>
+              <strong>Cumulative FY Gross Sales:</strong> {formatRupees(effectiveFyGrossPaise)} / ₹5,00,000 ({thresholdPercent}%)
+            </span>
+            <span>
+              {exceeds5Lakh ? (
+                <strong style={{ color: '#7e22ce' }}>
+                  Crossed ₹5L limit by {formatRupees(effectiveFyGrossPaise - FIVE_LAKH_PAISE)} → 0.1% TDS ({formatRupees(effectiveTdsPaise)}) auto-deducted & filed in Form 26Q
+                </strong>
+              ) : (
+                <strong style={{ color: '#0369a1' }}>
+                  {formatRupees(remainingBeforeTdsPaise)} remaining in FY before 0.1% Section 194-O TDS activates
+                </strong>
+              )}
+            </span>
+          </div>
+        </div>
+
+        {/* 2 Tax Cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+          {/* Box 1: GST TCS */}
+          <div
+            style={{
+              padding: '1.15rem',
+              borderRadius: '12px',
+              background: isGstRegistered ? '#f0fdf4' : '#f8fafc',
+              border: `1.5px solid ${isGstRegistered ? '#bbf7d0' : '#e2e8f0'}`,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <span style={{ fontSize: '0.78rem', fontWeight: 800, color: isGstRegistered ? '#166534' : '#475569', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Section 52 · GST TCS (0.5% · GSTR-8)
+                </span>
+                <h4 style={{ margin: '0.35rem 0 0.2rem', fontSize: '1.4rem', fontWeight: 800, color: isGstRegistered ? '#15803d' : '#64748b' }}>
+                  {isGstRegistered ? formatRupees(effectiveTcsPaise) : '₹0 (Enrolment ID Exempt)'}
+                </h4>
+              </div>
+              <span style={{ fontSize: '1.4rem' }}>{isGstRegistered ? '🏛️' : '🛡️'}</span>
+            </div>
+
+            <p style={{ margin: '0.45rem 0 0', fontSize: '0.78rem', color: '#475569', lineHeight: 1.45 }}>
+              {isGstRegistered ? (
+                <>
+                  Deducted at 0.5% (0.25% CGST + 0.25% SGST) on net taxable value. Deposited monthly by eSakhi via <strong>GSTR-8</strong> directly into your <strong>GST Electronic Cash Ledger</strong> ({gstinDisplay}).
+                </>
+              ) : (
+                <>
+                  Non-GST sellers operating under Enrolment ID (<strong>{enrolmentIdDisplay}</strong>, Notification No. 34/2023-CT) are legally exempt from charging GST and <strong>0% TCS is deducted</strong>. Outward supply value is reported in GSTR-8 Table 4B.
+                </>
+              )}
+            </p>
+          </div>
+
+          {/* Box 2: Income Tax TDS */}
+          <div
+            style={{
+              padding: '1.15rem',
+              borderRadius: '12px',
+              background: '#fdf4ff',
+              border: '1.5px solid #f5d0fe',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#86198f', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Section 194-O · Income Tax TDS (0.1% · Form 26Q)
+                </span>
+                <h4 style={{ margin: '0.35rem 0 0.2rem', fontSize: '1.4rem', fontWeight: 800, color: '#a21caf' }}>
+                  {exceeds5Lakh ? `${formatRupees(effectiveTdsPaise)} (0.1% Deducted)` : '₹0 (Below ₹5L Limit)'}
+                </h4>
+              </div>
+              <span style={{ fontSize: '1.4rem' }}>📋</span>
+            </div>
+
+            <p style={{ margin: '0.45rem 0 0', fontSize: '0.78rem', color: '#475569', lineHeight: 1.45 }}>
+              Applicable when Financial Year e-commerce sales exceed <strong>₹5,00,000</strong>. Deposited by eSakhi against PAN <strong>{panDisplay}</strong> via quarterly <strong>Form 26Q</strong> and reflects in your <strong>Form 26AS / AIS (Form 16A)</strong> for full credit or refund.
+            </p>
+          </div>
+        </div>
+
+        {/* Claim Procedure Accordion */}
+        <div style={{ background: '#f8fafc', padding: '0.9rem 1.15rem', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '0.8rem', color: '#334155', lineHeight: 1.5 }}>
+          <strong>💡 How Sellers Claim Deducted Government Taxes Back:</strong>
+          <ul style={{ margin: '0.35rem 0 0', paddingLeft: '1.25rem', display: 'grid', gap: '0.25rem' }}>
+            <li><strong>GST TCS (GSTR-8):</strong> Login to <em>services.gst.gov.in</em> → Services → Returns → <em>TDS and TCS credit received</em>. Accept the eSakhi return entry; the amount immediately credits to your <strong>Cash Ledger</strong>!</li>
+            <li><strong>Income Tax TDS (Form 16A):</strong> eSakhi generates quarterly Form 16A. When you file your annual ITR, pre-filled TDS credit reduces your tax liability or is refunded directly to your bank account.</li>
+          </ul>
         </div>
       </section>
 
@@ -354,34 +584,42 @@ export function SellerBankPassbook({
           <div style={{ padding: '1rem', color: '#dc2626', background: '#fef2f2', borderRadius: '8px' }}>{error}</div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.86rem' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.84rem' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                  <th style={{ padding: '0.75rem 1rem', color: '#475569', fontWeight: 700 }}>Date</th>
-                  <th style={{ padding: '0.75rem 1rem', color: '#475569', fontWeight: 700 }}>Narration & Reference</th>
-                  <th style={{ padding: '0.75rem 1rem', color: '#475569', fontWeight: 700 }}>Fulfilled Orders</th>
-                  <th style={{ padding: '0.75rem 1rem', color: '#475569', fontWeight: 700, textAlign: 'right' }}>Credit Amount</th>
-                  <th style={{ padding: '0.75rem 1rem', color: '#475569', fontWeight: 700, textAlign: 'center' }}>Status</th>
+                  <th style={{ padding: '0.75rem 0.85rem', color: '#475569', fontWeight: 700 }}>Date</th>
+                  <th style={{ padding: '0.75rem 0.85rem', color: '#475569', fontWeight: 700 }}>Order / DBT Narration & SKU</th>
+                  <th style={{ padding: '0.75rem 0.85rem', color: '#475569', fontWeight: 700, textAlign: 'right' }}>Gross Sale</th>
+                  <th style={{ padding: '0.75rem 0.85rem', color: '#475569', fontWeight: 700, textAlign: 'right' }}>10% Fee</th>
+                  <th style={{ padding: '0.75rem 0.85rem', color: '#475569', fontWeight: 700, textAlign: 'right' }}>GST TCS (0.5%)</th>
+                  <th style={{ padding: '0.75rem 0.85rem', color: '#475569', fontWeight: 700, textAlign: 'right' }}>IT TDS (0.1%)</th>
+                  <th style={{ padding: '0.75rem 0.85rem', color: '#475569', fontWeight: 700, textAlign: 'right' }}>Net Bank Credit</th>
+                  <th style={{ padding: '0.75rem 0.85rem', color: '#475569', fontWeight: 700, textAlign: 'center' }}>Status</th>
                 </tr>
               </thead>
               <tbody>
-                <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  <td style={{ padding: '0.85rem 1rem', color: '#334155' }}>
+                <tr style={{ borderBottom: '2px solid #e2e8f0', background: '#f0fdf4' }}>
+                  <td style={{ padding: '0.85rem', color: '#334155', fontWeight: 700 }}>
                     {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                   </td>
-                  <td style={{ padding: '0.85rem 1rem' }}>
-                    <strong>eSakhi DBT Payout #{settlements?.monthLabel?.replace(/\s+/g, '') || '2026-03'}</strong>
-                    <div style={{ fontSize: '0.74rem', color: '#64748b' }}>Direct settlement to {bankName} (Ac: {maskedAccount})</div>
+                  <td style={{ padding: '0.85rem' }}>
+                    <strong>Monthly Summary · eSakhi DBT Payout #{settlements?.monthLabel?.replace(/\s+/g, '') || '2026-11'}</strong>
+                    <div style={{ fontSize: '0.74rem', color: '#475569' }}>
+                      {completedOrders} Verified Orders · {bankName} ({maskedAccount}) · {isGstRegistered ? `GSTIN: ${gstinDisplay}` : `Enrolment ID: ${enrolmentIdDisplay}`}
+                    </div>
                   </td>
-                  <td style={{ padding: '0.85rem 1rem', color: '#334155' }}>
-                    <span style={{ padding: '0.2rem 0.5rem', background: '#f1f5f9', borderRadius: '6px', fontWeight: 700, fontSize: '0.8rem' }}>
-                      {completedOrders} Verified Orders
-                    </span>
+                  <td style={{ padding: '0.85rem', textAlign: 'right', fontWeight: 700 }}>{formatRupees(grossPaise)}</td>
+                  <td style={{ padding: '0.85rem', textAlign: 'right', color: '#b45309' }}>−{formatRupees(settlements?.commissionPaise ?? Math.round(grossPaise * 0.1))}</td>
+                  <td style={{ padding: '0.85rem', textAlign: 'right', color: '#0369a1' }}>
+                    {isGstRegistered ? `−${formatRupees(effectiveTcsPaise)}` : '₹0 (Exempt)'}
                   </td>
-                  <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 800, color: '#15803d', fontSize: '1rem' }}>
+                  <td style={{ padding: '0.85rem', textAlign: 'right', color: '#7e22ce' }}>
+                    {exceeds5Lakh ? `−${formatRupees(effectiveTdsPaise)}` : '₹0 (≤₹5L)'}
+                  </td>
+                  <td style={{ padding: '0.85rem', textAlign: 'right', fontWeight: 800, color: '#15803d', fontSize: '0.98rem' }}>
                     +{formatRupees(netPaise)}
                   </td>
-                  <td style={{ padding: '0.85rem 1rem', textAlign: 'center' }}>
+                  <td style={{ padding: '0.85rem', textAlign: 'center' }}>
                     <span
                       style={{
                         padding: '0.25rem 0.65rem',
@@ -389,13 +627,38 @@ export function SellerBankPassbook({
                         background: '#dcfce7',
                         color: '#166534',
                         fontWeight: 700,
-                        fontSize: '0.78rem',
+                        fontSize: '0.76rem',
                       }}
                     >
-                      ✓ Credited via DBT
+                      ✓ DBT Active
                     </span>
                   </td>
                 </tr>
+                {(settlements?.orderLedger ?? []).map((entry) => (
+                  <tr key={entry.orderId} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '0.75rem 0.85rem', color: '#475569' }}>
+                      {new Date(entry.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </td>
+                    <td style={{ padding: '0.75rem 0.85rem' }}>
+                      <strong style={{ fontFamily: 'monospace', color: '#0f172a' }}>#{entry.orderReference}</strong>
+                      <div style={{ fontSize: '0.74rem', color: '#64748b' }}>{entry.productSummary || 'Handcrafted SHG Item'}</div>
+                    </td>
+                    <td style={{ padding: '0.75rem 0.85rem', textAlign: 'right', fontWeight: 600 }}>{formatRupees(entry.grossPaise)}</td>
+                    <td style={{ padding: '0.75rem 0.85rem', textAlign: 'right', color: '#64748b' }}>−{formatRupees(entry.commissionPaise)}</td>
+                    <td style={{ padding: '0.75rem 0.85rem', textAlign: 'right', color: '#0369a1' }}>
+                      {entry.tcsPaise > 0 ? `−${formatRupees(entry.tcsPaise)}` : '₹0'}
+                    </td>
+                    <td style={{ padding: '0.75rem 0.85rem', textAlign: 'right', color: '#7e22ce' }}>
+                      {exceeds5Lakh ? `−${formatRupees(Math.round(entry.grossPaise * 0.001))}` : '₹0'}
+                    </td>
+                    <td style={{ padding: '0.75rem 0.85rem', textAlign: 'right', fontWeight: 700, color: '#15803d' }}>
+                      +{formatRupees(entry.netPaise)}
+                    </td>
+                    <td style={{ padding: '0.75rem 0.85rem', textAlign: 'center' }}>
+                      <span style={{ fontSize: '0.74rem', fontWeight: 700, color: '#166534' }}>✓ Verified</span>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

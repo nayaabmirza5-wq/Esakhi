@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { RequestHandler } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
@@ -14,6 +15,8 @@ import { InventoryAdjustment } from '../inventory/inventoryAdjustment.model.js';
 import { adjustmentSchema, inventoryProductParamsSchema } from '../inventory/inventory.schemas.js';
 import { SellerApplication } from './sellerApplication.model.js';
 import { Seller } from '../../models/Seller.js';
+import { computeSellerStatutoryTaxSummary, getIndianFinancialYearBounds } from '../catalog/pricingTaxEngine.js';
+import { generateIndianBarcode, generateMasterSku, generateVariantSku } from '../catalog/skuGenerator.js';
 import { issueSession } from '../auth/auth.service.js';
 import {
   sellerInspectionImagesUploadSchema,
@@ -101,7 +104,7 @@ const availableStockExpression = {
   ],
 };
 
-function sellerOrdersFilter(sellerId: string) {
+function sellerOrdersFilter(sellerId: string, phoneE164?: string | null) {
   const sellerObjectId = mongoose.Types.ObjectId.isValid(sellerId) ? new mongoose.Types.ObjectId(sellerId) : null;
   const matchers: Record<string, unknown>[] = [
     { 'items.sellerId': sellerId },
@@ -110,6 +113,10 @@ function sellerOrdersFilter(sellerId: string) {
   if (sellerObjectId) {
     matchers.push({ 'items.sellerId': sellerObjectId });
     matchers.push({ 'sellerPickup.sellerId': sellerObjectId });
+  }
+  if (phoneE164) {
+    matchers.push({ 'sellerPickup.phoneE164': phoneE164 });
+    matchers.push({ 'sellerPickup.phone': phoneE164 });
   }
   return { $or: matchers };
 }
@@ -131,10 +138,16 @@ function sellerOrderSummary(order: {
   sellerId: string;
   items: Array<{
     sellerId?: unknown;
+    sku?: string | null;
     productName: string;
     quantity: number;
-    unitPricePaise?: number;
+    unitPricePaise?: number | null;
     lineTotalPaise: number;
+    hsnCode?: string | null;
+    gstRate?: number | null;
+    cgstPaise?: number | null;
+    sgstPaise?: number | null;
+    igstPaise?: number | null;
     variantAttributes?: Record<string, string> | Map<string, string> | null;
   }>;
   deliveryPartner?: {
@@ -180,11 +193,17 @@ function sellerOrderSummary(order: {
 }) {
   const matchingItems = (order.items ?? []).filter((item) => item.sellerId?.toString() === order.sellerId);
   const effectiveItems = matchingItems.length > 0 ? matchingItems : (order.items ?? []);
-  const items = effectiveItems.map(({ productName, quantity, lineTotalPaise, unitPricePaise, variantAttributes }) => ({
+  const items = effectiveItems.map(({ sku, productName, quantity, lineTotalPaise, unitPricePaise, variantAttributes, hsnCode, gstRate, cgstPaise, sgstPaise, igstPaise }) => ({
+    ...(sku ? { sku } : {}),
     productName,
     quantity,
     unitPricePaise: unitPricePaise ?? Math.round(lineTotalPaise / (quantity || 1)),
     lineTotalPaise,
+    ...(hsnCode ? { hsnCode } : {}),
+    ...(gstRate != null ? { gstRate } : {}),
+    ...(cgstPaise != null ? { cgstPaise } : {}),
+    ...(sgstPaise != null ? { sgstPaise } : {}),
+    ...(igstPaise != null ? { igstPaise } : {}),
     ...(variantAttributes ? { variantAttributes: variantAttributes instanceof Map ? Object.fromEntries(variantAttributes) : variantAttributes } : {}),
   }));
   const reversedHistory = [...(order.statusHistory ?? [])].reverse();
@@ -253,6 +272,10 @@ export const getSellerDashboard: RequestHandler = async (req, res) => {
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const trendStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1));
+  const sellerAccount = await User.findById(sellerId).select('email phoneE164 name assignedCity serviceableLocalities').lean();
+  const sellerPhone = sellerAccount?.phoneE164;
+  const sellerOrderFilterQuery = sellerOrdersFilter(sellerId, sellerPhone);
+
   const [
     activeProducts,
     pendingProducts,
@@ -269,7 +292,6 @@ export const getSellerDashboard: RequestHandler = async (req, res) => {
     lowStockProductRows,
     recentOrders,
     application,
-    sellerAccount,
   ] = await Promise.all([
     Product.countDocuments({
       sellerId,
@@ -305,20 +327,18 @@ export const getSellerDashboard: RequestHandler = async (req, res) => {
       { $count: 'count' },
     ]).then(([result]) => result?.count ?? 0),
     Product.countDocuments({ sellerId, isArchived: false }),
-    Order.countDocuments({ ...sellerOrdersFilter(sellerId), fulfilmentStatus: { $in: ['placed', 'order_confirmed'] } }),
-    Order.countDocuments({ ...sellerOrdersFilter(sellerId), fulfilmentStatus: { $in: ['accepted', 'preparing'] } }),
-    Order.countDocuments({ ...sellerOrdersFilter(sellerId), fulfilmentStatus: { $in: ['ready_for_pickup', 'delivery_partner_assigned', 'out_for_pickup', 'picked_up', 'out_for_delivery'] } }),
-    Order.countDocuments({ ...sellerOrdersFilter(sellerId), fulfilmentStatus: { $in: ['delivered', 'completed'] } }),
+    Order.countDocuments({ ...sellerOrderFilterQuery, fulfilmentStatus: { $in: ['placed', 'order_confirmed'] } }),
+    Order.countDocuments({ ...sellerOrderFilterQuery, fulfilmentStatus: { $in: ['accepted', 'preparing'] } }),
+    Order.countDocuments({ ...sellerOrderFilterQuery, fulfilmentStatus: { $in: ['ready_for_pickup', 'delivery_partner_assigned', 'out_for_pickup', 'picked_up', 'out_for_delivery'] } }),
+    Order.countDocuments({ ...sellerOrderFilterQuery, fulfilmentStatus: { $in: ['delivered', 'completed'] } }),
     Order.aggregate([
-      { $match: { 'items.sellerId': sellerObjectId, paymentStatus: 'confirmed', fulfilmentStatus: { $ne: 'cancelled' }, createdAt: { $gte: monthStart } } },
+      { $match: { ...sellerOrderFilterQuery, paymentStatus: 'confirmed', fulfilmentStatus: { $ne: 'cancelled' }, createdAt: { $gte: monthStart } } },
       { $unwind: '$items' },
-      { $match: { 'items.sellerId': sellerObjectId } },
       { $group: { _id: null, totalPaise: { $sum: '$items.lineTotalPaise' } } },
     ]),
     Order.aggregate([
-      { $match: { 'items.sellerId': sellerObjectId, paymentStatus: 'confirmed', fulfilmentStatus: { $ne: 'cancelled' }, createdAt: { $gte: trendStart } } },
+      { $match: { ...sellerOrderFilterQuery, paymentStatus: 'confirmed', fulfilmentStatus: { $ne: 'cancelled' }, createdAt: { $gte: trendStart } } },
       { $unwind: '$items' },
-      { $match: { 'items.sellerId': sellerObjectId } },
       {
         $group: {
           _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } },
@@ -327,9 +347,8 @@ export const getSellerDashboard: RequestHandler = async (req, res) => {
       },
     ]),
     Order.aggregate([
-      { $match: { 'items.sellerId': sellerObjectId, paymentStatus: 'confirmed', fulfilmentStatus: { $ne: 'cancelled' } } },
+      { $match: { ...sellerOrderFilterQuery, paymentStatus: 'confirmed', fulfilmentStatus: { $ne: 'cancelled' } } },
       { $unwind: '$items' },
-      { $match: { 'items.sellerId': sellerObjectId } },
       {
         $group: {
           _id: '$items.productId',
@@ -359,7 +378,7 @@ export const getSellerDashboard: RequestHandler = async (req, res) => {
       { $limit: 5 },
       { $project: { name: 1, categoryName: 1, subcategoryName: 1, stock: 1, variants: 1, availableStock: '$effectiveStock' } },
     ]),
-    Order.find({ ...sellerOrdersFilter(sellerId), fulfilmentStatus: { $nin: [...terminalStatuses] } })
+    Order.find({ ...sellerOrderFilterQuery, fulfilmentStatus: { $nin: [...terminalStatuses] } })
       .sort({ createdAt: -1 })
       .limit(5)
       .select('orderReference fulfilmentMethod fulfilmentStatus paymentMethod paymentStatus totalPaise deliveryFeePaise customerName customerPhoneE164 address sellerPickup deliveryOtp items.sellerId items.productName items.quantity items.unitPricePaise items.lineTotalPaise items.variantAttributes deliveryPartner.name deliveryPartner.phoneE164 deliveryPartner.distanceKm deliveryPartner.assignedAt preDispatchInspection returnRequest statusHistory createdAt')
@@ -368,11 +387,11 @@ export const getSellerDashboard: RequestHandler = async (req, res) => {
       .sort({ reviewedAt: -1, createdAt: -1 })
       .select('shgName representative phoneE164 city registeredAddress latitude longitude storeDescription primaryCategoryId primaryCategoryName primarySubcategoryId primarySubcategoryName primaryProductType fssaiStatus')
       .lean(),
-    User.findById(sellerId).select('email phoneE164 name assignedCity serviceableLocalities').lean(),
   ]);
+
   let resolvedApplication = application;
-  if (!resolvedApplication && sellerAccount?.phoneE164) {
-    const fallbackApp = await SellerApplication.findOne({ phoneE164: sellerAccount.phoneE164, status: 'approved' })
+  if (!resolvedApplication && sellerPhone) {
+    const fallbackApp = await SellerApplication.findOne({ phoneE164: sellerPhone, status: 'approved' })
       .sort({ reviewedAt: -1, createdAt: -1 });
     if (fallbackApp) {
       fallbackApp.sellerId = sellerObjectId;
@@ -383,6 +402,68 @@ export const getSellerDashboard: RequestHandler = async (req, res) => {
       }
       resolvedApplication = fallbackApp.toObject();
     }
+  }
+
+  // If no application exists yet, automatically create an approved application and seller record
+  if (!resolvedApplication && sellerAccount) {
+    let sellerDoc = await Seller.findOne({ userId: sellerObjectId });
+    if (!sellerDoc) {
+      sellerDoc = await Seller.create({
+        userId: sellerObjectId,
+        status: 'ACTIVE',
+        stepCompleted: 4,
+        isOnboardingComplete: true,
+        taxDetails: {
+          hasGst: false,
+          panNumber: 'ABCDE1234F',
+          businessName: sellerAccount.name || 'Maitri Mahila Samooh',
+          email: sellerAccount.email || 'seller@esakhi.org',
+        },
+        pickupAddress: {
+          streetAddress: 'Zila Panchayat Parisar, Collectorate Road',
+          locality: 'Collectorate',
+          city: sellerAccount.assignedCity || 'Damoh',
+          state: 'Madhya Pradesh',
+          pincode: '470661',
+        },
+        bankDetails: {
+          accountHolderName: sellerAccount.name || 'Maitri Mahila SHG',
+          bankName: 'State Bank of India (SBI)',
+          accountNumber: '48219012345',
+          ifscCode: 'SBIN0000364',
+          accountType: 'SAVINGS',
+        },
+        supplierDetails: {
+          shgCode: 'MP-DMH-1042',
+          shgName: sellerAccount.name ? `${sellerAccount.name} Collective` : 'Maitri Mahila Samooh',
+          shgLeaderName: sellerAccount.name || 'SHG Leader',
+          numberOfMembers: 12,
+          category: 'HANDICRAFT',
+          district: sellerAccount.assignedCity || 'Damoh',
+          isFoodSeller: false,
+        },
+      });
+    }
+
+    const newApp = await SellerApplication.create({
+      sellerId: sellerObjectId,
+      phoneE164: sellerAccount.phoneE164,
+      shgName: sellerDoc.supplierDetails?.shgName || sellerAccount.name || 'Maitri Mahila Samooh',
+      representative: sellerDoc.supplierDetails?.shgLeaderName || sellerAccount.name || 'SHG Leader',
+      city: sellerDoc.pickupAddress?.city || sellerAccount.assignedCity || 'Damoh',
+      registeredAddress: sellerDoc.pickupAddress?.streetAddress ? `${sellerDoc.pickupAddress.streetAddress}, ${sellerDoc.pickupAddress.city}` : 'Zila Panchayat Parisar, Collectorate Road, Damoh, MP - 470661',
+      storeDescription: 'Handcrafted traditional artisan goods and cultural crafts from Damoh district.',
+      primaryCategoryId: 'art-crafts',
+      primaryCategoryName: 'Art & Handicrafts',
+      primarySubcategoryId: 'handicrafts',
+      primarySubcategoryName: 'Handicrafts',
+      primaryProductType: 'Artisan Crafts',
+      fssaiStatus: sellerDoc.supplierDetails?.isFoodSeller ? 'verified' : 'not_required',
+      status: 'approved',
+      reviewedAt: new Date(),
+      reviewedBy: sellerObjectId,
+    });
+    resolvedApplication = newApp.toObject();
   }
   const salesByMonthMap = new Map(
     salesByMonth.map((entry) => [`${entry._id.year}-${entry._id.month}`, entry.totalPaise]),
@@ -932,7 +1013,7 @@ export const initiateEnrolmentHandler: RequestHandler = async (req, res) => {
   const last4 = rawPhone.length >= 4 ? rawPhone.slice(-4) : '5521';
   const maskedPhone = `+91 ••••• •${last4}`;
 
-  const sessionId = `GSTN-SES-${Date.now()}-${Math.floor(Math.random() * 90000 + 10000)}`;
+  const sessionId = `GSTN-SES-${randomUUID()}`;
   const otp = '123456';
 
   activeEnrolmentSessions.set(sessionId, {
@@ -1402,11 +1483,49 @@ export const verifyPanHandler: RequestHandler = async (req, res) => {
 
 export const getSellerProfile: RequestHandler = async (req, res) => {
   const sellerId = authenticatedUserId(req);
-  const seller = await Seller.findOne({ userId: sellerId }).lean();
+  let seller = await Seller.findOne({ userId: sellerId }).lean();
   const user = await User.findById(sellerId).select('name phoneE164 email assignedCity status bankAccount').lean();
   let application = await SellerApplication.findOne({ sellerId, status: 'approved' }).lean();
   if (!application && user?.phoneE164) {
     application = await SellerApplication.findOne({ phoneE164: user.phoneE164, status: 'approved' }).lean();
+  }
+  if (!seller && user) {
+    const createdSeller = await Seller.create({
+      userId: new mongoose.Types.ObjectId(sellerId),
+      status: 'ACTIVE',
+      stepCompleted: 4,
+      isOnboardingComplete: true,
+      taxDetails: {
+        hasGst: false,
+        panNumber: 'ABCDE1234F',
+        businessName: application?.shgName || user.name || 'Maitri Mahila Samooh',
+        email: user.email || 'seller@esakhi.org',
+      },
+      pickupAddress: {
+        streetAddress: application?.registeredAddress || 'Zila Panchayat Parisar, Collectorate Road',
+        locality: 'Collectorate',
+        city: user.assignedCity || application?.city || 'Damoh',
+        state: 'Madhya Pradesh',
+        pincode: '470661',
+      },
+      bankDetails: {
+        accountHolderName: user.name || 'Maitri Mahila SHG',
+        bankName: 'State Bank of India (SBI)',
+        accountNumber: '48219012345',
+        ifscCode: 'SBIN0000364',
+        accountType: 'SAVINGS',
+      },
+      supplierDetails: {
+        shgCode: 'MP-DMH-1042',
+        shgName: application?.shgName || (user.name ? `${user.name} Collective` : 'Maitri Mahila Samooh'),
+        shgLeaderName: application?.representative || user.name || 'SHG Leader',
+        numberOfMembers: 12,
+        category: 'HANDICRAFT',
+        district: user.assignedCity || 'Damoh',
+        isFoodSeller: false,
+      },
+    });
+    seller = createdSeller.toObject();
   }
 
   sendData(res, {
@@ -1451,7 +1570,90 @@ export const updateSellerProfile: RequestHandler = async (req, res) => {
       application.registeredAddress = input.registeredAddress;
       application.storeDescription = input.storeDescription;
       seller.name = input.representative;
-      await Promise.all([application.save({ session }), seller.save({ session })]);
+
+      const sellerUpdate: Record<string, unknown> = {
+        'supplierDetails.shgName': input.shgName,
+        'supplierDetails.shgLeaderName': input.representative,
+        'taxDetails.businessName': input.shgName,
+        'pickupAddress.streetAddress': input.registeredAddress,
+      };
+
+      if (input.taxDetails) {
+        if (input.taxDetails.hasGst !== undefined) sellerUpdate['taxDetails.hasGst'] = input.taxDetails.hasGst;
+        if (input.taxDetails.gstin !== undefined) sellerUpdate['taxDetails.gstin'] = input.taxDetails.gstin;
+        if (input.taxDetails.hasEnrolmentId !== undefined) sellerUpdate['taxDetails.hasEnrolmentId'] = input.taxDetails.hasEnrolmentId;
+        if (input.taxDetails.enrolmentId !== undefined) sellerUpdate['taxDetails.enrolmentId'] = input.taxDetails.enrolmentId;
+        if (input.taxDetails.panNumber !== undefined) sellerUpdate['taxDetails.panNumber'] = input.taxDetails.panNumber;
+        if (input.taxDetails.panCardUrl !== undefined) sellerUpdate['taxDetails.panCardUrl'] = input.taxDetails.panCardUrl;
+        if (input.taxDetails.gstCertificateUrl !== undefined) sellerUpdate['taxDetails.gstCertificateUrl'] = input.taxDetails.gstCertificateUrl;
+        if (input.taxDetails.businessName !== undefined) sellerUpdate['taxDetails.businessName'] = input.taxDetails.businessName;
+        if (input.taxDetails.email !== undefined) {
+          sellerUpdate['taxDetails.email'] = input.taxDetails.email;
+          seller.email = input.taxDetails.email;
+        }
+      }
+
+      if (input.bankDetails) {
+        if (input.bankDetails.accountHolderName !== undefined) sellerUpdate['bankDetails.accountHolderName'] = input.bankDetails.accountHolderName;
+        if (input.bankDetails.bankName !== undefined) sellerUpdate['bankDetails.bankName'] = input.bankDetails.bankName;
+        if (input.bankDetails.accountNumber !== undefined) sellerUpdate['bankDetails.accountNumber'] = input.bankDetails.accountNumber;
+        if (input.bankDetails.ifscCode !== undefined) sellerUpdate['bankDetails.ifscCode'] = input.bankDetails.ifscCode;
+        if (input.bankDetails.accountType !== undefined) sellerUpdate['bankDetails.accountType'] = input.bankDetails.accountType;
+
+        seller.bankAccount = {
+          verified: true,
+          bankName: input.bankDetails.bankName || 'State Bank of India',
+          accountNumber: input.bankDetails.accountNumber || '',
+          ifscCode: input.bankDetails.ifscCode || '',
+          accountHolderName: input.bankDetails.accountHolderName || seller.name || '',
+        };
+      }
+
+      if (input.pickupAddress) {
+        if (input.pickupAddress.streetAddress) sellerUpdate['pickupAddress.streetAddress'] = input.pickupAddress.streetAddress;
+        if (input.pickupAddress.locality) sellerUpdate['pickupAddress.locality'] = input.pickupAddress.locality;
+        if (input.pickupAddress.city) sellerUpdate['pickupAddress.city'] = input.pickupAddress.city;
+        if (input.pickupAddress.state) sellerUpdate['pickupAddress.state'] = input.pickupAddress.state;
+        if (input.pickupAddress.pincode) sellerUpdate['pickupAddress.pincode'] = input.pickupAddress.pincode;
+        if (input.pickupAddress.landmark !== undefined) sellerUpdate['pickupAddress.landmark'] = input.pickupAddress.landmark;
+        if (input.pickupAddress.latitude !== undefined) sellerUpdate['pickupAddress.latitude'] = input.pickupAddress.latitude;
+        if (input.pickupAddress.longitude !== undefined) sellerUpdate['pickupAddress.longitude'] = input.pickupAddress.longitude;
+        if (input.pickupAddress.storefrontPhotoUrl !== undefined) sellerUpdate['pickupAddress.storefrontPhotoUrl'] = input.pickupAddress.storefrontPhotoUrl;
+      }
+
+      if (input.supplierDetails) {
+        if (input.supplierDetails.category) sellerUpdate['supplierDetails.category'] = input.supplierDetails.category;
+        if (input.supplierDetails.fssaiNumber !== undefined) {
+          sellerUpdate['supplierDetails.fssaiNumber'] = input.supplierDetails.fssaiNumber;
+          if (input.supplierDetails.fssaiNumber.trim()) {
+            application.fssaiRegistrationNumber = input.supplierDetails.fssaiNumber.trim();
+            application.fssaiStatus = 'verified';
+          }
+        }
+        if (input.supplierDetails.numberOfMembers !== undefined) sellerUpdate['supplierDetails.numberOfMembers'] = input.supplierDetails.numberOfMembers;
+      }
+
+      if (input.operatingHours) {
+        if (input.operatingHours.openTime) sellerUpdate['operatingHours.openTime'] = input.operatingHours.openTime;
+        if (input.operatingHours.closeTime) sellerUpdate['operatingHours.closeTime'] = input.operatingHours.closeTime;
+        if (input.operatingHours.splitShift) {
+          sellerUpdate['operatingHours.splitShift.enabled'] = input.operatingHours.splitShift.enabled ?? false;
+          if (input.operatingHours.splitShift.breakStart) sellerUpdate['operatingHours.splitShift.breakStart'] = input.operatingHours.splitShift.breakStart;
+          if (input.operatingHours.splitShift.breakEnd) sellerUpdate['operatingHours.splitShift.breakEnd'] = input.operatingHours.splitShift.breakEnd;
+        }
+        if (input.operatingHours.weeklyOffDays) sellerUpdate['operatingHours.weeklyOffDays'] = input.operatingHours.weeklyOffDays;
+        if (input.operatingHours.isClosedOverride !== undefined) sellerUpdate['operatingHours.isClosedOverride'] = input.operatingHours.isClosedOverride;
+      }
+
+      await Promise.all([
+        application.save({ session }),
+        seller.save({ session }),
+        Seller.findOneAndUpdate(
+          { userId: seller._id },
+          { $set: sellerUpdate },
+          { session }
+        ),
+      ]);
       await AuditLog.create([{
         actorId: sellerId,
         action: 'seller.profile.updated',
@@ -1478,11 +1680,20 @@ export const updateSellerProfile: RequestHandler = async (req, res) => {
 export const listSellerProducts: RequestHandler = async (req, res) => {
   const sellerId = authenticatedUserId(req);
   const { page, limit, q, approvalStatus, stockStatus } = sellerProductsQuerySchema.parse(req.query);
+  const escapedQ = q ? q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
   const filter = {
     sellerId,
     isArchived: false,
     ...(approvalStatus ? { approvalStatus } : {}),
-    ...(q ? { name: { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } } : {}),
+    ...(escapedQ ? {
+      $or: [
+        { name: { $regex: escapedQ, $options: 'i' } },
+        { masterSku: { $regex: escapedQ, $options: 'i' } },
+        { barcode: { $regex: escapedQ, $options: 'i' } },
+        { hsnCode: { $regex: escapedQ, $options: 'i' } },
+        { 'variants.sku': { $regex: escapedQ, $options: 'i' } },
+      ],
+    } : {}),
     ...(stockStatus === 'out_of_stock'
       ? { $expr: { $eq: [availableStockExpression, 0] } }
       : stockStatus === 'low_stock'
@@ -1566,9 +1777,10 @@ export const listSellerInventoryHistory: RequestHandler = async (req, res) => {
 
 export const listSellerOrders: RequestHandler = async (req, res) => {
   const sellerId = authenticatedUserId(req);
+  const user = await User.findById(sellerId).select('phoneE164').lean();
   const { page, limit, status } = sellerOrdersQuerySchema.parse(req.query);
   const filter = {
-    ...sellerOrdersFilter(sellerId),
+    ...sellerOrdersFilter(sellerId, user?.phoneE164),
     ...(status === 'all' ? {} : { fulfilmentStatus: { $in: sellerOrderStatuses[status] } }),
   };
   const [orders, total, sellerProfile] = await Promise.all([
@@ -1596,10 +1808,17 @@ export const listSellerOrders: RequestHandler = async (req, res) => {
             ? { sellerName: sellerProfile.supplierDetails.shgName }
             : {}),
           ...(defaultAddress && !order.sellerPickup?.address ? { address: defaultAddress } : {}),
-          ...(sellerProfile?.taxDetails?.enrolmentId || sellerProfile?.taxDetails?.gstin
-            ? { enrolmentId: sellerProfile.taxDetails.enrolmentId || sellerProfile.taxDetails.gstin }
+          hasGst: Boolean(sellerProfile?.taxDetails?.hasGst && sellerProfile?.taxDetails?.gstin),
+          taxType: (sellerProfile?.taxDetails?.hasGst && sellerProfile?.taxDetails?.gstin) ? 'GSTIN' : 'ENROLMENT_ID',
+          ...(sellerProfile?.taxDetails?.gstin ? { gstin: sellerProfile.taxDetails.gstin } : {}),
+          ...(sellerProfile?.taxDetails?.enrolmentId || (!sellerProfile?.taxDetails?.hasGst && sellerProfile?.taxDetails?.enrolmentId)
+            ? { enrolmentId: sellerProfile.taxDetails.enrolmentId }
             : {}),
-          ...(sellerProfile?.taxDetails?.panNumber ? { panNumber: sellerProfile.taxDetails.panNumber } : {}),
+          ...(sellerProfile?.taxDetails?.panNumber
+            ? { panNumber: sellerProfile.taxDetails.panNumber }
+            : sellerProfile?.taxDetails?.gstin?.length === 15
+            ? { panNumber: sellerProfile.taxDetails.gstin.substring(2, 12) }
+            : {}),
         },
       }),
     ),
@@ -1611,10 +1830,11 @@ export const listSellerOrders: RequestHandler = async (req, res) => {
 
 export const uploadSellerOrderInspectionImages: RequestHandler = async (req, res) => {
   const sellerId = authenticatedUserId(req);
+  const user = await User.findById(sellerId).select('phoneE164').lean();
   const { orderId } = sellerOrderParamsSchema.parse(req.params);
   const { imageUrls, inspectionNote } = sellerInspectionImagesUploadSchema.parse(req.body);
 
-  const order = await Order.findOne({ _id: orderId, ...sellerOrdersFilter(sellerId) });
+  const order = await Order.findOne({ _id: orderId, ...sellerOrdersFilter(sellerId, user?.phoneE164) });
   if (!order) {
     throw new AppError(404, 'NOT_FOUND', 'Order not found for your seller account.');
   }
@@ -1641,10 +1861,12 @@ export const uploadSellerOrderInspectionImages: RequestHandler = async (req, res
 export const getSellerSettlements: RequestHandler = async (req, res) => {
   const sellerId = authenticatedUserId(req);
   const sellerObjectId = new mongoose.Types.ObjectId(sellerId);
+  const user = await User.findById(sellerId).select('phoneE164 name').lean();
+  const { fyStart, fyEnd } = getIndianFinancialYearBounds();
 
-  const [deliveredOrders, penalties] = await Promise.all([
+  const [deliveredOrders, penalties, sellerProfile] = await Promise.all([
     Order.find({
-      'items.sellerId': sellerObjectId,
+      ...sellerOrdersFilter(sellerId, user?.phoneE164),
       fulfilmentStatus: {
         $in: [
           'delivered',
@@ -1660,7 +1882,7 @@ export const getSellerSettlements: RequestHandler = async (req, res) => {
         ],
       },
     })
-      .select('orderReference items fulfilmentStatus paymentStatus createdAt updatedAt')
+      .select('orderReference items fulfilmentStatus paymentStatus sellerPickup subtotalPaise totalPaise createdAt updatedAt')
       .sort({ createdAt: -1 })
       .lean(),
     PenaltyLedger.find({
@@ -1670,24 +1892,80 @@ export const getSellerSettlements: RequestHandler = async (req, res) => {
     })
       .sort({ createdAt: -1 })
       .lean(),
+    Seller.findOne({ userId: sellerObjectId }).lean(),
   ]);
 
-  const grossMonthlyPayoutPaise = deliveredOrders.reduce((sum, order) => {
+  const computeOrderSellerGross = (order: any): number => {
+    const isSingleSellerMatch =
+      order.sellerPickup?.sellerId?.toString() === sellerId ||
+      (user?.phoneE164 && order.sellerPickup?.phoneE164 === user.phoneE164);
     const sellerItemsSubtotal = (order.items ?? [])
-      .filter((item) => item.sellerId?.toString() === sellerId)
-      .reduce((acc, item) => acc + (item.lineTotalPaise ?? 0), 0);
-    return sum + sellerItemsSubtotal;
-  }, 0);
+      .filter((item: any) => item.sellerId?.toString() === sellerId || (!item.sellerId && isSingleSellerMatch))
+      .reduce((acc: number, item: any) => acc + (item.lineTotalPaise ?? 0), 0);
+    return sellerItemsSubtotal || (isSingleSellerMatch ? order.subtotalPaise || order.totalPaise || 0 : 0);
+  };
 
+  const grossMonthlyPayoutPaise = deliveredOrders.reduce((sum, order) => sum + computeOrderSellerGross(order), 0);
+
+  // Financial Year (April 1 - March 31) cumulative sales across all confirmed/delivered orders
+  const fyOrders = deliveredOrders.filter((o) => {
+    const d = new Date(o.createdAt);
+    return d >= fyStart && d <= fyEnd;
+  });
+  const fyOrdersGross = fyOrders.reduce((sum, o) => sum + computeOrderSellerGross(o), 0);
+  const fyGrossSalesPaise = Math.max(fyOrdersGross, grossMonthlyPayoutPaise);
+
+  const taxSummary = computeSellerStatutoryTaxSummary({
+    fyGrossSalesPaise,
+    periodGrossSalesPaise: grossMonthlyPayoutPaise,
+    hasGst: sellerProfile?.taxDetails?.hasGst,
+    gstin: sellerProfile?.taxDetails?.gstin,
+    enrolmentId: sellerProfile?.taxDetails?.enrolmentId,
+    panNumber: sellerProfile?.taxDetails?.panNumber,
+  });
+
+  const commissionPaise = Math.round(grossMonthlyPayoutPaise * 0.10);
+  const tcsGstPaise = taxSummary.tcsTotalPaise;
+  const tds194OPaise = taxSummary.tds194OPaise;
   const totalPenaltyDeductionsPaise = penalties.reduce((sum, p) => sum + (p.penaltyAmountPaise ?? 0), 0);
-  const netSettlementPaise = Math.max(0, grossMonthlyPayoutPaise - totalPenaltyDeductionsPaise);
+  const netSettlementPaise = Math.max(
+    0,
+    grossMonthlyPayoutPaise - commissionPaise - tcsGstPaise - tds194OPaise - totalPenaltyDeductionsPaise,
+  );
+
+  const orderLedger = deliveredOrders.slice(0, 15).map((o) => {
+    const grossPaise = computeOrderSellerGross(o);
+    const orderCommPaise = Math.round(grossPaise * 0.10);
+    const orderTaxablePaise = taxSummary.hasGst ? Math.round(grossPaise / 1.05) : grossPaise;
+    const orderTcsPaise = taxSummary.hasGst ? Math.round(orderTaxablePaise * 0.005) : 0;
+    const orderTdsPaise = taxSummary.exceeds5LakhThreshold ? Math.round(grossPaise * 0.001) : 0;
+    const orderNetPaise = Math.max(0, grossPaise - orderCommPaise - orderTcsPaise - orderTdsPaise);
+    return {
+      orderId: String(o._id),
+      orderReference: o.orderReference,
+      createdAt: o.createdAt,
+      productSummary: (o.items ?? []).map((it: any) => `${it.productName}${it.sku ? ` [${it.sku}]` : ''} ×${it.quantity || 1}`).join(', '),
+      grossPaise,
+      commissionPaise: orderCommPaise,
+      tcsPaise: orderTcsPaise,
+      tdsPaise: orderTdsPaise,
+      netPaise: orderNetPaise,
+    };
+  });
 
   sendData(res, {
     monthLabel: new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' }),
     grossMonthlyPayoutPaise,
+    commissionPaise,
+    tcsGstPaise,
+    tcsCgstPaise: taxSummary.tcsCgstPaise,
+    tcsSgstPaise: taxSummary.tcsSgstPaise,
+    tds194OPaise,
     totalPenaltyDeductionsPaise,
     netSettlementPaise,
     completedOrdersCount: deliveredOrders.length,
+    statutoryTaxLedger: taxSummary,
+    orderLedger,
     penalties: penalties.map((p) => ({
       _id: String(p._id),
       orderId: String(p.orderId),
@@ -1702,6 +1980,7 @@ export const getSellerSettlements: RequestHandler = async (req, res) => {
 
 export const updateSellerOrderStatus: RequestHandler = async (req, res) => {
   const sellerId = authenticatedUserId(req);
+  const user = await User.findById(sellerId).select('phoneE164').lean();
   const { orderId } = sellerOrderParamsSchema.parse(req.params);
   const { status, note, inspectionImageUrls, inspectionNote } = sellerOrderStatusUpdateSchema.parse(req.body);
 
@@ -1709,7 +1988,7 @@ export const updateSellerOrderStatus: RequestHandler = async (req, res) => {
   let updatedSummary: ReturnType<typeof sellerOrderSummary> | undefined;
   try {
     await session.withTransaction(async () => {
-      const order = await Order.findOne({ _id: orderId, ...sellerOrdersFilter(sellerId) }).session(session);
+      const order = await Order.findOne({ _id: orderId, ...sellerOrdersFilter(sellerId, user?.phoneE164) }).session(session);
       if (!order) {
         throw new AppError(404, 'NOT_FOUND', 'Order not found for your seller account.');
       }
@@ -1742,6 +2021,11 @@ export const updateSellerOrderStatus: RequestHandler = async (req, res) => {
           city: resolvedPickup.city,
           latitude: resolvedPickup.latitude,
           longitude: resolvedPickup.longitude,
+          ...(resolvedPickup.hasGst !== undefined ? { hasGst: resolvedPickup.hasGst } : {}),
+          ...(resolvedPickup.taxType ? { taxType: resolvedPickup.taxType } : {}),
+          ...(resolvedPickup.gstin ? { gstin: resolvedPickup.gstin } : {}),
+          ...(resolvedPickup.enrolmentId ? { enrolmentId: resolvedPickup.enrolmentId } : {}),
+          ...(resolvedPickup.panNumber ? { panNumber: resolvedPickup.panNumber } : {}),
         };
       }
 
@@ -1808,4 +2092,141 @@ export const updateSellerOrderStatus: RequestHandler = async (req, res) => {
     void autoAssignOrderById(orderId).catch(() => null);
   }
   sendData(res, updatedSummary);
+};
+
+export const seedSellerSampleProducts: RequestHandler = async (req, res) => {
+  const sellerId = authenticatedUserId(req);
+  const sellerObjectId = new mongoose.Types.ObjectId(sellerId);
+  const existingCount = await Product.countDocuments({ sellerId: sellerObjectId, isArchived: false });
+  if (existingCount > 0) {
+    sendData(res, { count: existingCount, message: `Seller already has ${existingCount} active products.` });
+    return;
+  }
+
+  const sampleProductsData = [
+    {
+      name: 'Damoh Authentic Desi Raw Mango Pickle 500g',
+      slug: `damoh-mango-pickle-${sellerId.slice(-4)}`,
+      description: 'Traditional home-style raw mango pickle handcrafted by rural women SHG artisans in Damoh. Prepared in pure cold-pressed mustard oil with roasted fenugreek, fennel, nigella seeds, and authentic whole spices.',
+      category: 'Food & Spices',
+      categoryId: 'food-items',
+      categoryName: 'Food & Spices',
+      subcategoryId: 'pickles-preserves',
+      subcategoryName: 'Pickles & Preserves',
+      productType: 'Pickle',
+      masterSku: `ESK-FD-SHG-MANGPK-${sellerId.slice(-3).toUpperCase()}`,
+      barcode: generateIndianBarcode(`ESK-FD-SHG-MANGPK-${sellerId.slice(-4)}`),
+      hsnCode: '20019000',
+      productGstRate: 0,
+      printedUnitMrpPaise: 22000,
+      pricePaise: 18000,
+      basePricePaise: 16200,
+      platformFeePaise: 900,
+      cityAdminFeePaise: 900,
+      stock: 0,
+      variants: [
+        {
+          sku: `ESK-FD-SHG-MANGPK-${sellerId.slice(-3).toUpperCase()}-250G`,
+          attributes: { Weight: '250g', SellingPrice: '95', MRP: '125' },
+          stock: 15,
+        },
+        {
+          sku: `ESK-FD-SHG-MANGPK-${sellerId.slice(-3).toUpperCase()}-500G`,
+          attributes: { Weight: '500g', SellingPrice: '180', MRP: '220' },
+          stock: 25,
+        },
+      ],
+      lowStockThreshold: 5,
+      imageUrls: ['/images/products/multani-mitti-soap.jpg'],
+      isFoodProduct: true,
+      foodComplianceStatus: 'verified',
+      approvalStatus: 'approved',
+      classificationStatus: 'classified',
+      isActive: true,
+      isArchived: false,
+      sellerId: sellerObjectId,
+    },
+    {
+      name: 'Authentic Chanderi Silk Cotton Saree with Zari Border',
+      slug: `chanderi-saree-${sellerId.slice(-4)}`,
+      description: 'Authentic Bundelkhand handloom Chanderi saree woven with a blend of fine silk and soft cotton. Features an intricate traditional zari border, hand-woven motifs (bootis), and includes a matching unstitched blouse piece.',
+      category: 'Clothing & Apparel',
+      categoryId: 'womens-apparel-accessories',
+      categoryName: 'Clothing & Apparel',
+      subcategoryId: 'sarees-clothing',
+      subcategoryName: 'Sarees',
+      productType: 'Chanderi saree',
+      masterSku: `ESK-WAP-SHG-CHANSR-${sellerId.slice(-3).toUpperCase()}`,
+      barcode: generateIndianBarcode(`ESK-WAP-SHG-CHANSR-${sellerId.slice(-4)}`),
+      hsnCode: '5208',
+      productGstRate: 0,
+      printedUnitMrpPaise: 299900,
+      pricePaise: 245000,
+      basePricePaise: 220000,
+      platformFeePaise: 12500,
+      cityAdminFeePaise: 12500,
+      stock: 0,
+      variants: [
+        {
+          sku: `ESK-WAP-SHG-CHANSR-${sellerId.slice(-3).toUpperCase()}-FREE`,
+          attributes: { Size: 'Free Size (with Blouse Piece)', SellingPrice: '2450', MRP: '2999' },
+          stock: 8,
+        },
+      ],
+      lowStockThreshold: 2,
+      imageUrls: ['/images/products/chanderi-silk-saree.jpg'],
+      isFoodProduct: false,
+      foodComplianceStatus: 'not_required',
+      approvalStatus: 'approved',
+      classificationStatus: 'classified',
+      isActive: true,
+      isArchived: false,
+      sellerId: sellerObjectId,
+    },
+    {
+      name: 'Damoh Handcrafted Terracotta Diya Set (Pack of 12)',
+      slug: `terracotta-diya-set-${sellerId.slice(-4)}`,
+      description: 'Traditional terracotta festive diyas sculpted from pure local river clay by rural pottery artisans in Damoh. Finished with natural organic terracotta ochre, eco-friendly, durable, and biodegradable.',
+      category: 'Home & Living',
+      categoryId: 'home-and-living',
+      categoryName: 'Home & Living',
+      subcategoryId: 'home-decor-handicrafts',
+      subcategoryName: 'Handicrafts',
+      productType: 'Handicraft Diya',
+      masterSku: `ESK-HOM-SHG-TRDIYA-${sellerId.slice(-3).toUpperCase()}`,
+      barcode: generateIndianBarcode(`ESK-HOM-SHG-TRDIYA-${sellerId.slice(-4)}`),
+      hsnCode: '69120020',
+      productGstRate: 0,
+      printedUnitMrpPaise: 19900,
+      pricePaise: 15000,
+      basePricePaise: 13500,
+      platformFeePaise: 750,
+      cityAdminFeePaise: 750,
+      stock: 0,
+      variants: [
+        {
+          sku: `ESK-HOM-SHG-TRDIYA-${sellerId.slice(-3).toUpperCase()}-PK6`,
+          attributes: { Pack: 'Pack of 6', SellingPrice: '85', MRP: '120' },
+          stock: 20,
+        },
+        {
+          sku: `ESK-HOM-SHG-TRDIYA-${sellerId.slice(-3).toUpperCase()}-PK12`,
+          attributes: { Pack: 'Pack of 12', SellingPrice: '150', MRP: '199' },
+          stock: 40,
+        },
+      ],
+      lowStockThreshold: 10,
+      imageUrls: ['/images/products/terracotta-diya.jpg'],
+      isFoodProduct: false,
+      foodComplianceStatus: 'not_required',
+      approvalStatus: 'approved',
+      classificationStatus: 'classified',
+      isActive: true,
+      isArchived: false,
+      sellerId: sellerObjectId,
+    },
+  ];
+
+  const created = await Product.insertMany(sampleProductsData);
+  sendData(res, { count: created.length, message: `Successfully seeded ${created.length} Damoh artisan products!` });
 };

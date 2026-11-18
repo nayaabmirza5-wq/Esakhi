@@ -1,0 +1,24 @@
+@import "tailwindcss/theme.css";
+@import "tailwindcss/utilities.css";
+
+@theme {
+  --color-indigo-dark: #1E1B4B;
+  --color-lime-primary: #A3E635;
+  --color-purple-soft: #C084FC;
+  --color-canvas-light: #F8FAFC;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.25s ease-out forwards;
+}

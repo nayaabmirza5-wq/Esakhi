@@ -13,12 +13,19 @@ function formatMoneyInr(paise: number): string {
 }
 
 const DEFAULT_5_INSPECTION_PHOTOS = [
-  '/images/products/chanderi-silk-saree.jpg',
-  '/images/products/zardozi-clutch.jpg',
-  '/images/products/bamboo-tokri.jpg',
-  '/images/products/terracotta-diya.jpg',
-  '/images/products/multani-mitti-soap.jpg',
+  'https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&w=400&q=80',
+  'https://images.unsplash.com/photo-1589301760014-d929f3979dbc?auto=format&fit=crop&w=400&q=80',
+  'https://images.unsplash.com/photo-1578749556568-bc2c40e68b61?auto=format&fit=crop&w=400&q=80',
+  'https://images.unsplash.com/photo-1607083206869-4c7672e72a8a?auto=format&fit=crop&w=400&q=80',
+  'https://images.unsplash.com/photo-1595079676339-1534801ad6cf?auto=format&fit=crop&w=400&q=80',
 ];
+
+function normalizeInspectionPhotoUrl(url: string | undefined, idx: number): string {
+  if (!url || url.startsWith('/images/products/')) {
+    return DEFAULT_5_INSPECTION_PHOTOS[idx % DEFAULT_5_INSPECTION_PHOTOS.length];
+  }
+  return resolveProductImageUrl(url);
+}
 
 const INSPECTION_ANGLE_LABELS = [
   '1. Front View',
@@ -113,9 +120,10 @@ export function SellerOrderCard({
 }): ReactNode {
   const [expanded, setExpanded] = useState(false);
   const [showSlip, setShowSlip] = useState(false);
+  const [showInspectionGrid, setShowInspectionGrid] = useState(order.fulfilmentStatus === 'preparing');
   const [inspectionImages, setInspectionImages] = useState<string[]>(
     order.preDispatchInspection?.imageUrls?.length === 5
-      ? order.preDispatchInspection.imageUrls
+      ? order.preDispatchInspection.imageUrls.map((u, i) => normalizeInspectionPhotoUrl(u, i))
       : DEFAULT_5_INSPECTION_PHOTOS,
   );
   const [savingPhotos, setSavingPhotos] = useState(false);
@@ -307,83 +315,99 @@ export function SellerOrderCard({
         })}
       </div>
 
-      {/* Seller Pre-Dispatch 5-Image Inspection Uploader (Visible in PREPARING stage or as Ground Truth badge) */}
+      {/* Seller Pre-Dispatch 5-Image Inspection Uploader (Visible in PREPARING stage or as collapsible Ground Truth badge) */}
       {(isPreparingStage || (order.preDispatchInspection?.imageUrls && order.preDispatchInspection.imageUrls.length === 5)) && (
         <div
           style={{
-            padding: '0.85rem 1rem',
+            padding: '0.65rem 0.9rem',
             borderRadius: '12px',
             background: '#f8fafc',
             border: '1px solid #cbd5e1',
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <div>
-              <strong style={{ fontSize: '0.84rem', color: '#0f172a' }}>
-                📸 5 Mandatory Pre-Dispatch Inspection Photos (Dispute Ground Truth)
+              <strong style={{ fontSize: '0.82rem', color: '#0f172a' }}>
+                📸 5 Mandatory Pre-Dispatch Inspection Photos (Verified Ground Truth)
               </strong>
-              <div style={{ fontSize: '0.75rem', color: '#475569' }}>
-                Attached permanently to order record to protect Seller against post-delivery return disputes.
+              <div style={{ fontSize: '0.73rem', color: '#475569' }}>
+                Attached permanently to order record to protect Seller against return disputes.
               </div>
             </div>
-            {isPreparingStage && (
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              {isPreparingStage && (
+                <button
+                  type="button"
+                  className="seller-secondary-action"
+                  disabled={savingPhotos}
+                  onClick={handleSaveInspectionPhotos}
+                  style={{ fontSize: '0.75rem', padding: '0.32rem 0.7rem' }}
+                >
+                  {savingPhotos ? 'Saving…' : '✓ Save 5 Photos'}
+                </button>
+              )}
               <button
                 type="button"
                 className="seller-secondary-action"
-                disabled={savingPhotos}
-                onClick={handleSaveInspectionPhotos}
-                style={{ fontSize: '0.76rem', padding: '0.35rem 0.75rem' }}
+                onClick={() => setShowInspectionGrid((prev) => !prev)}
+                style={{ fontSize: '0.74rem', padding: '0.3rem 0.65rem', background: '#ffffff' }}
               >
-                {savingPhotos ? 'Saving…' : '✓ Save 5 Inspection Photos'}
+                {showInspectionGrid ? 'Hide Photos ▲' : 'View 5 Photos ▼'}
               </button>
-            )}
+            </div>
           </div>
           {photoSavedMsg && (
-            <div style={{ fontSize: '0.76rem', color: '#15803d', fontWeight: 700, marginBottom: 6 }}>{photoSavedMsg}</div>
+            <div style={{ fontSize: '0.76rem', color: '#15803d', fontWeight: 700, marginTop: 6 }}>{photoSavedMsg}</div>
           )}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(72px, 1fr))', gap: 8 }}>
-            {inspectionImages.map((imgUrl, idx) => (
-              <div
-                key={idx}
-                style={{
-                  padding: 4,
-                  borderRadius: 8,
-                  background: '#ffffff',
-                  border: '1px solid #e2e8f0',
-                  textAlign: 'center',
-                }}
-              >
-                <img
-                  src={resolveProductImageUrl(imgUrl)}
-                  alt={INSPECTION_ANGLE_LABELS[idx]}
-                  style={{ width: '100%', height: 54, objectFit: 'cover', borderRadius: 6 }}
-                />
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#334155', marginTop: 2 }}>
-                  {INSPECTION_ANGLE_LABELS[idx]}
-                </div>
-                {isPreparingStage && (
-                  <label
-                    style={{
-                      display: 'inline-block',
-                      marginTop: 2,
-                      fontSize: 9,
-                      color: '#4A0E4E',
-                      fontWeight: 700,
-                      cursor: 'pointer',
+          {(showInspectionGrid || isPreparingStage) && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(68px, 1fr))', gap: 8, marginTop: 8 }}>
+              {inspectionImages.map((imgUrl, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    padding: 4,
+                    borderRadius: 8,
+                    background: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    textAlign: 'center',
+                  }}
+                >
+                  <img
+                    src={normalizeInspectionPhotoUrl(imgUrl, idx)}
+                    onError={(e) => {
+                      const target = e.currentTarget;
+                      target.src = DEFAULT_5_INSPECTION_PHOTOS[idx % DEFAULT_5_INSPECTION_PHOTOS.length];
                     }}
-                  >
-                    Replace
-                    <input
-                      type="file"
-                      accept="image/*"
-                      style={{ display: 'none' }}
-                      onChange={(e) => e.target.files?.[0] && handleReplaceAngleImage(idx, e.target.files[0])}
-                    />
-                  </label>
-                )}
-              </div>
-            ))}
-          </div>
+                    alt={INSPECTION_ANGLE_LABELS[idx]}
+                    style={{ width: '100%', height: 52, objectFit: 'cover', borderRadius: 6 }}
+                  />
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#334155', marginTop: 2 }}>
+                    {INSPECTION_ANGLE_LABELS[idx]}
+                  </div>
+                  {isPreparingStage && (
+                    <label
+                      style={{
+                        display: 'inline-block',
+                        marginTop: 2,
+                        fontSize: 9,
+                        color: '#4A0E4E',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Replace
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={(e) => e.target.files?.[0] && handleReplaceAngleImage(idx, e.target.files[0])}
+                      />
+                    </label>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -607,7 +631,7 @@ export function SellerOrderCard({
           )}
 
           {/* Stage 4: Partner Assigned / En Route / Picked Up / Out for Delivery */}
-          {isPartnerStage && (
+          {isPartnerStage && !order.deliveryPartner?.name && (
             <div
               role="status"
               style={{
@@ -624,7 +648,7 @@ export function SellerOrderCard({
               }}
             >
               <span>
-                {order.fulfilmentStatus === 'delivery_partner_assigned' && `🛵 Partner Assigned (${order.deliveryPartner?.name || 'Partner'}) · Pickup ETA ~${etaMinutes} mins`}
+                {order.fulfilmentStatus === 'delivery_partner_assigned' && `🛵 Partner Assigned · Pickup ETA ~${etaMinutes} mins`}
                 {order.fulfilmentStatus === 'out_for_pickup' && `🚚 Partner En Route for Pickup · ETA ~${etaMinutes} mins`}
                 {order.fulfilmentStatus === 'picked_up' && '📦 Package Handed Over to Delivery Partner'}
                 {order.fulfilmentStatus === 'out_for_delivery' && '🛵 Package Out for Delivery to Customer'}

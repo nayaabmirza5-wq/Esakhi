@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { CashRemittance } from '../orders/cashRemittance.model.js';
 import type { RequestHandler } from 'express';
 import mongoose from 'mongoose';
@@ -929,7 +930,7 @@ export const settleCityAdminCashRemittance: RequestHandler = async (req, res) =>
   );
 
   // Invalidate and rotate partner's PIN immediately for next session
-  partner.remittancePin = String(Math.floor(1000 + Math.random() * 9000));
+  partner.remittancePin = randomInt(1000, 10000).toString();
   (partner as any).remittancePinExpiresAt = new Date(now.getTime() + 60_000);
   (partner as any).previousRemittancePin = undefined;
   (partner as any).previousPinExpiresAt = undefined;

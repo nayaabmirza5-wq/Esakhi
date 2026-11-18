@@ -7,6 +7,8 @@ import { Order } from '../orders/order.model.js';
 import { PenaltyLedger } from '../orders/penaltyLedger.model.js';
 import { PayoutRecord } from './payoutRecord.model.js';
 import { SellerApplication } from '../seller/sellerApplication.model.js';
+import { Seller } from '../../models/Seller.js';
+import { computeSellerStatutoryTaxSummary, getIndianFinancialYearBounds } from '../catalog/pricingTaxEngine.js';
 import { DeliveryPartnerApplication } from '../cityAdmin/deliveryPartnerApplication.model.js';
 import { authenticatedUserId } from '../../utils/authenticatedUser.js';
 import { sendData } from '../../utils/apiResponse.js';
@@ -135,12 +137,18 @@ export const getSuperAdminSellerSettlements: RequestHandler = async (_req, res) 
     .select('_id name phoneE164 email assignedCity bankAccount')
     .lean();
 
-  const sellerApps = await SellerApplication.find({
-    $or: [
-      { sellerId: { $in: sellers.map((s) => s._id) } },
-      { phoneE164: { $in: sellers.map((s) => s.phoneE164) } },
-    ],
-  }).lean();
+  const [sellerApps, sellerProfiles] = await Promise.all([
+    SellerApplication.find({
+      $or: [
+        { sellerId: { $in: sellers.map((s) => s._id) } },
+        { phoneE164: { $in: sellers.map((s) => s.phoneE164) } },
+      ],
+    }).lean(),
+    Seller.find({ userId: { $in: sellers.map((s) => s._id) } }).lean(),
+  ]);
+
+  const sellerProfileByUserId = new Map(sellerProfiles.map((sp) => [String(sp.userId), sp]));
+  const { fyStart, fyEnd } = getIndianFinancialYearBounds();
 
   const allCompletedOrders = await Order.find({
     fulfilmentStatus: { $in: COMPLETED_FULFILMENT_STATUSES },
@@ -159,21 +167,26 @@ export const getSuperAdminSellerSettlements: RequestHandler = async (_req, res) 
   const results = sellers.map((seller) => {
     const sId = String(seller._id);
     const app = sellerApps.find((a) => String(a.sellerId) === sId || a.phoneE164 === seller.phoneE164);
+    const profile = sellerProfileByUserId.get(sId);
 
     let grossSalesPaise = 0;
+    let fyOrdersGrossPaise = 0;
     let unitsSold = 0;
     const sellerOrdersList: Array<{ orderReference: string; itemTotalPaise: number; productName: string }> = [];
 
     for (const order of allCompletedOrders) {
       let orderMatched = false;
+      let orderSellerGross = 0;
       for (const item of order.items || []) {
         if (item.sellerId && String(item.sellerId) === sId) {
-          grossSalesPaise += item.lineTotalPaise || 0;
+          const itemLine = item.lineTotalPaise || 0;
+          grossSalesPaise += itemLine;
+          orderSellerGross += itemLine;
           unitsSold += item.quantity || 1;
           orderMatched = true;
           sellerOrdersList.push({
             orderReference: order.orderReference,
-            itemTotalPaise: item.lineTotalPaise || 0,
+            itemTotalPaise: itemLine,
             productName: item.productName,
           });
         }
@@ -181,18 +194,44 @@ export const getSuperAdminSellerSettlements: RequestHandler = async (_req, res) 
       if (!orderMatched && order.sellerPickup?.sellerId && String(order.sellerPickup.sellerId) === sId) {
         const sub = order.subtotalPaise || 0;
         grossSalesPaise += sub;
+        orderSellerGross += sub;
         sellerOrdersList.push({
           orderReference: order.orderReference,
           itemTotalPaise: sub,
           productName: order.items?.[0]?.productName || 'Handcrafted items',
         });
       }
+      if (orderSellerGross > 0) {
+        const createdDate = new Date(order.createdAt);
+        if (createdDate >= fyStart && createdDate <= fyEnd) {
+          fyOrdersGrossPaise += orderSellerGross;
+        }
+      }
     }
+
+    const fyGrossSalesPaise = Math.max(fyOrdersGrossPaise, grossSalesPaise);
+    const statutoryTax = computeSellerStatutoryTaxSummary({
+      fyGrossSalesPaise,
+      periodGrossSalesPaise: grossSalesPaise,
+      hasGst: profile?.taxDetails?.hasGst,
+      gstin: profile?.taxDetails?.gstin,
+      enrolmentId: profile?.taxDetails?.enrolmentId,
+      panNumber: profile?.taxDetails?.panNumber,
+    });
 
     // 10% platform + city admin retention (5% platform + 5% city admin)
     const commissionDeductionsPaise = Math.round(grossSalesPaise * 0.10);
-    // Net artisan base share (90%)
-    const grossArtisanSharePaise = grossSalesPaise - commissionDeductionsPaise;
+    // Statutory Govt Deductions:
+    // - Section 52 GST TCS (0.5% of net taxable value for GSTIN sellers; ₹0 for Non-GST Enrolment ID sellers)
+    // - Section 194-O Income Tax TDS (0.1% of gross sales when FY gross sales > ₹5,00,000; ₹0 below ₹5L)
+    const tcsDeductionPaise = statutoryTax.tcsTotalPaise;
+    const tdsDeductionPaise = statutoryTax.tds194OPaise;
+
+    // Net artisan base share after commission & statutory TCS/TDS
+    const grossArtisanSharePaise = Math.max(
+      0,
+      grossSalesPaise - commissionDeductionsPaise - tcsDeductionPaise - tdsDeductionPaise,
+    );
 
     const sellerPenalties = penalties.filter(
       (p) => String(p.partyId) === sId && p.settlementStatus !== 'WAIVED'
@@ -206,13 +245,13 @@ export const getSuperAdminSellerSettlements: RequestHandler = async (_req, res) 
 
     const netLockedPayablePaise = Math.max(0, grossArtisanSharePaise - penaltyDeductionsPaise - alreadyDisbursedPaise);
 
-    const rawAcc = seller.bankAccount?.accountNumber;
+    const rawAcc = seller.bankAccount?.accountNumber || profile?.bankDetails?.accountNumber;
     const bankAccount = rawAcc
       ? {
-          accountHolderName: seller.bankAccount?.accountHolderName || app?.representative || seller.name || 'Artisan Seller',
+          accountHolderName: seller.bankAccount?.accountHolderName || profile?.bankDetails?.accountHolderName || app?.representative || seller.name || 'Artisan Seller',
           accountNumberMasked: rawAcc.length > 4 ? `${'*'.repeat(Math.max(4, rawAcc.length - 4))}${rawAcc.slice(-4)}` : rawAcc,
-          ifscCode: seller.bankAccount?.ifscCode || 'SBIN0000001',
-          bankName: seller.bankAccount?.bankName || 'State Bank of India',
+          ifscCode: seller.bankAccount?.ifscCode || profile?.bankDetails?.ifscCode || 'SBIN0000001',
+          bankName: seller.bankAccount?.bankName || profile?.bankDetails?.bankName || 'State Bank of India',
           upiId: seller.bankAccount?.upiId || undefined,
           isPending: false,
         }
@@ -227,14 +266,19 @@ export const getSuperAdminSellerSettlements: RequestHandler = async (_req, res) 
 
     return {
       sellerId: sId,
-      sellerName: app?.shgName || seller.name || 'Maitri SHG Artisan Group',
-      representative: app?.representative || seller.name || 'Sunita Bai',
+      sellerName: profile?.supplierDetails?.shgName || app?.shgName || seller.name || 'Maitri SHG Artisan Group',
+      representative: profile?.supplierDetails?.shgLeaderName || app?.representative || seller.name || 'Sunita Bai',
+      shgCode: profile?.supplierDetails?.shgCode || 'MP-DMH-1042',
+      fssaiNumber: profile?.supplierDetails?.fssaiNumber || app?.fssaiRegistrationNumber || null,
       phoneE164: seller.phoneE164,
-      city: app?.city || seller.assignedCity || 'Damoh',
+      city: profile?.pickupAddress?.city || app?.city || seller.assignedCity || 'Damoh',
       unitsSold,
       grossSalesPaise,
       commissionDeductionsPaise, // 10% (5% platform + 5% city)
-      grossArtisanSharePaise, // 90%
+      tcsDeductionPaise, // 0.5% GSTR-8 TCS for GSTIN, 0 for Enrolment ID
+      tdsDeductionPaise, // 0.1% Sec 194-O TDS when FY sales > ₹5L
+      statutoryTax,
+      grossArtisanSharePaise,
       penaltyDeductionsPaise,
       alreadyDisbursedPaise,
       netLockedPayablePaise, // non-editable
@@ -393,6 +437,8 @@ export const recordSuperAdminDisbursement: RequestHandler = async (req, res) => 
   // Recalculate exact net payable to guarantee ZERO manipulation or front-end spoofing
   let grossPaise = 0;
   let commissionPaise = 0;
+  let tcsPaise = 0;
+  let tdsPaise = 0;
   let penaltyDeductionsPaise = 0;
 
   if (input.beneficiaryType === 'city_admin') {
@@ -407,25 +453,50 @@ export const recordSuperAdminDisbursement: RequestHandler = async (req, res) => 
     grossPaise = adminOrders.reduce((sum, o) => sum + (o.subtotalPaise || 0), 0);
     commissionPaise = Math.round(grossPaise * 0.05); // 5%
   } else if (input.beneficiaryType === 'seller') {
-    const sellerOrders = await Order.find({
-      fulfilmentStatus: { $in: COMPLETED_FULFILMENT_STATUSES },
-      paymentStatus: 'confirmed',
-      $or: [{ 'items.sellerId': beneficiary._id }, { 'sellerPickup.sellerId': beneficiary._id }],
-    }).lean<CompletedOrderLean[]>();
+    const [sellerOrders, sellerProfile] = await Promise.all([
+      Order.find({
+        fulfilmentStatus: { $in: COMPLETED_FULFILMENT_STATUSES },
+        paymentStatus: 'confirmed',
+        $or: [{ 'items.sellerId': beneficiary._id }, { 'sellerPickup.sellerId': beneficiary._id }],
+      }).lean<CompletedOrderLean[]>(),
+      Seller.findOne({ userId: beneficiary._id }).lean(),
+    ]);
+
+    const { fyStart, fyEnd } = getIndianFinancialYearBounds();
+    let fyGross = 0;
 
     for (const order of sellerOrders) {
       let matched = false;
+      let orderGross = 0;
       for (const item of order.items || []) {
         if (item.sellerId && String(item.sellerId) === String(beneficiary._id)) {
-          grossPaise += item.lineTotalPaise || 0;
+          const line = item.lineTotalPaise || 0;
+          grossPaise += line;
+          orderGross += line;
           matched = true;
         }
       }
       if (!matched && order.sellerPickup?.sellerId && String(order.sellerPickup.sellerId) === String(beneficiary._id)) {
-        grossPaise += order.subtotalPaise || 0;
+        const sub = order.subtotalPaise || 0;
+        grossPaise += sub;
+        orderGross += sub;
+      }
+      if (orderGross > 0) {
+        const d = new Date(order.createdAt);
+        if (d >= fyStart && d <= fyEnd) fyGross += orderGross;
       }
     }
     commissionPaise = Math.round(grossPaise * 0.10); // 10% platform + city
+    const statutoryTax = computeSellerStatutoryTaxSummary({
+      fyGrossSalesPaise: Math.max(fyGross, grossPaise),
+      periodGrossSalesPaise: grossPaise,
+      hasGst: sellerProfile?.taxDetails?.hasGst,
+      gstin: sellerProfile?.taxDetails?.gstin,
+      enrolmentId: sellerProfile?.taxDetails?.enrolmentId,
+      panNumber: sellerProfile?.taxDetails?.panNumber,
+    });
+    tcsPaise = statutoryTax.tcsTotalPaise;
+    tdsPaise = statutoryTax.tds194OPaise;
   } else {
     // Delivery partner: ₹29 per trip
     const partnerOrders = await Order.find({
@@ -451,7 +522,7 @@ export const recordSuperAdminDisbursement: RequestHandler = async (req, res) => 
   const baseEligible = input.beneficiaryType === 'city_admin'
     ? commissionPaise
     : input.beneficiaryType === 'seller'
-    ? (grossPaise - commissionPaise)
+    ? Math.max(0, grossPaise - commissionPaise - tcsPaise - tdsPaise)
     : grossPaise;
 
   const netPayablePaise = Math.max(0, baseEligible - penaltyDeductionsPaise - alreadyDisbursedPaise);

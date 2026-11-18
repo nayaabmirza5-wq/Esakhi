@@ -40,7 +40,7 @@ const variantInputSchema = z.object({
 const productCreateBaseSchema = z.object({
   sellerId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
   name: z.string().trim().min(1).max(160),
-  slug: z.string().trim().toLowerCase().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(180),
+  slug: z.string().trim().toLowerCase().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(180).optional(),
   description: z.string().trim().min(1).max(5000),
   categoryId: categoryIdSchema,
   subcategoryId: subcategoryIdSchema,
@@ -51,7 +51,16 @@ const productCreateBaseSchema = z.object({
   stock: z.number().int().min(0).default(0),
   lowStockThreshold: z.number().int().min(0).max(100_000).default(5),
   variants: z.array(variantInputSchema).max(50).default([]),
-  isActive: z.boolean().default(false),
+  isActive: z.boolean().default(true),
+  masterSku: z.string().trim().max(100).optional(),
+  barcode: z.string().trim().max(30).optional(),
+  hsnCode: z.string().trim().max(20).optional(),
+  printedUnitMrpPaise: z.number().int().min(0).optional(),
+  sellerBasePricePaise: z.number().int().min(0).optional(),
+  customerUnitPricePaise: z.number().int().min(0).optional(),
+  minOrderQuantity: z.number().int().min(1).optional(),
+  productGstRate: z.number().optional(),
+  bestBeforeDate: z.string().trim().optional(),
 }).strict();
 
 type ProductCreateValues = Pick<
@@ -104,7 +113,7 @@ export const productListQuerySchema = z.object({
 }).strict();
 
 export const sellerProductCreateSchema = productCreateBaseSchema
-  .omit({ sellerId: true, isActive: true })
+  .omit({ sellerId: true })
   .superRefine(validateProductCreate);
 
 export const bestSellerQuerySchema = z.object({

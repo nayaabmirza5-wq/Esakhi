@@ -1,6 +1,6 @@
 import type { RequestHandler } from 'express';
 import mongoose from 'mongoose';
-import crypto from 'crypto';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { AppError } from '../../utils/AppError.js';
 import { authenticatedUserId } from '../../utils/authenticatedUser.js';
@@ -50,7 +50,7 @@ export const submitDeliveryPartnerApplication: RequestHandler = async (req, res)
   let bankDetailsPayload: Record<string, unknown> | undefined;
   if (input.accountNumber) {
     const masked = `••••••••${input.accountNumber.slice(-4)}`;
-    const hash = crypto.createHash('sha256').update(input.accountNumber).digest('hex');
+    const hash = createHash('sha256').update(input.accountNumber).digest('hex');
     bankDetailsPayload = {
       accountHolderName: input.name,
       accountNumberMasked: masked,
@@ -409,7 +409,7 @@ export const completeDeliveryPartnerOnboarding: RequestHandler = async (req, res
         bankDetails: {
           accountHolderName: input.bankDetails.accountHolderName.trim(),
           accountNumberMasked: `••••••••${input.bankDetails.accountNumber.trim().slice(-4)}`,
-          accountNumberHash: crypto.createHash('sha256').update(input.bankDetails.accountNumber.trim()).digest('hex'),
+          accountNumberHash: createHash('sha256').update(input.bankDetails.accountNumber.trim()).digest('hex'),
           ifscCode: input.bankDetails.ifscCode.trim().toUpperCase(),
           bankName: input.bankDetails.bankName.trim(),
           branchName: input.bankDetails.branchName.trim(),

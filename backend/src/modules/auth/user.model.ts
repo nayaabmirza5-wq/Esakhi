@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { Schema, model } from 'mongoose';
 import type { InferSchemaType } from 'mongoose';
 import { userRoles } from './roles.js';
@@ -88,7 +89,7 @@ userSchema.pre('validate', function () {
     remittancePinExpiresAt?: Date;
   };
   if (self.role === 'delivery_partner' && !self.remittancePin) {
-    self.remittancePin = String(Math.floor(1000 + Math.random() * 9000));
+    self.remittancePin = randomInt(1000, 10000).toString();
     self.remittancePinExpiresAt = new Date(Date.now() + 60_000);
   }
   if (!self.phoneE164 && self.phone) {

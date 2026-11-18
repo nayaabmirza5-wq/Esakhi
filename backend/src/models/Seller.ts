@@ -13,6 +13,8 @@ export interface ISeller extends Document {
     hasEnrolmentId: boolean;
     enrolmentId?: string;
     panNumber: string;
+    panCardUrl?: string;
+    gstCertificateUrl?: string;
     businessName: string;
     email: string;
   };
@@ -25,6 +27,9 @@ export interface ISeller extends Document {
     state: string;
     pincode: string;
     landmark?: string;
+    latitude?: number;
+    longitude?: number;
+    storefrontPhotoUrl?: string;
   };
 
   // Step 3: Bank Account
@@ -53,6 +58,19 @@ export interface ISeller extends Document {
     fssaiNumber?: string;
     district: string;
   };
+
+  // Store Operating Hours & Split-Shift Schedule
+  operatingHours?: {
+    openTime: string;
+    closeTime: string;
+    splitShift?: {
+      enabled: boolean;
+      breakStart: string;
+      breakEnd: string;
+    };
+    weeklyOffDays?: string[];
+    isClosedOverride?: boolean;
+  };
 }
 
 const SellerSchema = new Schema<ISeller>(
@@ -68,6 +86,8 @@ const SellerSchema = new Schema<ISeller>(
       hasEnrolmentId: { type: Boolean, default: false },
       enrolmentId: { type: String, uppercase: true, trim: true },
       panNumber: { type: String, uppercase: true, trim: true },
+      panCardUrl: { type: String, trim: true },
+      gstCertificateUrl: { type: String, trim: true },
       businessName: { type: String, trim: true },
       email: { type: String, trim: true },
     },
@@ -78,6 +98,9 @@ const SellerSchema = new Schema<ISeller>(
       state: { type: String, required: true },
       pincode: { type: String, required: true },
       landmark: String,
+      latitude: Number,
+      longitude: Number,
+      storefrontPhotoUrl: { type: String, trim: true },
     },
     bankDetails: {
       accountHolderName: { type: String, required: true },
@@ -101,6 +124,17 @@ const SellerSchema = new Schema<ISeller>(
       foodSubcategory: { type: String, trim: true },
       fssaiNumber: { type: String, trim: true },
       district: { type: String, required: true },
+    },
+    operatingHours: {
+      openTime: { type: String, default: '09:30' },
+      closeTime: { type: String, default: '20:30' },
+      splitShift: {
+        enabled: { type: Boolean, default: false },
+        breakStart: { type: String, default: '13:30' },
+        breakEnd: { type: String, default: '16:30' },
+      },
+      weeklyOffDays: { type: [String], default: [] },
+      isClosedOverride: { type: Boolean, default: false },
     },
   },
   { timestamps: true }

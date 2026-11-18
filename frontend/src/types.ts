@@ -143,12 +143,53 @@ export interface PenaltyLedgerEntry {
   settledAt?: string;
 }
 
+export interface SellerStatutoryTaxSummary {
+  fyLabel: string;
+  taxProfile: 'GST_REGISTERED' | 'NON_GST_ENROLMENT';
+  hasGst: boolean;
+  gstin?: string;
+  enrolmentId?: string;
+  panNumber: string;
+  stateCode: string;
+  fyGrossSalesPaise: number;
+  fiveLakhThresholdPaise: number;
+  exceeds5LakhThreshold: boolean;
+  thresholdProgressPercent: number;
+  remainingBeforeTdsPaise: number;
+  taxableSalesPaise: number;
+  tcsRatePercent: number;
+  tcsCgstPaise: number;
+  tcsSgstPaise: number;
+  tcsTotalPaise: number;
+  tdsRatePercent: number;
+  tds194OPaise: number;
+  govtReportingFormTcs: string;
+  govtReportingFormTds: string;
+}
+
 export interface SellerSettlementsResponse {
   monthLabel: string;
   grossMonthlyPayoutPaise: number;
+  commissionPaise?: number;
+  tcsGstPaise?: number;
+  tcsCgstPaise?: number;
+  tcsSgstPaise?: number;
+  tds194OPaise?: number;
   totalPenaltyDeductionsPaise: number;
   netSettlementPaise: number;
   completedOrdersCount: number;
+  statutoryTaxLedger?: SellerStatutoryTaxSummary;
+  orderLedger?: Array<{
+    orderId: string;
+    orderReference: string;
+    createdAt: string;
+    productSummary: string;
+    grossPaise: number;
+    commissionPaise: number;
+    tcsPaise: number;
+    tdsPaise: number;
+    netPaise: number;
+  }>;
   penalties: PenaltyLedgerEntry[];
 }
 
@@ -251,6 +292,13 @@ export interface User {
   aadhaarNumber?: string;
   compensationRate?: string;
   payerText?: string;
+  shgName?: string;
+  shgLeaderName?: string;
+  shgCode?: string;
+  category?: string;
+  grossSalesPaise?: number;
+  sellerProfile?: SellerRecord;
+  statutoryTax?: SellerStatutoryTaxSummary;
 }
 
 export interface PartnerProfile {
@@ -282,6 +330,11 @@ export interface SellerPickupSnapshot {
   city?: string;
   latitude: number;
   longitude: number;
+  hasGst?: boolean;
+  taxType?: 'GSTIN' | 'ENROLMENT_ID' | 'UIN';
+  gstin?: string;
+  enrolmentId?: string;
+  panNumber?: string;
 }
 
 export interface Address {
@@ -351,6 +404,33 @@ export interface Product {
   approvalStatus: 'pending' | 'approved' | 'rejected';
   foodComplianceStatus: 'not_required' | 'pending' | 'verified';
   pricePaise: number;
+  basePricePaise?: number;
+  platformFeePaise?: number;
+  cityAdminFeePaise?: number;
+  masterSku?: string;
+  barcode?: string;
+  hsnCode?: string;
+  printedUnitMrpPaise?: number;
+  sellerBasePricePaise?: number;
+  customerUnitPricePaise?: number;
+  minOrderQuantity?: number;
+  productGstRate?: number;
+  bestBeforeDate?: string;
+  taxLedgerSnapshot?: {
+    taxableValuePaise: number;
+    productGstPaise: number;
+    cgstPaise: number;
+    sgstPaise: number;
+    igstPaise: number;
+    commissionRatePercent: number;
+    commissionPaise: number;
+    commissionGstPaise: number;
+    tcsGstPaise: number;
+    tdsPaise: number;
+    netBankPayoutPaise: number;
+    sellerTaxProfile: string;
+    calculatedAt: string;
+  };
   imageUrls: string[];
   stock: number;
   lowStockThreshold: number;
@@ -412,6 +492,7 @@ export interface OrderItem {
   sellerId?: string | null;
   sellerName?: string;
   variantId?: string;
+  sku?: string;
   productName: string;
   variantAttributes?: Record<string, string>;
   unitPricePaise: number;
@@ -549,6 +630,7 @@ export interface SellerOrder {
   sellerPickup?: { sellerName?: string; phoneE164?: string; address?: string; city?: string; latitude?: number; longitude?: number; enrolmentId?: string; panNumber?: string };
   deliveryOtp?: string;
   items: Array<{
+    sku?: string;
     productName: string;
     quantity: number;
     unitPricePaise?: number;
@@ -1434,11 +1516,16 @@ export interface SellerPayoutSettlementItem {
   sellerId: string;
   sellerName: string;
   representative: string;
+  shgCode?: string;
+  fssaiNumber?: string | null;
   phoneE164: string;
   city: string;
   unitsSold: number;
   grossSalesPaise: number;
   commissionDeductionsPaise: number;
+  tcsDeductionPaise?: number;
+  tdsDeductionPaise?: number;
+  statutoryTax?: SellerStatutoryTaxSummary;
   grossArtisanSharePaise: number;
   penaltyDeductionsPaise: number;
   alreadyDisbursedPaise: number;

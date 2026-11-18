@@ -29,6 +29,7 @@ import { sellerApplicationRoutes } from './modules/seller/sellerApplication.rout
 import { deliveryPartnerApplicationRoutes } from './modules/cityAdmin/deliveryPartnerApplication.routes.js';
 import { lookupShgCode } from './modules/seller/seller.controller.js';
 import { paymentRoutes } from './modules/payments/payment.routes.js';
+import { merchantRoutes } from './modules/merchant/merchant.routes.js';
 
 // helmet's typings differ between installs under NodeNext (default export may resolve to the module namespace).
 type HelmetFactory = () => express.RequestHandler;
@@ -218,6 +219,7 @@ api.use('/super-admin', superAdminRoutes);
 api.use('/city-admin', cityAdminRoutes);
 api.get('/track/partner/:orderId', requireAuth, requireRole('city_admin', 'admin', 'super_admin'), trackCityAdminOrderPartner);
 api.use('/seller', sellerRoutes);
+api.use('/merchant', merchantRoutes);
 api.use('/seller-applications', sellerApplicationRoutes);
 api.get('/shg/lookup/:code', lookupShgCode);
 api.use('/delivery-partner-applications', deliveryPartnerApplicationRoutes);

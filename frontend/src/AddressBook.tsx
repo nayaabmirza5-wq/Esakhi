@@ -1,35 +1,46 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useState, useMemo } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import L from 'leaflet';
-import { MapContainer, Marker, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import { api } from './api';
-import type { Address, AddressSuggestion } from './types';
+import type { Address } from './types';
+import {
+  MapPin,
+  Plus,
+  Trash2,
+  Check,
+  CheckCircle2,
+  RefreshCw,
+  Home,
+  Building2,
+  AlertCircle,
+  Phone,
+  User,
+} from 'lucide-react';
 
 export type ServiceLocality = { name: string; postalCodes: string[]; deliveryFeePaise?: number };
 export type AddressFields = Omit<Address, 'id' | '_id'>;
 export type AddressField = keyof AddressFields;
-export type AddressFormErrors = Partial<Record<'name' | 'phone' | 'address' | 'villageOrCity' | 'state' | 'postalCode' | 'locality', string>>;
+export type AddressFormErrors = Partial<Record<'name' | 'phone' | 'houseNumber' | 'street' | 'city' | 'state' | 'postalCode', string>>;
 
-const POPULAR_DAMOH_AREAS = [
-  'Civil Lines',
-  'Ghanta Ghar',
-  'Purana Bazar',
-  'Naya Bazar',
-  'Jabalpur Naka',
-  'Sagar Naka',
-  'Station Road',
-  'Galla Mandi',
-  'Badi Devi Ji',
-  'Futera Ward',
-];
-
-const QUICK_INSTRUCTIONS = [
-  '📞 Call before arrival',
-  '🚪 Leave at doorstep',
-  '🔔 Ring bell twice',
-  '🛡️ Hand over to security',
-  '🚫 Do not call, send SMS',
-];
+// Common Central India / MP Pincode Fast Lookup
+const PINCODE_MAP: Record<string, { city: string; state: string; district?: string }> = {
+  '470661': { city: 'Damoh', state: 'Madhya Pradesh', district: 'Damoh' },
+  '470663': { city: 'Damoh', state: 'Madhya Pradesh', district: 'Damoh' },
+  '470670': { city: 'Damoh', state: 'Madhya Pradesh', district: 'Damoh' },
+  '470672': { city: 'Damoh', state: 'Madhya Pradesh', district: 'Damoh' },
+  '470673': { city: 'Damoh', state: 'Madhya Pradesh', district: 'Damoh' },
+  '470675': { city: 'Damoh', state: 'Madhya Pradesh', district: 'Damoh' },
+  '470771': { city: 'Hatta', state: 'Madhya Pradesh', district: 'Damoh' },
+  '470772': { city: 'Patera', state: 'Madhya Pradesh', district: 'Damoh' },
+  '470775': { city: 'Tendukheda', state: 'Madhya Pradesh', district: 'Damoh' },
+  '470880': { city: 'Jabera', state: 'Madhya Pradesh', district: 'Damoh' },
+  '470881': { city: 'Damoh', state: 'Madhya Pradesh', district: 'Damoh' },
+  '470001': { city: 'Sagar', state: 'Madhya Pradesh', district: 'Sagar' },
+  '470002': { city: 'Sagar', state: 'Madhya Pradesh', district: 'Sagar' },
+  '482001': { city: 'Jabalpur', state: 'Madhya Pradesh', district: 'Jabalpur' },
+  '482002': { city: 'Jabalpur', state: 'Madhya Pradesh', district: 'Jabalpur' },
+  '462001': { city: 'Bhopal', state: 'Madhya Pradesh', district: 'Bhopal' },
+  '452001': { city: 'Indore', state: 'Madhya Pradesh', district: 'Indore' },
+};
 
 const DEFAULT_DAMOH_LOCALITY: ServiceLocality = {
   name: 'Damoh',
@@ -57,105 +68,16 @@ const emptyAddress = (name: string, phone: string, defaultLocality?: ServiceLoca
   deliveryInstructions: '',
 });
 
-function locationFields(suggestion: AddressSuggestion): Partial<AddressFields> {
-  return {
-    ...(suggestion.houseNumber ? { houseNumber: suggestion.houseNumber } : {}),
-    ...(suggestion.street ? { street: suggestion.street } : {}),
-    ...(suggestion.area ? { area: suggestion.area } : {}),
-    ...(suggestion.villageOrCity ? { villageOrCity: suggestion.villageOrCity, city: suggestion.villageOrCity } : {}),
-    ...(suggestion.district ? { district: suggestion.district } : {}),
-    ...(suggestion.state ? { state: suggestion.state } : {}),
-    ...(suggestion.postalCode ? { postalCode: suggestion.postalCode } : {}),
-    latitude: suggestion.latitude,
-    longitude: suggestion.longitude,
-    formattedAddress: suggestion.formattedAddress,
-  };
-}
-
-function pinIcon(): L.DivIcon {
-  return L.divIcon({
-    className: 'address-map-pin',
-    html: '<span></span>',
-    iconSize: [34, 42],
-    iconAnchor: [17, 40],
-  });
-}
-
-function MapController({ center }: { center: [number, number] }): null {
-  const map = useMap();
-  useEffect(() => { map.setView(center, Math.max(map.getZoom(), 15)); }, [center, map]);
-  return null;
-}
-
-function MapClickHandler({ onMove }: { onMove: (latitude: number, longitude: number) => void }): null {
-  useMapEvents({
-    click(event) { onMove(event.latlng.lat, event.latlng.lng); },
-  });
-  return null;
-}
-
-function AddressMap({
-  latitude,
-  longitude,
-  onMove,
-}: {
-  latitude?: number;
-  longitude?: number;
-  onMove: (latitude: number, longitude: number) => void;
-}): ReactNode {
-  const [tileError, setTileError] = useState(false);
-  const [tileLoading, setTileLoading] = useState(true);
-  const center: [number, number] = latitude !== undefined && longitude !== undefined
-    ? [latitude, longitude]
-    : [23.84, 79.44];
-  const tileUrl = import.meta.env.VITE_OSM_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-  return (
-    <div className="address-map" aria-label="Map for choosing a delivery location">
-      <MapContainer center={center} zoom={latitude === undefined ? 6 : 15} scrollWheelZoom>
-        <MapController center={center} />
-        <MapClickHandler onMove={onMove} />
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url={tileUrl}
-          eventHandlers={{
-            loading: () => { setTileLoading(true); setTileError(false); },
-            load: () => setTileLoading(false),
-            tileerror: () => { setTileLoading(false); setTileError(true); },
-          }}
-        />
-        {latitude !== undefined && longitude !== undefined && (
-          <Marker
-            position={[latitude, longitude]}
-            draggable
-            icon={pinIcon()}
-            eventHandlers={{
-              dragend(event: L.DragEndEvent & { target: L.Marker }) {
-                const point = event.target.getLatLng();
-                onMove(point.lat, point.lng);
-              },
-            }}
-          />
-        )}
-      </MapContainer>
-      {tileLoading && <p className="address-map-status" role="status">Loading map…</p>}
-      {tileError && <p className="address-map-error" role="status">Map tiles unavailable. Enter address manually.</p>}
-      <small>Click map or drag the pin to adjust entrance.</small>
-    </div>
-  );
-}
-
-export function formatAddress(address: AddressFields): string {
+export function formatAddress(address: AddressFields | Address): string {
   return [
     address.houseNumber,
     address.street,
     address.area,
     address.landmark ? `Near ${address.landmark}` : undefined,
-    address.locality && address.locality !== (address.villageOrCity || address.city) ? address.locality : undefined,
-    address.villageOrCity || address.city,
-    address.district,
+    address.city || address.villageOrCity,
     address.state,
-    address.postalCode,
-  ].filter(Boolean).join(', ');
+    address.postalCode ? `PIN ${address.postalCode}` : undefined,
+  ].filter(Boolean).join(', ') || address.addressLine1 || 'Delivery Address';
 }
 
 function AddressForm({
@@ -173,11 +95,7 @@ function AddressForm({
   onSave: (address: AddressFields, id?: string) => Promise<Address>;
   onCancel: () => void;
 }): ReactNode {
-  const activeLocalities = useMemo(() => (
-    serviceLocalities.length > 0 ? serviceLocalities : [DEFAULT_DAMOH_LOCALITY]
-  ), [serviceLocalities]);
-
-  const primaryLocality = activeLocalities[0] || DEFAULT_DAMOH_LOCALITY;
+  const primaryLocality = serviceLocalities[0] || DEFAULT_DAMOH_LOCALITY;
 
   const initial = useMemo(() => {
     const base = emptyAddress(customerName, customerPhone, primaryLocality);
@@ -190,192 +108,178 @@ function AddressForm({
       street: initialAddress.street ?? '',
       area: initialAddress.area ?? '',
       landmark: initialAddress.landmark ?? initialAddress.addressLine2 ?? '',
-      villageOrCity: initialAddress.villageOrCity ?? initialAddress.city ?? 'Damoh',
       city: initialAddress.city ?? initialAddress.villageOrCity ?? 'Damoh',
-      district: initialAddress.district ?? 'Damoh',
       state: initialAddress.state ?? 'Madhya Pradesh',
-      postalCode: initialAddress.postalCode ?? primaryLocality.postalCodes[0] ?? '470661',
-      locality: initialAddress.locality ?? primaryLocality.name ?? 'Damoh',
+      postalCode: initialAddress.postalCode ?? '470661',
+      locality: initialAddress.locality ?? initialAddress.area ?? 'Damoh',
       label: initialAddress.label ?? 'Home',
     };
   }, [customerName, customerPhone, initialAddress, primaryLocality]);
 
-  // Mode: 'manual' by default, or 'gps' if GPS location is selected
-  const [entryMode, setEntryMode] = useState<'manual' | 'gps'>(
-    initialAddress?.latitude !== undefined ? 'gps' : 'manual'
-  );
-
   const [values, setValues] = useState<AddressFields>(initial);
-  const [step, setStep] = useState<'edit' | 'confirm'>('edit');
   const [saving, setSaving] = useState(false);
+  const [locating, setLocating] = useState(false);
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<AddressFormErrors>({});
-  const [lookupError, setLookupError] = useState('');
-  const [message, setMessage] = useState('');
-  const [resolvingPin, setResolvingPin] = useState(false);
-  const [gpsAccuracy, setGpsAccuracy] = useState<number | undefined>(initialAddress?.locationAccuracyMeters);
-  const [showMap, setShowMap] = useState(false);
-  const [showAdvancedRegion, setShowAdvancedRegion] = useState(false);
+  const [gpsMessage, setGpsMessage] = useState('');
   const [customLabel, setCustomLabel] = useState(
     initialAddress?.label && !['Home', 'Work'].includes(initialAddress.label) ? initialAddress.label : ''
   );
+
   const setField = (field: AddressField, value: string | boolean) => {
-    setValues((previous) => ({
-      ...previous,
+    setValues((prev) => ({
+      ...prev,
       [field]: value,
-      ...(typeof value === 'string' && ['houseNumber', 'street', 'area', 'landmark', 'villageOrCity', 'district', 'state', 'postalCode', 'locality'].includes(field)
-        ? { latitude: undefined, longitude: undefined, locationAccuracyMeters: undefined, formattedAddress: undefined }
-        : {}),
     }));
-    setFieldErrors((previous) => ({ ...previous, [field]: undefined }));
+    setFieldErrors((prev) => ({ ...prev, [field]: undefined }));
     setError('');
   };
 
-  const locateMe = () => {
-    setLookupError('');
-    setMessage('Detecting your actual doorstep location in Damoh…');
-    if (!navigator.geolocation) {
-      setLookupError('This browser does not support GPS location. Please use "Enter Address Manually".');
-      setMessage('');
-      return;
+  // Instant Pincode Auto-Fill (Local central India + Pan-India fallback)
+  const handlePincodeChange = (pin: string) => {
+    setField('postalCode', pin);
+    if (pin.length === 6) {
+      const match = PINCODE_MAP[pin];
+      if (match) {
+        setValues((prev) => ({
+          ...prev,
+          postalCode: pin,
+          city: match.city,
+          villageOrCity: match.city,
+          state: match.state,
+          district: match.district || match.city,
+        }));
+        return;
+      }
+
+      // Universal Pan-India postal pincode fallback
+      void fetch(`https://api.postalpincode.in/pincode/${pin}`, { signal: AbortSignal.timeout(3000) })
+        .then((res) => res.json())
+        .then((data) => {
+          const po = data?.[0]?.PostOffice?.[0];
+          if (po?.District && po?.State) {
+            setValues((prev) => ({
+              ...prev,
+              postalCode: pin,
+              city: po.District,
+              villageOrCity: po.District,
+              state: po.State,
+              district: po.District,
+            }));
+          }
+        })
+        .catch(() => {});
     }
-    if (!window.isSecureContext && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      setLookupError('GPS location requires HTTPS. Please use "Enter Address Manually".');
-      setMessage('');
+  };
+
+  // 1-Click GPS Doorstep Locator
+  const locateMe = () => {
+    setError('');
+    setGpsMessage('');
+    if (!navigator.geolocation) {
+      setError('GPS location is not supported in this browser. Please type your address below.');
       return;
     }
 
+    setLocating(true);
     navigator.geolocation.getCurrentPosition(
       async ({ coords }) => {
-        setValues((previous) => ({
-          ...previous,
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          locationAccuracyMeters: coords.accuracy,
-        }));
-        setGpsAccuracy(coords.accuracy);
-        setMessage('');
-        setResolvingPin(true);
         try {
           const suggestion = await api.reverseAddress(coords.latitude, coords.longitude);
-          const fields = locationFields(suggestion);
-          setValues((current) => ({
-            ...current,
-            ...fields,
+          setValues((prev) => ({
+            ...prev,
             latitude: coords.latitude,
             longitude: coords.longitude,
             locationAccuracyMeters: coords.accuracy,
-            locality: primaryLocality.name,
-            postalCode: fields.postalCode || primaryLocality.postalCodes[0] || '470661',
-            city: fields.city || 'Damoh',
-            district: fields.district || 'Damoh',
-            state: fields.state || 'Madhya Pradesh',
+            postalCode: suggestion.postalCode || prev.postalCode || '470661',
+            city: suggestion.villageOrCity || suggestion.district || 'Damoh',
+            villageOrCity: suggestion.villageOrCity || suggestion.district || 'Damoh',
+            district: suggestion.district || 'Damoh',
+            state: suggestion.state || 'Madhya Pradesh',
+            area: suggestion.area || prev.area,
+            street: suggestion.street || prev.street,
+            houseNumber: suggestion.houseNumber || prev.houseNumber,
+            formattedAddress: suggestion.formattedAddress,
           }));
-          setMessage('✓ Actual location detected successfully.');
-        } catch (cause) {
-          setLookupError(cause instanceof Error ? cause.message : 'Could not reverse geocode coordinates. Enter address manually.');
+          setGpsMessage(`✓ Doorstep location auto-detected (${suggestion.area || suggestion.villageOrCity || 'Damoh'})`);
+        } catch {
+          setValues((prev) => ({
+            ...prev,
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+          }));
+          setGpsMessage('✓ Coordinates detected. Please verify your house/street details.');
         } finally {
-          setResolvingPin(false);
+          setLocating(false);
         }
       },
-      (cause) => {
-        setMessage('');
-        const reason = cause.code === cause.PERMISSION_DENIED
-          ? 'Location permission was denied. You can switch to "Enter Address Manually".'
-          : cause.code === cause.POSITION_UNAVAILABLE
-            ? 'Device could not determine GPS location. Please switch to "Enter Address Manually".'
-            : 'Location detection timed out. Switch to "Enter Address Manually".';
-        setLookupError(reason);
+      (err) => {
+        setLocating(false);
+        if (err.code === err.PERMISSION_DENIED) {
+          setError('Location access was denied. Please enter your address details manually.');
+        } else {
+          setError('Could not detect location. Please enter your address manually.');
+        }
       },
-      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 10_000 }
     );
   };
 
-  const movePin = (latitude: number, longitude: number) => {
-    setValues((previous) => ({
-      ...previous,
-      latitude,
-      longitude,
-      locationAccuracyMeters: undefined,
-      formattedAddress: undefined,
-    }));
-    setGpsAccuracy(undefined);
-  };
+  const rawPhoneDigits = values.phone.replace(/^\+91/, '').replace(/\D/g, '');
 
-  const review = (event: FormEvent) => {
-    event.preventDefault();
+  const handleSubmit = async (e?: FormEvent) => {
+    e?.preventDefault();
     setError('');
     const errors: AddressFormErrors = {};
-    if (!values.name.trim()) errors.name = 'Enter the recipient’s full name.';
 
-    const compactPhone = values.phone.replace(/[\s()-]/g, '');
-    const fullPhone = compactPhone.startsWith('+91') ? compactPhone : `+91${compactPhone}`;
-    if (!/^\+91[6-9]\d{9}$/.test(fullPhone)) {
+    if (!values.name.trim()) errors.name = 'Full name is required.';
+    if (!/^[6-9]\d{9}$/.test(rawPhoneDigits)) {
       errors.phone = 'Enter a valid 10-digit Indian mobile number.';
     }
-
-    if (![values.houseNumber, values.street, values.area].some((value) => value?.trim())) {
-      errors.address = 'Enter a flat/house number, street name, or area.';
+    if (!values.postalCode.trim() || !/^\d{6}$/.test(values.postalCode.trim())) {
+      errors.postalCode = 'Enter a valid 6-digit PIN code.';
     }
-    if (!values.villageOrCity?.trim() && !values.city?.trim()) {
-      errors.villageOrCity = 'Enter a village, town, or city.';
-      setShowAdvancedRegion(true);
+    if (!values.houseNumber?.trim() && !values.street?.trim()) {
+      errors.houseNumber = 'Enter your flat, house number, or building.';
     }
-    if (!values.state.trim()) {
-      errors.state = 'Enter a state.';
-      setShowAdvancedRegion(true);
+    if (!values.area?.trim() && !values.street?.trim()) {
+      errors.street = 'Enter your street, road, or area.';
     }
-    if (!/^\d{6}$/.test(values.postalCode.trim())) {
-      errors.postalCode = 'Enter a valid six-digit PIN code.';
-      setShowAdvancedRegion(true);
-    }
-
-    const localityMatch = activeLocalities.find(
-      (zone) => zone.name.toLocaleLowerCase() === values.locality.trim().toLocaleLowerCase()
-    );
-    if (!localityMatch) {
-      errors.locality = 'Choose a configured delivery locality in Damoh.';
-    } else if (!localityMatch.postalCodes.includes(values.postalCode.trim())) {
-      errors.locality = `PIN ${values.postalCode} is outside ${localityMatch.name} (Valid: ${localityMatch.postalCodes.join(', ')})`;
-      setShowAdvancedRegion(true);
-    }
+    if (!values.city.trim()) errors.city = 'Enter your city or town.';
+    if (!values.state.trim()) errors.state = 'Enter your state.';
 
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
-      setError('Please resolve the highlighted fields before proceeding.');
+      setError('Please fill in all required address fields.');
       return;
     }
-    setStep('confirm');
-  };
 
-  const save = async () => {
-    setError('');
     setSaving(true);
     try {
-      const cleanPhone = values.phone.replace(/[\s()-]/g, '');
-      const formattedPhone = cleanPhone.startsWith('+91') ? cleanPhone : `+91${cleanPhone}`;
-
+      const fullPhone = `+91${rawPhoneDigits}`;
       const resolvedLabel = values.label === 'Other' && customLabel.trim()
         ? customLabel.trim()
         : (values.label?.trim() || 'Home');
 
-      const address: AddressFields = {
+      const streetLine = [values.houseNumber, values.street, values.area].filter(Boolean).join(', ');
+
+      const addressPayload: AddressFields = {
         label: resolvedLabel,
         isDefault: Boolean(values.isDefault),
         name: values.name.trim(),
-        phone: formattedPhone,
-        addressLine1: [values.houseNumber, values.street, values.area].filter(Boolean).join(', ') || values.addressLine1.trim(),
+        phone: fullPhone,
+        addressLine1: streetLine || values.addressLine1 || 'Doorstep Address',
         addressLine2: values.landmark?.trim() || '',
-        locality: values.locality.trim() || 'Damoh',
-        city: (values.villageOrCity?.trim() || values.city).trim() || 'Damoh',
+        locality: values.area?.trim() || values.city.trim() || 'Damoh',
+        city: values.city.trim() || 'Damoh',
         state: values.state.trim() || 'Madhya Pradesh',
         postalCode: values.postalCode.trim() || '470661',
         houseNumber: values.houseNumber?.trim() || '',
         street: values.street?.trim() || '',
-        area: values.area?.trim() || '',
+        area: values.area?.trim() || values.street?.trim() || '',
         landmark: values.landmark?.trim() || '',
-        villageOrCity: values.villageOrCity?.trim() || 'Damoh',
-        district: values.district?.trim() || 'Damoh',
+        villageOrCity: values.city.trim() || 'Damoh',
+        district: values.district?.trim() || values.city.trim() || 'Damoh',
         deliveryInstructions: values.deliveryInstructions?.trim() || '',
         ...(values.latitude !== undefined && values.longitude !== undefined
           ? {
@@ -387,540 +291,298 @@ function AddressForm({
           : {}),
       };
 
-      await onSave(address, initialAddress?.id ?? initialAddress?._id);
+      await onSave(addressPayload, initialAddress?.id ?? initialAddress?._id);
       onCancel();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not save this address.');
-      setStep('edit');
+      setError(cause instanceof Error ? cause.message : 'Failed to save address.');
     } finally {
       setSaving(false);
     }
   };
 
-  if (step === 'confirm') {
-    return (
-      <section className="address-form-panel address-confirm-panel">
-        <div className="address-confirm-header">
-          <span className="address-badge-verified">✓ Verified Local Delivery</span>
-          <h3>Confirm Delivery Address</h3>
-          <p className="address-confirm-sub">Review your details to ensure fast, reliable local delivery across Damoh.</p>
-        </div>
-
-        <div className="address-confirm-card">
-          <div className="address-confirm-recipient">
-            <div className="recipient-avatar" aria-hidden="true">👤</div>
-            <div className="recipient-info">
-              <strong>{values.name}</strong>
-              <span>📞 {values.phone.startsWith('+91') ? values.phone : `+91 ${values.phone}`}</span>
-            </div>
-            <span className="address-type-pill">
-              {values.label === 'Home' ? '🏠 Home' : values.label === 'Work' ? '🏢 Work' : `📍 ${customLabel || values.label || 'Other'}`}
-              {values.isDefault && ' · Default'}
-            </span>
-          </div>
-
-          <div className="address-confirm-body">
-            <div className="address-confirm-row">
-              <span className="address-row-icon" aria-hidden="true">📍</span>
-              <div className="address-row-text">
-                <p className="address-main-line">
-                  {[values.houseNumber, values.street].filter(Boolean).join(', ') || 'Address line'}
-                </p>
-                <p className="address-sub-line">
-                  {[values.area, values.landmark ? `Near ${values.landmark}` : null].filter(Boolean).join(', ')}
-                </p>
-                <p className="address-city-line">
-                  {[values.locality, values.villageOrCity || values.city, values.district, values.state].filter(Boolean).join(', ')} — <strong>PIN {values.postalCode}</strong>
-                </p>
-              </div>
-            </div>
-
-            {values.deliveryInstructions && (
-              <div className="address-confirm-instructions">
-                <span className="instructions-icon" aria-hidden="true">💬</span>
-                <div>
-                  <strong>Delivery Instructions:</strong>
-                  <p>{values.deliveryInstructions}</p>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {values.latitude !== undefined && values.longitude !== undefined && (
-          <div className="address-confirm-map-wrap">
-            <AddressMap latitude={values.latitude} longitude={values.longitude} onMove={movePin} />
-            <small className="address-coordinates">GPS Coordinates: {values.latitude.toFixed(5)}, {values.longitude.toFixed(5)}</small>
-          </div>
-        )}
-
-        {error && <p className="address-error" role="alert">{error}</p>}
-
-        <div className="address-confirm-actions">
-          <button type="button" className="button button-outline" onClick={() => setStep('edit')}>
-            ✏️ Edit Details
-          </button>
-          <button type="button" className="button" disabled={saving || resolvingPin} onClick={() => void save()}>
-            {saving ? 'Saving Address…' : '✓ Confirm & Save Address'}
-          </button>
-        </div>
-      </section>
-    );
-  }
-
-  const rawPhoneDigits = values.phone.replace(/^\+91/, '').replace(/\D/g, '');
-
   return (
-    <form className="address-form-panel" onSubmit={review}>
-      <div className="address-form-header">
-        <span className="eyebrow">Local Fulfilment</span>
-        <h3>{initialAddress ? 'Edit Delivery Address' : 'Add a Delivery Address'}</h3>
-        <p className="address-form-sub">Dispatched directly from Damoh Women SHG Clusters within 24–48 hours.</p>
-      </div>
-
-      {/* 2 CLEAR OPTIONS UP FRONT: USE ACTUAL LOCATION OR ENTER MANUALLY */}
-      <div className="address-mode-choice-section">
-        <span className="field-subheading" style={{ marginBottom: '10px' }}>Choose how to set your address:</span>
-        <div className="address-mode-toggle-grid">
-          <button
-            type="button"
-            className={`address-mode-toggle-card ${entryMode === 'gps' ? 'active' : ''}`}
-            onClick={() => {
-              setEntryMode('gps');
-              locateMe();
-            }}
-          >
-            <span className="mode-toggle-icon">📍</span>
-            <div className="mode-toggle-text">
-              <strong>Use My Actual Location</strong>
-              <small>Auto-detect doorstep GPS via device</small>
-            </div>
-            {entryMode === 'gps' && <span className="mode-active-pill">✓ Active</span>}
-          </button>
-
-          <button
-            type="button"
-            className={`address-mode-toggle-card ${entryMode === 'manual' ? 'active' : ''}`}
-            onClick={() => {
-              setEntryMode('manual');
-              setMessage('');
-              setLookupError('');
-            }}
-          >
-            <span className="mode-toggle-icon">✍️</span>
-            <div className="mode-toggle-text">
-              <strong>Enter Address Manually</strong>
-              <small>Type house number, street & area</small>
-            </div>
-            {entryMode === 'manual' && <span className="mode-active-pill">✓ Active</span>}
-          </button>
-        </div>
-      </div>
-
-      {/* OPTION A: GPS ACTUAL LOCATION FLOW */}
-      {entryMode === 'gps' && (
-        <section className="address-section-card gps-flow-card">
-          <div className="address-section-header">
-            <h4 className="address-section-title">
-              <span>📍</span> Doorstep Location Detection
-            </h4>
-            <button
-              type="button"
-              className="quick-action-btn"
-              disabled={Boolean(message.includes('Detecting')) || resolvingPin}
-              onClick={locateMe}
-            >
-              🔄 Refresh GPS
-            </button>
-          </div>
-
-          {message && (
-            <div className="gps-status-box" role="status">
-              <span className="gps-live-dot" />
-              <span>{message}</span>
-            </div>
-          )}
-
-          {lookupError && (
-            <div className="gps-error-box" role="alert">
-              <span>⚠️ {lookupError}</span>
-              <button
-                type="button"
-                className="text-button"
-                onClick={() => setEntryMode('manual')}
-                style={{ marginLeft: '8px', textDecoration: 'underline' }}
-              >
-                Switch to Manual Entry
-              </button>
-            </div>
-          )}
-
-          {values.latitude !== undefined && values.longitude !== undefined && (
-            <div className="gps-result-box">
-              <div className="gps-result-info">
-                <span className="gps-badge-ok">✓ Doorstep Pinned</span>
-                <p className="gps-result-address">
-                  {[values.houseNumber, values.street, values.area, values.city, values.postalCode].filter(Boolean).join(', ') || 'Damoh, Madhya Pradesh'}
-                </p>
-                {gpsAccuracy !== undefined && (
-                  <small className="gps-accuracy-note">Accuracy: ±{Math.round(gpsAccuracy)} meters</small>
-                )}
-              </div>
-              <button
-                type="button"
-                className="button button-outline button-small"
-                onClick={() => setShowMap(!showMap)}
-              >
-                {showMap ? 'Hide Map' : '🗺️ Adjust Pin on Map'}
-              </button>
-            </div>
-          )}
-
-          {showMap && (
-            <div className="address-map-section" style={{ marginTop: '12px' }}>
-              <AddressMap latitude={values.latitude} longitude={values.longitude} onMove={movePin} />
-              <div className="button-row" style={{ marginTop: '8px' }}>
-                <span className="address-coordinates">
-                  Pin: {values.latitude?.toFixed(5)}, {values.longitude?.toFixed(5)}
-                </span>
-                <button type="button" className="text-button" onClick={() => setShowMap(false)}>
-                  Done Pinning
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="form-grid" style={{ marginTop: '12px' }}>
-            <label className="field">
-              <span>Flat / House / Door Number *</span>
-              <input
-                required
-                maxLength={100}
-                placeholder="e.g. Flat 204, Radha Kunj, House No. 12"
-                value={values.houseNumber ?? ''}
-                onChange={(event) => setField('houseNumber', event.target.value)}
-              />
-              {fieldErrors.address && <small className="address-error">{fieldErrors.address}</small>}
-            </label>
-
-            <label className="field">
-              <span>Street / Road / Colony</span>
-              <input
-                maxLength={150}
-                placeholder="e.g. Near Circuit House Road"
-                value={values.street ?? ''}
-                onChange={(event) => setField('street', event.target.value)}
-              />
-            </label>
-          </div>
-        </section>
-      )}
-
-      {/* OPTION B: MANUAL ENTRY FLOW */}
-      {entryMode === 'manual' && (
-        <section className="address-section-card manual-flow-card">
-          <div className="address-section-header">
-            <h4 className="address-section-title">
-              <span>🏠</span> House & Street Address
-            </h4>
-            <span className="service-status-pill">✓ Damoh 470661 · Free Delivery</span>
-          </div>
-
-          <div className="popular-areas-wrap" style={{ marginTop: 0, paddingTop: 0, borderTop: 0 }}>
-            <span className="popular-areas-label">Quick select your Damoh neighborhood:</span>
-            <div className="popular-areas-list">
-              {POPULAR_DAMOH_AREAS.map((areaName) => {
-                const isSelected = values.area === areaName;
-                return (
-                  <button
-                    key={areaName}
-                    type="button"
-                    className={`area-quick-chip ${isSelected ? 'selected' : ''}`}
-                    onClick={() => setField('area', isSelected ? '' : areaName)}
-                  >
-                    {isSelected ? '✓ ' : '+ '}{areaName}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="form-grid" style={{ marginTop: '14px' }}>
-            <label className="field">
-              <span>Flat / House / Building No. *</span>
-              <input
-                autoComplete="address-line1"
-                required
-                maxLength={100}
-                placeholder="e.g. House No. 24, Flat 3B, Ward 12"
-                value={values.houseNumber ?? ''}
-                onChange={(event) => setField('houseNumber', event.target.value)}
-              />
-              {fieldErrors.address && <small className="address-error">{fieldErrors.address}</small>}
-            </label>
-
-            <label className="field">
-              <span>Street / Road / Colony</span>
-              <input
-                maxLength={150}
-                placeholder="e.g. Station Road, Civil Ward"
-                value={values.street ?? ''}
-                onChange={(event) => setField('street', event.target.value)}
-              />
-            </label>
-
-            <label className="field">
-              <span>Area / Locality / Mohalla *</span>
-              <input
-                autoComplete="address-level3"
-                required
-                maxLength={100}
-                placeholder="e.g. Civil Lines, Ghanta Ghar"
-                value={values.area ?? ''}
-                onChange={(event) => setField('area', event.target.value)}
-              />
-            </label>
-
-            <label className="field">
-              <span>Prominent Landmark (Optional)</span>
-              <input
-                maxLength={150}
-                placeholder="e.g. Opposite District Hospital, Near Jain Mandir"
-                value={values.landmark ?? ''}
-                onChange={(event) => setField('landmark', event.target.value)}
-              />
-            </label>
-          </div>
-
-          <div className="region-summary-wrap" style={{ marginTop: '10px' }}>
-            <div className="region-summary-strip">
-              <span className="region-summary-icon">🏛️</span>
-              <div className="region-summary-text">
-                <strong>{values.villageOrCity || values.city || 'Damoh'}, {values.district || 'Damoh'}, {values.state || 'Madhya Pradesh'}</strong>
-                <span>PIN Code: <b>{values.postalCode || '470661'}</b></span>
-              </div>
-              <button
-                type="button"
-                className="address-advanced-toggle"
-                onClick={() => setShowAdvancedRegion((prev) => !prev)}
-              >
-                ⚙️ {showAdvancedRegion ? 'Hide Region Settings' : 'Edit Region / PIN'}
-              </button>
-            </div>
-
-            {showAdvancedRegion && (
-              <div className="form-grid advanced-region-fields" style={{ marginTop: '10px' }}>
-                <label className="field">
-                  <span>Village / Town / City *</span>
-                  <input
-                    required
-                    maxLength={100}
-                    value={values.villageOrCity ?? values.city}
-                    onChange={(event) => {
-                      setField('villageOrCity', event.target.value);
-                      setField('city', event.target.value);
-                    }}
-                  />
-                  {fieldErrors.villageOrCity && <small className="address-error">{fieldErrors.villageOrCity}</small>}
-                </label>
-
-                <label className="field">
-                  <span>District</span>
-                  <input
-                    maxLength={100}
-                    value={values.district ?? ''}
-                    onChange={(event) => setField('district', event.target.value)}
-                  />
-                </label>
-
-                <label className="field">
-                  <span>State *</span>
-                  <input
-                    required
-                    maxLength={100}
-                    value={values.state}
-                    onChange={(event) => setField('state', event.target.value)}
-                  />
-                  {fieldErrors.state && <small className="address-error">{fieldErrors.state}</small>}
-                </label>
-
-                <label className="field">
-                  <span>6-Digit PIN Code *</span>
-                  <input
-                    inputMode="numeric"
-                    required
-                    pattern="[0-9]{6}"
-                    maxLength={6}
-                    value={values.postalCode}
-                    onChange={(event) => setField('postalCode', event.target.value.replace(/\D/g, '').slice(0, 6))}
-                  />
-                  {fieldErrors.postalCode && <small className="address-error">{fieldErrors.postalCode}</small>}
-                </label>
-              </div>
-            )}
-          </div>
-        </section>
-      )}
-
-      {/* RECIPIENT CONTACT DETAILS */}
-      <section className="address-section-card">
-        <div className="address-section-header">
-          <h4 className="address-section-title">
-            <span>👤</span> Recipient Contact Information
-          </h4>
+    <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-7 shadow-xs">
+      {/* 1. Header with 1-Click GPS button */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+        <div>
+          <h3 className="text-base sm:text-lg font-bold text-slate-900">
+            {initialAddress ? 'Edit Delivery Address' : 'Add a Delivery Address'}
+          </h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Enter your doorstep delivery details for safe order dispatch.
+          </p>
         </div>
 
-        <div className="form-grid">
-          <label className="field">
-            <span>Recipient Full Name *</span>
-            <input
-              autoComplete="name"
-              required
-              maxLength={120}
-              placeholder="e.g. Priya Sharma"
-              aria-invalid={Boolean(fieldErrors.name)}
-              value={values.name}
-              onChange={(event) => setField('name', event.target.value)}
-            />
-            {fieldErrors.name && <small className="address-error">{fieldErrors.name}</small>}
-          </label>
+        <button
+          type="button"
+          onClick={locateMe}
+          disabled={locating}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-900 text-xs font-bold transition-all shadow-2xs shrink-0"
+        >
+          {locating ? (
+            <RefreshCw className="w-3.5 h-3.5 animate-spin text-purple-600" />
+          ) : (
+            <MapPin className="w-3.5 h-3.5 text-purple-600" />
+          )}
+          <span>{locating ? 'Detecting…' : 'Use Current Location'}</span>
+        </button>
+      </div>
 
-          <label className="field">
-            <span>Recipient 10-Digit Mobile Number *</span>
-            <div className="phone-input-group">
-              <span className="phone-prefix-badge">🇮🇳 +91</span>
+      {/* GPS Status Message */}
+      {gpsMessage && (
+        <div className="mt-3 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-medium text-emerald-800 flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>{gpsMessage}</span>
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-3 p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs font-medium text-rose-800 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      <div className="mt-5 space-y-4">
+        {/* ROW 1: RECIPIENT CONTACT (Name & Mobile) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-800 mb-1">
+              Recipient Full Name <span className="text-rose-500">*</span>
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-2.5 text-slate-400">
+                <User className="w-4 h-4" />
+              </span>
               <input
-                autoComplete="tel"
-                inputMode="numeric"
+                type="text"
+                required
+                maxLength={100}
+                placeholder="e.g. Rahul Sharma"
+                value={values.name}
+                onChange={(e) => setField('name', e.target.value)}
+                className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#1E1B4B]"
+              />
+            </div>
+            {fieldErrors.name && <p className="text-rose-600 text-[11px] mt-0.5">{fieldErrors.name}</p>}
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-800 mb-1">
+              10-Digit Mobile Number <span className="text-rose-500">*</span>
+            </label>
+            <div className="flex">
+              <span className="px-2.5 py-2 rounded-l-lg border-y border-l border-slate-300 bg-slate-50 text-xs font-bold text-slate-700 flex items-center gap-1 shrink-0">
+                <Phone className="w-3.5 h-3.5 text-slate-500" />
+                <span>+91</span>
+              </span>
+              <input
+                type="tel"
                 required
                 maxLength={10}
                 placeholder="9876543210"
-                aria-invalid={Boolean(fieldErrors.phone)}
                 value={rawPhoneDigits}
-                onChange={(event) => {
-                  const cleaned = event.target.value.replace(/\D/g, '').slice(0, 10);
+                onChange={(e) => {
+                  const cleaned = e.target.value.replace(/\D/g, '').slice(0, 10);
                   setField('phone', `+91${cleaned}`);
                 }}
+                className="w-full px-3 py-2 rounded-r-lg border border-slate-300 text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#1E1B4B]"
               />
             </div>
-            {fieldErrors.phone ? (
-              <small className="address-error">{fieldErrors.phone}</small>
-            ) : (
-              <small className="field-hint">Indian 10-digit number for SMS dispatch updates</small>
-            )}
-          </label>
-        </div>
-      </section>
-
-      {/* ADDRESS LABEL & PREFERENCES */}
-      <section className="address-section-card">
-        <div className="address-section-header">
-          <h4 className="address-section-title">
-            <span>🏷️</span> Address Label & Preferences
-          </h4>
+            {fieldErrors.phone && <p className="text-rose-600 text-[11px] mt-0.5">{fieldErrors.phone}</p>}
+          </div>
         </div>
 
-        <div className="address-label-selector">
-          <span className="field-subheading">Save Address As:</span>
-          <div className="address-label-pills">
-            {[
-              { key: 'Home', icon: '🏠', text: 'Home' },
-              { key: 'Work', icon: '🏢', text: 'Work' },
-              { key: 'Other', icon: '📍', text: 'Other' },
-            ].map((item) => {
-              const isSelected = (values.label || 'Home') === item.key;
-              return (
+        {/* ROW 2: PINCODE, CITY, STATE */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+          <div>
+            <label className="block text-xs font-bold text-slate-800 mb-1">
+              6-Digit PIN Code <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              required
+              maxLength={6}
+              placeholder="e.g. 470661"
+              value={values.postalCode}
+              onChange={(e) => {
+                const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+                handlePincodeChange(val);
+              }}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#1E1B4B]"
+            />
+            {fieldErrors.postalCode && <p className="text-rose-600 text-[11px] mt-0.5">{fieldErrors.postalCode}</p>}
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-800 mb-1">
+              City / Town <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. Damoh"
+              value={values.city}
+              onChange={(e) => {
+                setField('city', e.target.value);
+                setField('villageOrCity', e.target.value);
+              }}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#1E1B4B]"
+            />
+            {fieldErrors.city && <p className="text-rose-600 text-[11px] mt-0.5">{fieldErrors.city}</p>}
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-800 mb-1">
+              State <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. Madhya Pradesh"
+              value={values.state}
+              onChange={(e) => setField('state', e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#1E1B4B]"
+            />
+            {fieldErrors.state && <p className="text-rose-600 text-[11px] mt-0.5">{fieldErrors.state}</p>}
+          </div>
+        </div>
+
+        {/* ROW 3: FLAT/HOUSE NO & STREET/AREA */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+          <div>
+            <label className="block text-xs font-bold text-slate-800 mb-1">
+              Flat, House No., Building, Apartment <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. House No. 24, Flat 3B, Ward 12"
+              value={values.houseNumber}
+              onChange={(e) => setField('houseNumber', e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#1E1B4B]"
+            />
+            {fieldErrors.houseNumber && <p className="text-rose-600 text-[11px] mt-0.5">{fieldErrors.houseNumber}</p>}
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-800 mb-1">
+              Area, Street, Sector, Mohalla <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. Civil Lines, Station Road, Purana Bazar"
+              value={values.area || values.street}
+              onChange={(e) => {
+                setField('area', e.target.value);
+                setField('street', e.target.value);
+                setField('locality', e.target.value || 'Damoh');
+              }}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#1E1B4B]"
+            />
+            {fieldErrors.street && <p className="text-rose-600 text-[11px] mt-0.5">{fieldErrors.street}</p>}
+          </div>
+        </div>
+
+        {/* ROW 4: LANDMARK & DELIVERY INSTRUCTIONS */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+          <div>
+            <label className="block text-xs font-bold text-slate-800 mb-1">
+              Prominent Landmark (Optional)
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. Near Ghanta Ghar, Opposite District Hospital"
+              value={values.landmark}
+              onChange={(e) => setField('landmark', e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#1E1B4B]"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-800 mb-1">
+              Delivery Instructions (Optional)
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. Call upon arrival, leave with security guard"
+              value={values.deliveryInstructions}
+              onChange={(e) => setField('deliveryInstructions', e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#1E1B4B]"
+            />
+          </div>
+        </div>
+
+        {/* ROW 5: ADDRESS LABEL & PRIMARY TOGGLE */}
+        <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-700">Save As:</span>
+            <div className="flex gap-1.5">
+              {[
+                { key: 'Home', icon: <Home className="w-3.5 h-3.5" />, label: 'Home' },
+                { key: 'Work', icon: <Building2 className="w-3.5 h-3.5" />, label: 'Work' },
+                { key: 'Other', icon: <MapPin className="w-3.5 h-3.5" />, label: 'Other' },
+              ].map((item) => (
                 <button
                   key={item.key}
                   type="button"
-                  className={`label-pill ${isSelected ? 'selected' : ''}`}
                   onClick={() => setField('label', item.key)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
+                    values.label === item.key
+                      ? 'bg-[#1E1B4B] text-white shadow-2xs'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
                 >
-                  <span className="label-pill-icon">{item.icon}</span>
-                  <span>{item.text}</span>
-                  {isSelected && <span className="label-pill-check">✓</span>}
+                  {item.icon}
+                  <span>{item.label}</span>
                 </button>
-              );
-            })}
+              ))}
+            </div>
+            {values.label === 'Other' && (
+              <input
+                type="text"
+                placeholder="Label name (e.g. Mom's House)"
+                value={customLabel}
+                onChange={(e) => setCustomLabel(e.target.value)}
+                className="px-2.5 py-1 rounded-lg border border-slate-300 text-xs text-slate-900 w-36"
+              />
+            )}
           </div>
 
-          {values.label === 'Other' && (
+          <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
             <input
-              type="text"
-              placeholder="Give this address a label (e.g. Grandma's, Farmhouse)"
-              value={customLabel}
-              onChange={(e) => setCustomLabel(e.target.value)}
-              className="custom-label-input"
-              maxLength={40}
+              type="checkbox"
+              checked={Boolean(values.isDefault)}
+              onChange={(e) => setField('isDefault', e.target.checked)}
+              className="rounded border-slate-300 text-[#1E1B4B] focus:ring-[#1E1B4B]"
             />
-          )}
+            <span>Make this my default delivery address</span>
+          </label>
         </div>
 
-        <div className="delivery-instructions-section">
-          <span className="field-subheading">Delivery Instructions (Optional):</span>
-          <div className="quick-instructions-list">
-            {QUICK_INSTRUCTIONS.map((instruction) => {
-              const current = values.deliveryInstructions || '';
-              const isSelected = current.includes(instruction);
-              return (
-                <button
-                  key={instruction}
-                  type="button"
-                  className={`instruction-quick-chip ${isSelected ? 'selected' : ''}`}
-                  onClick={() => {
-                    if (isSelected) {
-                      const updated = current
-                        .replace(instruction, '')
-                        .replace(/,\s*,/g, ',')
-                        .replace(/^,\s*|\s*,$/g, '')
-                        .trim();
-                      setField('deliveryInstructions', updated);
-                    } else {
-                      const updated = current ? `${current}, ${instruction}` : instruction;
-                      setField('deliveryInstructions', updated);
-                    }
-                  }}
-                >
-                  {isSelected ? '✓ ' : '+ '}{instruction}
-                </button>
-              );
-            })}
-          </div>
-
-          <textarea
-            rows={2}
-            maxLength={500}
-            placeholder="e.g. Call before arrival, leave with security guard..."
-            value={values.deliveryInstructions ?? ''}
-            onChange={(e) => setField('deliveryInstructions', e.target.value)}
-            className="instructions-textarea"
-          />
+        {/* ROW 6: ACTIONS */}
+        <div className="pt-4 border-t border-slate-100 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void handleSubmit()}
+            disabled={saving}
+            className="px-5 py-2.5 rounded-xl bg-[#1E1B4B] hover:bg-[#2e2a6d] text-white text-xs font-bold shadow-sm transition-all flex items-center gap-2 cursor-pointer"
+          >
+            {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5 text-[#A3E635]" />}
+            <span>{saving ? 'Saving Address…' : 'Save Address'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
         </div>
-
-        <label className="address-default-toggle">
-          <input
-            type="checkbox"
-            checked={Boolean(values.isDefault)}
-            onChange={(event) => setField('isDefault', event.target.checked)}
-          />
-          <span className="default-toggle-text">
-            <strong>Make this my primary delivery address</strong>
-            <small>Automatically preselected during 1-click checkout</small>
-          </span>
-        </label>
-      </section>
-
-      {error && <p className="address-error" role="alert">{error}</p>}
-
-      <div className="address-form-actions">
-        <button className="button" type="submit">
-          Review & Save Address →
-        </button>
-        <button type="button" className="text-button" onClick={onCancel}>
-          Cancel
-        </button>
       </div>
-    </form>
+    </div>
   );
 }
 
@@ -963,7 +625,7 @@ export function AddressBook({
       await onChanged();
       onSelect?.(address);
     } catch (cause) {
-      setActionError(cause instanceof Error ? cause.message : 'Could not update the default address.');
+      setActionError(cause instanceof Error ? cause.message : 'Could not update default address.');
     }
   };
 
@@ -974,7 +636,7 @@ export function AddressBook({
       setPendingDelete('');
       await onChanged();
     } catch (cause) {
-      setActionError(cause instanceof Error ? cause.message : 'Could not delete the address.');
+      setActionError(cause instanceof Error ? cause.message : 'Could not delete address.');
     }
   };
 
@@ -992,107 +654,137 @@ export function AddressBook({
   }
 
   return (
-    <section className="address-book">
-      {addresses.length === 0 && (
-        <div className="address-empty-card">
-          <span className="address-empty-icon" aria-hidden="true">📍</span>
-          <h4>No delivery address added yet</h4>
-          <p>Add your home or work address in Damoh to enjoy direct delivery from local rural women's SHGs.</p>
+    <div className="space-y-4">
+      {actionError && (
+        <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold text-rose-800">
+          {actionError}
         </div>
       )}
 
-      {actionError && <p className="address-error" role="alert">{actionError}</p>}
-
-      <div className="address-book-list">
+      {/* List of Saved Addresses */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
         {addresses.map((address) => {
           const id = address.id ?? address._id ?? '';
-          const selectedAddress = id === selected;
-          const icon = address.label === 'Work' ? '🏢' : address.label === 'Home' ? '🏠' : '📍';
+          const isSelected = id === selected;
+          const isHome = (address.label || '').toLowerCase().includes('home');
+          const isWork = (address.label || '').toLowerCase().includes('work');
 
           return (
-            <article className={`saved-address-card-v2 ${selectedAddress ? 'selected' : ''}`} key={id}>
-              <div className="saved-address-card-top">
-                <div className="saved-address-title-group">
-                  {onSelect && (
-                    <label className="saved-address-radio">
-                      <input
-                        type="radio"
-                        name="checkout-address"
-                        checked={selectedAddress}
-                        onChange={() => onSelect(address)}
-                      />
-                      <span className="sr-only">Use this delivery address</span>
-                    </label>
-                  )}
-                  <span className="saved-address-type-badge">
-                    {icon} {address.label || 'Address'}
-                  </span>
-                  {address.isDefault && <span className="default-address-badge">⭐ Default</span>}
-                  {address.locality && <span className="locality-tag">📍 {address.locality}</span>}
-                </div>
-
-                <div className="saved-address-actions">
-                  <button type="button" className="text-button" onClick={() => setEditing(address)}>
-                    ✏️ Edit
-                  </button>
-                  {!address.isDefault && (
-                    <button type="button" className="text-button" onClick={() => void setDefault(id)}>
-                      ⭐ Set Default
-                    </button>
-                  )}
-                  {pendingDelete === id ? (
-                    <span className="delete-confirm-group">
-                      <span className="danger-text">Delete?</span>
-                      <button type="button" className="text-button danger-text" onClick={() => void deleteAddress(id)}>
-                        Yes
-                      </button>
-                      <button type="button" className="text-button" onClick={() => setPendingDelete('')}>
-                        Cancel
-                      </button>
+            <div
+              key={id}
+              onClick={() => onSelect?.(address)}
+              className={`p-4 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
+                isSelected
+                  ? 'border-[#1E1B4B] bg-purple-50/20 shadow-xs'
+                  : 'border-slate-200 hover:border-slate-300 bg-white'
+              }`}
+            >
+              <div>
+                {/* Top Badge & Radio */}
+                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="selected_delivery_address"
+                      checked={isSelected}
+                      onChange={() => onSelect?.(address)}
+                      className="text-[#1E1B4B] focus:ring-[#1E1B4B]"
+                    />
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-800 text-[11px] font-bold">
+                      {isHome ? <Home className="w-3 h-3 text-purple-700" /> : isWork ? <Building2 className="w-3 h-3 text-blue-700" /> : <MapPin className="w-3 h-3 text-emerald-700" />}
+                      <span>{address.label || 'Home'}</span>
                     </span>
-                  ) : (
-                    <button type="button" className="text-button danger-text" onClick={() => setPendingDelete(id)}>
-                      🗑️ Delete
+                    {address.isDefault && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-800">
+                        Default
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 text-xs" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      onClick={() => setEditing(address)}
+                      className="font-bold text-purple-700 hover:text-purple-900"
+                    >
+                      Edit
                     </button>
+                    {!address.isDefault && (
+                      <button
+                        type="button"
+                        onClick={() => void setDefault(id)}
+                        className="text-slate-500 hover:text-slate-800"
+                      >
+                        Set Default
+                      </button>
+                    )}
+                    {pendingDelete === id ? (
+                      <span className="flex items-center gap-1 font-bold text-rose-600">
+                        <span>Delete?</span>
+                        <button type="button" onClick={() => void deleteAddress(id)} className="underline">Yes</button>
+                        <button type="button" onClick={() => setPendingDelete('')} className="text-slate-400">No</button>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setPendingDelete(id)}
+                        className="text-slate-400 hover:text-rose-600 p-0.5"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Recipient details */}
+                <div className="mt-2.5">
+                  <div className="text-xs font-bold text-slate-900">
+                    {address.name} <span className="text-slate-500 font-normal">({address.phone})</span>
+                  </div>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    {formatAddress(address)}
+                  </p>
+                  {address.deliveryInstructions && (
+                    <p className="text-[11px] text-slate-500 italic mt-1 bg-slate-50 px-2 py-1 rounded">
+                      Note: "{address.deliveryInstructions}"
+                    </p>
                   )}
                 </div>
               </div>
-
-              <div className="saved-address-card-content">
-                <div className="saved-address-primary-line">
-                  {[address.houseNumber, address.street].filter(Boolean).join(', ') || address.addressLine1}
-                </div>
-                <div className="saved-address-secondary-line">
-                  {[
-                    address.area,
-                    address.landmark ? `Near ${address.landmark}` : null,
-                    address.villageOrCity || address.city,
-                    address.district,
-                    address.state,
-                  ].filter(Boolean).join(', ')}{address.postalCode ? ` — PIN ${address.postalCode}` : ''}
-                </div>
-                <div className="saved-address-contact-line">
-                  <span>👤 {address.name}</span>
-                  <span>📞 {address.phone}</span>
-                </div>
-                {address.deliveryInstructions && (
-                  <div className="saved-address-instructions">
-                    <span>💬</span> <em>"{address.deliveryInstructions}"</em>
-                  </div>
-                )}
-              </div>
-            </article>
+            </div>
           );
         })}
       </div>
 
-      {addresses.length < 10 ? (
-        <button type="button" className="button button-outline add-address-btn" onClick={() => setAdding(true)}>
-          + Add a New Delivery Address
+      {/* Add New Address Button */}
+      {addresses.length < 10 && (
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border-2 border-dashed border-slate-300 hover:border-purple-600 hover:bg-purple-50/30 text-xs font-bold text-slate-800 transition-colors"
+        >
+          <Plus className="w-4 h-4 text-purple-700" />
+          <span>Add a New Delivery Address</span>
         </button>
-      ) : (
-        <p className="address-muted">You have reached the limit of 10 saved addresses.</p>
       )}
-    </section>
+
+      {addresses.length === 0 && !adding && (
+        <div className="p-8 text-center bg-slate-50 rounded-2xl border border-slate-200">
+          <MapPin className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+          <h4 className="text-sm font-bold text-slate-800">No Saved Delivery Address</h4>
+          <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+            Add your doorstep delivery address to complete your checkout and receive your order.
+          </p>
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1E1B4B] text-white text-xs font-bold hover:bg-[#2b2767]"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add Delivery Address</span>
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

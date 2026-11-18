@@ -8,6 +8,7 @@ interface MeeshoSlipModalProps {
   sellerBusinessName?: string;
   sellerAddress?: string;
   sellerPhone?: string;
+  sellerGstin?: string;
 }
 
 // Convert paise to Title Case Indian English words: "Rupees One Thousand One Hundred Forty Only"
@@ -225,6 +226,8 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
   onClose,
   sellerBusinessName,
   sellerAddress,
+  sellerPhone,
+  sellerGstin,
 }) => {
   const ref = order.orderReference || 'OD42981039481';
   const formattedDate = formatBillDate(order.createdAt);
@@ -234,14 +237,29 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
       ref.split('').reduce((acc: number, ch: string) => acc * 31 + ch.charCodeAt(0), 7),
     ) % 9000 + 1000,
   );
-  const invoiceNo = `BOS-${year}-${shortNumericHash}`;
 
   const isCod =
     order.paymentMethod === 'cash' ||
     (order.paymentStatus === 'pending_verification' && order.paymentMethod !== 'upi');
   const paymentModeText = isCod ? 'Cash on Delivery (COD)' : 'Prepaid (Online / UPI)';
 
-  // Seller Details (Unregistered E-Commerce Seller under Notification No. 34/2023-CT)
+  // Determine whether seller is GSTIN Registered or Non-GST Enrolment ID
+  const isGstRegistered = Boolean(
+    order.sellerPickup?.hasGst ||
+    order.sellerPickup?.taxType === 'GSTIN' ||
+    (order.sellerPickup?.gstin && order.sellerPickup.gstin.length === 15) ||
+    (sellerGstin && sellerGstin.length === 15)
+  );
+
+  const documentTitle = isGstRegistered ? 'TAX INVOICE' : 'BILL OF SUPPLY';
+  const documentSubtitle = isGstRegistered
+    ? '(Issued under Section 31 of CGST Act, 2017 · Intra-State Supply)'
+    : '(Issued by Non-GST Registered Small Supplier u/s 31(3)(c) & Notification 34/2023-CT)';
+
+  const invoicePrefix = isGstRegistered ? 'TI' : 'BOS';
+  const invoiceNo = `${invoicePrefix}-${year}-${shortNumericHash}`;
+
+  // Seller Details
   const effectiveSellerName =
     sellerBusinessName ||
     order.sellerPickup?.sellerName ||
@@ -250,13 +268,18 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
     sellerAddress ||
     order.sellerPickup?.address ||
     'Station Road, Purana Bazar, Damoh, Madhya Pradesh - 470661';
+
+  const gstin = order.sellerPickup?.gstin || sellerGstin || (isGstRegistered ? '23AAAAA0000A1Z5' : undefined);
   const enrolmentId =
     order.sellerPickup?.enrolmentId ||
-    '23ABCDE1234F1Z9';
+    (!isGstRegistered ? 'ENR-MP-470661-0012' : undefined);
+
+  const sellerTaxIdLabel = isGstRegistered ? 'GSTIN' : 'Enrolment ID';
+  const sellerTaxIdValue = isGstRegistered ? gstin : enrolmentId;
+
   const panNumber =
     order.sellerPickup?.panNumber ||
-    enrolmentId.slice(2, 12) ||
-    'ABCDE1234F';
+    (gstin ? gstin.slice(2, 12) : enrolmentId ? enrolmentId.replace(/[^A-Z0-9]/g, '').slice(0, 10) : 'ABCDE1234F');
 
   // Customer Details (Bill To / Ship To)
   const customerName = order.customerName || order.address?.name || 'Valued Customer';
@@ -284,7 +307,7 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
 
   const cityStatePinLine = `${addr.city || 'Damoh'}, Madhya Pradesh - ${addr.postalCode || '470661'}`;
 
-  // Line Items
+  // Line Items with relative GST / HSN
   const rawItems =
     order.items && order.items.length > 0
       ? order.items
@@ -294,16 +317,40 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
             quantity: 1,
             unitPricePaise: order.subtotalPaise || 75000,
             lineTotalPaise: order.subtotalPaise || 75000,
+            hsnCode: isGstRegistered ? '09024020' : undefined,
+            gstRate: isGstRegistered ? 5 : 0,
           },
         ];
 
   let computedSubtotalPaise = 0;
+  let totalCgstPaise = 0;
+  let totalSgstPaise = 0;
+  let totalTaxablePaise = 0;
+
   const lineRows = rawItems.map((it: any, idx: number) => {
     const qty = it.quantity || 1;
     const lineTotalPaise =
       it.lineTotalPaise || (it.unitPricePaise ? it.unitPricePaise * qty : 75000);
     const unitPricePaise = it.unitPricePaise || Math.round(lineTotalPaise / qty);
     computedSubtotalPaise += lineTotalPaise;
+
+    const hsnCode = it.hsnCode || (isGstRegistered ? '09024020' : 'Exempt (Sec 23)');
+    const gstRate = isGstRegistered ? (it.gstRate ?? 5) : 0;
+
+    let itemCgstPaise = it.cgstPaise ?? 0;
+    let itemSgstPaise = it.sgstPaise ?? 0;
+    let itemTaxablePaise = lineTotalPaise;
+
+    if (isGstRegistered && gstRate > 0) {
+      itemTaxablePaise = Math.round(lineTotalPaise / (1 + gstRate / 100));
+      const totalTax = lineTotalPaise - itemTaxablePaise;
+      itemCgstPaise = Math.round(totalTax / 2);
+      itemSgstPaise = totalTax - itemCgstPaise;
+    }
+
+    totalTaxablePaise += itemTaxablePaise;
+    totalCgstPaise += itemCgstPaise;
+    totalSgstPaise += itemSgstPaise;
 
     const variantText =
       it.variantAttributes && Object.keys(it.variantAttributes).length > 0
@@ -315,15 +362,21 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
     return {
       sNo: `${idx + 1}.`,
       description: `${it.productName}${variantText}`,
+      sku: it.sku || undefined,
+      hsnCode,
+      gstRate,
       qty,
       unitPricePaise,
+      itemTaxablePaise,
+      itemCgstPaise,
+      itemSgstPaise,
       lineTotalPaise,
     };
   });
 
   const subtotalPaise = computedSubtotalPaise;
   const discountPaise = order.discountPaise || 0;
-  const shippingPaise = order.deliveryFeePaise ?? 0;
+  const shippingPaise = order.deliveryFeePaise ?? 1500;
   const grandTotalPaise = order.totalPaise || (subtotalPaise - discountPaise + shippingPaise);
 
   const [scanPreview, setScanPreview] = useState<'qr' | 'barcode' | null>(null);
@@ -334,18 +387,22 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
 
   // Scannable QR Code Payload (human-readable verified receipt when scanned with any phone camera / Google Lens)
   const qrVerificationPayload = [
-    '=== eSAKHI VERIFIED BILL OF SUPPLY ===',
+    `=== eSAKHI VERIFIED ${documentTitle} ===`,
     `Invoice No: ${invoiceNo}`,
     `Order ID: ${ref}`,
     `Date: ${formattedDate}`,
     `Seller: ${effectiveSellerName}`,
-    `Enrolment ID: ${enrolmentId} | PAN: ${panNumber}`,
+    `${sellerTaxIdLabel}: ${sellerTaxIdValue} | PAN: ${panNumber}`,
+    `Tax Regime: ${isGstRegistered ? 'Regular GSTIN Taxpayer (CGST+SGST)' : 'Non-GST Small Supplier (Notification 34/2023-CT)'}`,
     `Place of Supply: Madhya Pradesh (23) [Intra-State]`,
     `Customer: ${customerName}`,
     `Items: ${itemsSummaryText}`,
-    `Grand Total: ${formatInr(grandTotalPaise)} (GST 0% - Exempt u/s 34/2023-CT)`,
+    isGstRegistered
+      ? `Taxable: ${formatInr(totalTaxablePaise)} | CGST: ${formatInr(totalCgstPaise)} | SGST: ${formatInr(totalSgstPaise)} | Delivery: ${formatInr(shippingPaise)}`
+      : `Subtotal: ${formatInr(subtotalPaise)} | GST: 0.00% (Exempt) | Delivery: ${formatInr(shippingPaise)}`,
+    `Grand Total: ${formatInr(grandTotalPaise)}`,
     `Payment: ${paymentModeText}`,
-    'Status: AUTHENTICATED PACKAGE PROOF SLIP',
+    'Status: AUTHENTICATED LEGAL TAX DOCUMENT',
   ].join('\n');
 
   const doubleRule: React.CSSProperties = {
@@ -395,7 +452,7 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
       >
         <div>
           <strong style={{ fontSize: '1rem', color: '#4A0E4E', display: 'block' }}>
-            Bill of Supply · Package Proof Slip
+            {documentTitle} · Package Proof Slip
           </strong>
           <span style={{ fontSize: '0.76rem', color: '#64748b' }}>
             Scan QR / Barcode with phone camera or click them below to preview decoded verification data
@@ -436,7 +493,7 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
               gap: '6px',
             }}
           >
-            🖨️ Print Bill of Supply
+            🖨️ Print {documentTitle}
           </button>
           <button
             type="button"
@@ -599,7 +656,7 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
             />
           </div>
 
-          {/* Center: BILL OF SUPPLY Heading */}
+          {/* Center: BILL OF SUPPLY or TAX INVOICE Heading */}
           <div style={{ textAlign: 'center' }}>
             <div
               style={{
@@ -610,10 +667,10 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
                 fontFamily: 'Arial, Helvetica, sans-serif',
               }}
             >
-              BILL OF SUPPLY
+              {documentTitle}
             </div>
-            <div style={{ fontSize: '11.5px', fontWeight: 700, marginTop: '3px' }}>
-              (Issued by Unregistered E-Commerce Seller - No GST Charged)
+            <div style={{ fontSize: '11px', fontWeight: 700, marginTop: '3px' }}>
+              {documentSubtitle}
             </div>
             <div
               style={{
@@ -661,8 +718,13 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
               <strong>Address:</strong> {effectiveSellerAddress}
             </div>
             <div>
-              <strong>Enrolment ID:</strong> {enrolmentId}
+              <strong>{sellerTaxIdLabel}:</strong> {sellerTaxIdValue}
             </div>
+            {sellerPhone && (
+              <div>
+                <strong>Phone:</strong> {sellerPhone}
+              </div>
+            )}
             <div>
               <strong>State Code:</strong> 23 (Madhya Pradesh)
             </div>
@@ -697,7 +759,7 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
           <div>{cityStatePinLine}</div>
           {customerPhone && <div>Contact: {customerPhone}</div>}
           <div style={{ marginTop: '3px', fontWeight: 800 }}>
-            Place of Supply: Madhya Pradesh (23) — [Intra-State Only]
+            Place of Supply: Madhya Pradesh (23) — [Intra-State Delivery · Damoh]
           </div>
         </div>
 
@@ -710,19 +772,28 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
           style={{
             width: '100%',
             borderCollapse: 'collapse',
-            fontSize: '12.5px',
+            fontSize: '12px',
           }}
         >
           <thead>
             <tr style={{ fontWeight: 900, textAlign: 'left' }}>
-              <th style={{ padding: '4px 6px 6px 0', width: '52px' }}>S.No</th>
+              <th style={{ padding: '4px 6px 6px 0', width: '40px' }}>S.No</th>
               <th style={{ padding: '4px 6px 6px 0' }}>Item Description</th>
-              <th style={{ padding: '4px 6px 6px 0', width: '65px', textAlign: 'center' }}>Qty</th>
-              <th style={{ padding: '4px 6px 6px 0', width: '120px', textAlign: 'right' }}>Unit Price</th>
-              <th style={{ padding: '4px 0 6px 6px', width: '125px', textAlign: 'right' }}>Amount</th>
+              <th style={{ padding: '4px 6px 6px 0', width: '80px' }}>HSN/SAC</th>
+              <th style={{ padding: '4px 6px 6px 0', width: '50px', textAlign: 'center' }}>Qty</th>
+              <th style={{ padding: '4px 6px 6px 0', width: '85px', textAlign: 'right' }}>Unit Price</th>
+              {isGstRegistered ? (
+                <>
+                  <th style={{ padding: '4px 6px 6px 0', width: '75px', textAlign: 'right' }}>CGST</th>
+                  <th style={{ padding: '4px 6px 6px 0', width: '75px', textAlign: 'right' }}>SGST</th>
+                </>
+              ) : (
+                <th style={{ padding: '4px 6px 6px 0', width: '85px', textAlign: 'center' }}>GST (0%)</th>
+              )}
+              <th style={{ padding: '4px 0 6px 6px', width: '95px', textAlign: 'right' }}>Amount</th>
             </tr>
             <tr>
-              <td colSpan={5} style={{ padding: 0 }}>
+              <td colSpan={isGstRegistered ? 8 : 7} style={{ padding: 0 }}>
                 <div style={{ borderTop: '1.5px dashed #000000', marginBottom: '6px' }} />
               </td>
             </tr>
@@ -732,7 +803,15 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
               <tr key={row.sNo}>
                 <td style={{ padding: '4px 6px 4px 0', verticalAlign: 'top' }}>{row.sNo}</td>
                 <td style={{ padding: '4px 6px 4px 0', fontWeight: 700, verticalAlign: 'top' }}>
-                  {row.description}
+                  <div>{row.description}</div>
+                  {row.sku && (
+                    <div style={{ fontSize: '10px', fontFamily: 'monospace', fontWeight: 600, color: '#334155' }}>
+                      SKU: {row.sku}
+                    </div>
+                  )}
+                </td>
+                <td style={{ padding: '4px 6px 4px 0', fontFamily: 'monospace', fontSize: '11px', verticalAlign: 'top' }}>
+                  {row.hsnCode}
                 </td>
                 <td style={{ padding: '4px 6px 4px 0', textAlign: 'center', verticalAlign: 'top' }}>
                   {row.qty}
@@ -740,6 +819,20 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
                 <td style={{ padding: '4px 6px 4px 0', textAlign: 'right', verticalAlign: 'top' }}>
                   {formatInr(row.unitPricePaise)}
                 </td>
+                {isGstRegistered ? (
+                  <>
+                    <td style={{ padding: '4px 6px 4px 0', textAlign: 'right', fontSize: '11px', verticalAlign: 'top' }}>
+                      {row.gstRate > 0 ? `${(row.gstRate / 2).toFixed(1)}% (${formatInr(row.itemCgstPaise)})` : '₹0.00'}
+                    </td>
+                    <td style={{ padding: '4px 6px 4px 0', textAlign: 'right', fontSize: '11px', verticalAlign: 'top' }}>
+                      {row.gstRate > 0 ? `${(row.gstRate / 2).toFixed(1)}% (${formatInr(row.itemSgstPaise)})` : '₹0.00'}
+                    </td>
+                  </>
+                ) : (
+                  <td style={{ padding: '4px 6px 4px 0', textAlign: 'center', fontSize: '11px', color: '#166534', fontWeight: 700, verticalAlign: 'top' }}>
+                    0.0% (Exempt)
+                  </td>
+                )}
                 <td style={{ padding: '4px 0 4px 6px', textAlign: 'right', fontWeight: 700, verticalAlign: 'top' }}>
                   {formatInr(row.lineTotalPaise)}
                 </td>
@@ -751,26 +844,61 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
         <div style={dashedRule} />
 
         {/* ================================================================== */}
-        {/* SUBTOTAL, DISCOUNT, SHIPPING, GST (0%), GRAND TOTAL                */}
+        {/* SUBTOTAL, DISCOUNT, SHIPPING, GST, GRAND TOTAL                     */}
         {/* ================================================================== */}
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <div style={{ width: '280px' }}>
+          <div style={{ width: '310px' }}>
+            {isGstRegistered ? (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                  <span>Taxable Goods Value:</span>
+                  <strong>{formatInr(totalTaxablePaise)}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                  <span>CGST (Intra-State MP):</span>
+                  <span>{formatInr(totalCgstPaise)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                  <span>SGST (Intra-State MP):</span>
+                  <span>{formatInr(totalSgstPaise)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', color: '#64748b', fontSize: '11.5px' }}>
+                  <span>IGST (Inter-State):</span>
+                  <span>₹0.00 (N/A)</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+                  <span>Goods Subtotal:</span>
+                  <strong>{formatInr(subtotalPaise)}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', color: '#166534' }}>
+                  <span>CGST (0% - Non-GST Enrolment):</span>
+                  <span>₹0.00</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', color: '#166534' }}>
+                  <span>SGST (0% - Non-GST Enrolment):</span>
+                  <span>₹0.00</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', color: '#64748b', fontSize: '11.5px' }}>
+                  <span>IGST (Inter-State):</span>
+                  <span>₹0.00 (N/A)</span>
+                </div>
+              </>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-              <span>Subtotal:</span>
-              <strong>{formatInr(subtotalPaise)}</strong>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-              <span>Discount:</span>
-              <span>-{formatInr(discountPaise)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-              <span>Shipping:</span>
+              <span>Delivery Charge (Flat):</span>
               <span>{formatInr(shippingPaise)}</span>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-              <span>GST (0%):</span>
-              <span>₹0.00</span>
-            </div>
+
+            {discountPaise > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', color: '#166534' }}>
+                <span>Promotional Discount:</span>
+                <span>-{formatInr(discountPaise)}</span>
+              </div>
+            )}
 
             <div style={dashedRule} />
 
@@ -799,9 +927,11 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
         </div>
 
         <div style={{ marginTop: '12px' }}>
-          <div style={{ fontWeight: 800 }}>Declaration:</div>
+          <div style={{ fontWeight: 800 }}>Statutory Declaration:</div>
           <div style={{ fontStyle: 'italic', marginTop: '2px', lineHeight: 1.45 }}>
-            &ldquo;Certified that the seller is exempt from GST registration under Notification No. 34/2023-CT and supplies goods strictly within Madhya Pradesh. No GST has been charged on this invoice.&rdquo;
+            {isGstRegistered
+              ? '“Certified that the particulars given above are true and correct, and the amount indicated represents the price actually charged. Goods supplied strictly within Madhya Pradesh (Intra-State). eSakhi Marketplace Technologies Pvt. Ltd. collects and deposits GST TCS under Section 52 via monthly GSTR-8 into the seller’s GST Cash Ledger.”'
+              : '“Certified that the seller is exempt from GST registration under Notification No. 34/2023-CT and supplies goods strictly within Madhya Pradesh through an e-commerce operator. No GST has been charged on this Bill of Supply. Section 52 GST TCS does not apply.”'}
           </div>
         </div>
 

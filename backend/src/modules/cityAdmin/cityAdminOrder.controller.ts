@@ -273,6 +273,11 @@ export const assignCityAdminDeliveryPartner: RequestHandler = async (req, res) =
         city: resolvedPickup.city,
         latitude: resolvedPickup.latitude,
         longitude: resolvedPickup.longitude,
+        ...(resolvedPickup.hasGst !== undefined ? { hasGst: resolvedPickup.hasGst } : {}),
+        ...(resolvedPickup.taxType ? { taxType: resolvedPickup.taxType } : {}),
+        ...(resolvedPickup.gstin ? { gstin: resolvedPickup.gstin } : {}),
+        ...(resolvedPickup.enrolmentId ? { enrolmentId: resolvedPickup.enrolmentId } : {}),
+        ...(resolvedPickup.panNumber ? { panNumber: resolvedPickup.panNumber } : {}),
       };
 
       const partnerLat = partner.currentLocation?.latitude ?? 23.8415;

@@ -56,6 +56,51 @@ export const sellerProfileUpdateSchema = z.object({
   representative: z.string().trim().min(2).max(120),
   registeredAddress: z.string().trim().min(5).max(500),
   storeDescription: z.string().trim().max(1000).default(''),
+  taxDetails: z.object({
+    hasGst: z.boolean().optional(),
+    gstin: z.string().trim().optional(),
+    hasEnrolmentId: z.boolean().optional(),
+    enrolmentId: z.string().trim().optional(),
+    panNumber: z.string().trim().optional(),
+    panCardUrl: z.string().trim().optional(),
+    gstCertificateUrl: z.string().trim().optional(),
+    businessName: z.string().trim().optional(),
+    email: z.string().trim().optional(),
+  }).optional(),
+  pickupAddress: z.object({
+    streetAddress: z.string().trim().optional(),
+    locality: z.string().trim().optional(),
+    city: z.string().trim().optional(),
+    state: z.string().trim().optional(),
+    pincode: z.string().trim().optional(),
+    landmark: z.string().trim().optional(),
+    latitude: z.number().optional(),
+    longitude: z.number().optional(),
+    storefrontPhotoUrl: z.string().trim().optional(),
+  }).optional(),
+  bankDetails: z.object({
+    accountHolderName: z.string().trim().optional(),
+    bankName: z.string().trim().optional(),
+    accountNumber: z.string().trim().optional(),
+    ifscCode: z.string().trim().optional(),
+    accountType: z.enum(['SAVINGS', 'CURRENT']).optional(),
+  }).optional(),
+  supplierDetails: z.object({
+    category: z.enum(['HANDICRAFT', 'TEXTILES', 'FOOD', 'HERBAL']).optional(),
+    fssaiNumber: z.string().trim().optional(),
+    numberOfMembers: z.number().int().min(1).max(500).optional(),
+  }).optional(),
+  operatingHours: z.object({
+    openTime: z.string().trim().optional(),
+    closeTime: z.string().trim().optional(),
+    splitShift: z.object({
+      enabled: z.boolean().optional(),
+      breakStart: z.string().trim().optional(),
+      breakEnd: z.string().trim().optional(),
+    }).optional(),
+    weeklyOffDays: z.array(z.string().trim()).optional(),
+    isClosedOverride: z.boolean().optional(),
+  }).optional(),
 }).strict();
 
 export const sellerInventoryHistoryQuerySchema = z.object({

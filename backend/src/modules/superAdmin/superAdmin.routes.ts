@@ -39,6 +39,7 @@ superAdminRoutes.get('/settlements', getSuperAdminSettlementsLedger);
 superAdminRoutes.get('/settlements/city-admins', getSuperAdminCityAdminSettlements);
 superAdminRoutes.get('/settlements/sellers', getSuperAdminSellerSettlements);
 superAdminRoutes.get('/settlements/delivery-partners', getSuperAdminPartnerSettlements);
+superAdminRoutes.post('/settlements/disburse', recordSuperAdminDisbursement);
 superAdminRoutes.post('/payouts/record-disbursement', recordSuperAdminDisbursement);
 superAdminRoutes.get('/support-tickets', listSuperAdminSupportTickets);
 superAdminRoutes.patch('/support-tickets/:ticketId/resolve', resolveSuperAdminSupportTicket);
