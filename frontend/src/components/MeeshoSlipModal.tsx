@@ -135,13 +135,25 @@ function SvgBarcode({
 
   return (
     <div
-      style={{ display: 'inline-block', textAlign: 'center', cursor: onInspect ? 'pointer' : 'default' }}
+      style={{
+        display: 'inline-block',
+        textAlign: 'center',
+        maxWidth: '100%',
+        cursor: onInspect ? 'pointer' : 'default',
+      }}
       onClick={onInspect}
       title={`Click or scan with a Code-128 barcode scanner: ${clean}`}
     >
       <svg
         viewBox={`0 0 ${totalModules} ${height}`}
-        style={{ width: `${width}px`, height: `${height}px`, display: 'block', background: '#ffffff' }}
+        style={{
+          width: '100%',
+          maxWidth: `${width}px`,
+          height: `${height}px`,
+          display: 'block',
+          margin: '0 auto',
+          background: '#ffffff',
+        }}
         preserveAspectRatio="none"
         shapeRendering="crispEdges"
       >
@@ -429,7 +441,7 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        padding: '1.25rem 0.75rem',
+        padding: '0.75rem 0.5rem',
       }}
       onClick={onClose}
     >
@@ -441,10 +453,12 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
           maxWidth: '760px',
           background: '#ffffff',
           borderRadius: '12px 12px 0 0',
-          padding: '0.75rem 1.25rem',
+          padding: '0.75rem 1rem',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '8px',
           borderBottom: '2px solid #e2e8f0',
           boxSizing: 'border-box',
         }}
@@ -612,6 +626,7 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
       {/* Printable Bill of Supply Sheet */}
       <div
         id="meesho-printable-sheet"
+        className="meesho-sheet"
         style={{
           width: '100%',
           maxWidth: '760px',
@@ -634,6 +649,7 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
         <div style={doubleRule} />
 
         <div
+          className="meesho-header-grid"
           style={{
             display: 'grid',
             gridTemplateColumns: '215px 1fr 110px',
@@ -702,6 +718,7 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
         {/* SELLER DETAILS (LEFT) & INVOICE / ORDER METADATA (RIGHT)           */}
         {/* ================================================================== */}
         <div
+          className="meesho-address-grid"
           style={{
             display: 'grid',
             gridTemplateColumns: '1.15fr 1fr',
@@ -768,85 +785,88 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
         {/* ================================================================== */}
         <div style={dashedRule} />
 
-        <table
-          style={{
-            width: '100%',
-            borderCollapse: 'collapse',
-            fontSize: '12px',
-          }}
-        >
-          <thead>
-            <tr style={{ fontWeight: 900, textAlign: 'left' }}>
-              <th style={{ padding: '4px 6px 6px 0', width: '40px' }}>S.No</th>
-              <th style={{ padding: '4px 6px 6px 0' }}>Item Description</th>
-              <th style={{ padding: '4px 6px 6px 0', width: '80px' }}>HSN/SAC</th>
-              <th style={{ padding: '4px 6px 6px 0', width: '50px', textAlign: 'center' }}>Qty</th>
-              <th style={{ padding: '4px 6px 6px 0', width: '85px', textAlign: 'right' }}>Unit Price</th>
-              {isGstRegistered ? (
-                <>
-                  <th style={{ padding: '4px 6px 6px 0', width: '75px', textAlign: 'right' }}>CGST</th>
-                  <th style={{ padding: '4px 6px 6px 0', width: '75px', textAlign: 'right' }}>SGST</th>
-                </>
-              ) : (
-                <th style={{ padding: '4px 6px 6px 0', width: '85px', textAlign: 'center' }}>GST (0%)</th>
-              )}
-              <th style={{ padding: '4px 0 6px 6px', width: '95px', textAlign: 'right' }}>Amount</th>
-            </tr>
-            <tr>
-              <td colSpan={isGstRegistered ? 8 : 7} style={{ padding: 0 }}>
-                <div style={{ borderTop: '1.5px dashed #000000', marginBottom: '6px' }} />
-              </td>
-            </tr>
-          </thead>
-          <tbody>
-            {lineRows.map((row: any) => (
-              <tr key={row.sNo}>
-                <td style={{ padding: '4px 6px 4px 0', verticalAlign: 'top' }}>{row.sNo}</td>
-                <td style={{ padding: '4px 6px 4px 0', fontWeight: 700, verticalAlign: 'top' }}>
-                  <div>{row.description}</div>
-                  {row.sku && (
-                    <div style={{ fontSize: '10px', fontFamily: 'monospace', fontWeight: 600, color: '#334155' }}>
-                      SKU: {row.sku}
-                    </div>
-                  )}
-                </td>
-                <td style={{ padding: '4px 6px 4px 0', fontFamily: 'monospace', fontSize: '11px', verticalAlign: 'top' }}>
-                  {row.hsnCode}
-                </td>
-                <td style={{ padding: '4px 6px 4px 0', textAlign: 'center', verticalAlign: 'top' }}>
-                  {row.qty}
-                </td>
-                <td style={{ padding: '4px 6px 4px 0', textAlign: 'right', verticalAlign: 'top' }}>
-                  {formatInr(row.unitPricePaise)}
-                </td>
+        <div className="meesho-table-scroll" style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          <table
+            style={{
+              width: '100%',
+              minWidth: '540px',
+              borderCollapse: 'collapse',
+              fontSize: '12px',
+            }}
+          >
+            <thead>
+              <tr style={{ fontWeight: 900, textAlign: 'left' }}>
+                <th style={{ padding: '4px 6px 6px 0', width: '40px' }}>S.No</th>
+                <th style={{ padding: '4px 6px 6px 0' }}>Item Description</th>
+                <th style={{ padding: '4px 6px 6px 0', width: '80px' }}>HSN/SAC</th>
+                <th style={{ padding: '4px 6px 6px 0', width: '50px', textAlign: 'center' }}>Qty</th>
+                <th style={{ padding: '4px 6px 6px 0', width: '85px', textAlign: 'right' }}>Unit Price</th>
                 {isGstRegistered ? (
                   <>
-                    <td style={{ padding: '4px 6px 4px 0', textAlign: 'right', fontSize: '11px', verticalAlign: 'top' }}>
-                      {row.gstRate > 0 ? `${(row.gstRate / 2).toFixed(1)}% (${formatInr(row.itemCgstPaise)})` : '₹0.00'}
-                    </td>
-                    <td style={{ padding: '4px 6px 4px 0', textAlign: 'right', fontSize: '11px', verticalAlign: 'top' }}>
-                      {row.gstRate > 0 ? `${(row.gstRate / 2).toFixed(1)}% (${formatInr(row.itemSgstPaise)})` : '₹0.00'}
-                    </td>
+                    <th style={{ padding: '4px 6px 6px 0', width: '75px', textAlign: 'right' }}>CGST</th>
+                    <th style={{ padding: '4px 6px 6px 0', width: '75px', textAlign: 'right' }}>SGST</th>
                   </>
                 ) : (
-                  <td style={{ padding: '4px 6px 4px 0', textAlign: 'center', fontSize: '11px', color: '#166534', fontWeight: 700, verticalAlign: 'top' }}>
-                    0.0% (Exempt)
-                  </td>
+                  <th style={{ padding: '4px 6px 6px 0', width: '85px', textAlign: 'center' }}>GST (0%)</th>
                 )}
-                <td style={{ padding: '4px 0 4px 6px', textAlign: 'right', fontWeight: 700, verticalAlign: 'top' }}>
-                  {formatInr(row.lineTotalPaise)}
+                <th style={{ padding: '4px 0 6px 6px', width: '95px', textAlign: 'right' }}>Amount</th>
+              </tr>
+              <tr>
+                <td colSpan={isGstRegistered ? 8 : 7} style={{ padding: 0 }}>
+                  <div style={{ borderTop: '1.5px dashed #000000', marginBottom: '6px' }} />
                 </td>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {lineRows.map((row: any) => (
+                <tr key={row.sNo}>
+                  <td style={{ padding: '4px 6px 4px 0', verticalAlign: 'top' }}>{row.sNo}</td>
+                  <td style={{ padding: '4px 6px 4px 0', fontWeight: 700, verticalAlign: 'top' }}>
+                    <div>{row.description}</div>
+                    {row.sku && (
+                      <div style={{ fontSize: '10px', fontFamily: 'monospace', fontWeight: 600, color: '#334155' }}>
+                        SKU: {row.sku}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ padding: '4px 6px 4px 0', fontFamily: 'monospace', fontSize: '11px', verticalAlign: 'top' }}>
+                    {row.hsnCode}
+                  </td>
+                  <td style={{ padding: '4px 6px 4px 0', textAlign: 'center', verticalAlign: 'top' }}>
+                    {row.qty}
+                  </td>
+                  <td style={{ padding: '4px 6px 4px 0', textAlign: 'right', verticalAlign: 'top' }}>
+                    {formatInr(row.unitPricePaise)}
+                  </td>
+                  {isGstRegistered ? (
+                    <>
+                      <td style={{ padding: '4px 6px 4px 0', textAlign: 'right', fontSize: '11px', verticalAlign: 'top' }}>
+                        {row.gstRate > 0 ? `${(row.gstRate / 2).toFixed(1)}% (${formatInr(row.itemCgstPaise)})` : '₹0.00'}
+                      </td>
+                      <td style={{ padding: '4px 6px 4px 0', textAlign: 'right', fontSize: '11px', verticalAlign: 'top' }}>
+                        {row.gstRate > 0 ? `${(row.gstRate / 2).toFixed(1)}% (${formatInr(row.itemSgstPaise)})` : '₹0.00'}
+                      </td>
+                    </>
+                  ) : (
+                    <td style={{ padding: '4px 6px 4px 0', textAlign: 'center', fontSize: '11px', color: '#166534', fontWeight: 700, verticalAlign: 'top' }}>
+                      0.0% (Exempt)
+                    </td>
+                  )}
+                  <td style={{ padding: '4px 0 4px 6px', textAlign: 'right', fontWeight: 700, verticalAlign: 'top' }}>
+                    {formatInr(row.lineTotalPaise)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
         <div style={dashedRule} />
 
         {/* ================================================================== */}
         {/* SUBTOTAL, DISCOUNT, SHIPPING, GST, GRAND TOTAL                     */}
         {/* ================================================================== */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <div className="meesho-totals-wrap" style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <div style={{ width: '310px' }}>
             {isGstRegistered ? (
               <>
@@ -939,12 +959,15 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
         {/* BOTTOM BARCODE & AUTHORIZED SIGNATORY                              */}
         {/* ================================================================== */}
         <div
+          className="meesho-footer-grid"
           style={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'flex-end',
             marginTop: '22px',
             paddingTop: '6px',
+            flexWrap: 'wrap',
+            gap: '12px',
           }}
         >
           <div>
@@ -963,8 +986,55 @@ export const MeeshoSlipModal: React.FC<MeeshoSlipModalProps> = ({
         <div style={doubleRule} />
       </div>
 
-      {/* Print-specific CSS */}
+      {/* Responsive & Print-specific CSS */}
       <style>{`
+        @media screen and (max-width: 680px) {
+          .meesho-sheet {
+            padding: 14px 10px !important;
+            font-size: 11px !important;
+          }
+          .meesho-header-grid {
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            text-align: center !important;
+            gap: 12px !important;
+          }
+          .meesho-header-grid > div {
+            text-align: center !important;
+            width: 100% !important;
+          }
+          .meesho-address-grid {
+            grid-template-columns: 1fr !important;
+            gap: 12px !important;
+          }
+          .meesho-totals-wrap {
+            width: 100% !important;
+            justify-content: stretch !important;
+          }
+          .meesho-totals-wrap > div {
+            width: 100% !important;
+            max-width: 100% !important;
+          }
+          .meesho-footer-grid {
+            flex-direction: column !important;
+            align-items: center !important;
+            text-align: center !important;
+          }
+          .meesho-footer-grid > div {
+            text-align: center !important;
+            width: 100% !important;
+          }
+          .meesho-modal-controls {
+            flex-direction: column !important;
+            align-items: stretch !important;
+          }
+          .meesho-modal-controls > div {
+            width: 100% !important;
+            justify-content: center !important;
+            flex-wrap: wrap !important;
+          }
+        }
         @media print {
           body * {
             visibility: hidden !important;

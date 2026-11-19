@@ -64,10 +64,11 @@ export const DynamicUpiQrModal: React.FC<DynamicUpiQrModalProps> = ({
           borderRadius: '20px',
           width: '100%',
           maxWidth: '420px',
-          padding: '1.75rem',
+          padding: 'clamp(1rem, 4vw, 1.75rem)',
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
           border: '1px solid #e2e8f0',
           position: 'relative',
+          boxSizing: 'border-box',
         }}
       >
         <button
@@ -157,7 +158,7 @@ export const DynamicUpiQrModal: React.FC<DynamicUpiQrModalProps> = ({
           <img
             src={qrImageUrl}
             alt={`UPI QR Code for Order ${orderReference}`}
-            style={{ width: '220px', height: '220px', borderRadius: '8px' }}
+            style={{ width: '220px', maxWidth: '100%', aspectRatio: '1/1', height: 'auto', borderRadius: '8px' }}
           />
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.75rem' }}>
             <span style={{ fontSize: '0.76rem', color: '#475569', fontWeight: 600 }}>

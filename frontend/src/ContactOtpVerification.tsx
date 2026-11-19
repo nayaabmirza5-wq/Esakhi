@@ -359,7 +359,7 @@ export function ContactOtpVerification({
             boxShadow: '0 2px 8px rgba(2, 132, 199, 0.08)',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.5rem' }}>
             <span style={{ fontWeight: 700, fontSize: '0.88rem', color: '#0369a1' }}>
               Enter the 6-Digit Verification Code
             </span>
